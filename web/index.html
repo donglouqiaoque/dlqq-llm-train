@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>鸫楼桥鹊AI大语言模型</title>
+<link rel="icon" type="image/x-icon" href="/logo.ico">
+<link rel="stylesheet" href="/vendor/xterm.css">
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e8ee;
+          --muted:#8b93a3; --accent:#4f8cff; --ok:#39b26e; --warn:#e0a03a; --err:#e05656; }
+  * { box-sizing: border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         display:flex; flex-direction:column; overflow:hidden;
+         font:14px/1.6 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; }
+  header { display:flex; align-items:center; gap:16px; padding:10px 18px;
+           background:var(--panel); border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.5px; }
+  header .brand { width:26px; height:26px; border-radius:6px; object-fit:contain; }
+  #env { color:var(--muted); font-size:12px; }
+  nav { display:flex; gap:4px; padding:10px 18px 0; }
+  nav button { background:transparent; border:1px solid transparent; color:var(--muted);
+               padding:7px 14px; border-radius:8px 8px 0 0; cursor:pointer; font-size:13px; }
+  nav button.on { background:var(--panel); color:var(--fg); border-color:var(--line);
+                  border-bottom-color:var(--panel); }
+  main { flex:1; min-height:0; padding:14px 18px 18px; display:flex; }
+  section { display:none; flex:1; min-height:0; flex-direction:column;
+            background:var(--panel); border:1px solid var(--line);
+            border-radius:0 10px 10px 10px; padding:16px; }
+  section.on { display:flex; }
+  section > .row { flex:0 0 auto; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  label { color:var(--muted); font-size:12px; }
+  select, input[type=text], input[type=number], textarea, button {
+    background:#0d1015; color:var(--fg); border:1px solid var(--line);
+    border-radius:7px; padding:6px 9px; font:inherit; font-size:13px; }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.danger { border-color:var(--err); color:var(--err); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .log:empty { display:none; }          /* 没有输出时不显示黑框 */
+  .log { flex:1; min-height:140px; overflow:auto; background:#0a0c10; border:1px solid var(--line);
+         border-radius:8px; padding:10px; font-family:Consolas, monospace; font-size:12px;
+         white-space:pre-wrap; word-break:break-all; }
+  .xterm-log:empty { display:block; }
+  .xterm-log { position:relative; flex:1 1 0; min-height:0; padding:0;
+               overflow:auto; white-space:normal; word-break:normal; }
+  .xterm-log .xterm { position:relative; inset:auto; width:100%;
+                      height:auto !important; padding:8px; }
+  .xterm-log .xterm-viewport { overflow:hidden !important;
+                               background:#0a0c10 !important; }
+  .chat { flex:1; min-height:200px; overflow:auto; background:#0a0c10; border:1px solid var(--line);
+          border-radius:8px; padding:12px; margin-bottom:10px; }
+  .msg { margin-bottom:10px; }
+  .msg .who { font-size:11px; color:var(--muted); }
+  .msg.user .body { color:#bcd2ff; }
+  .msg.bot .body { color:#dfe6f5; white-space:pre-wrap; }
+  /* 配置页：一行一个配置项，左边键名 + 中文解释，右边控件 */
+  .cfglist { flex:1; min-height:0; overflow:auto; border:1px solid var(--line); border-radius:10px; }
+  .cfgrow { display:flex; align-items:center; gap:18px; padding:9px 14px;
+            border-bottom:1px solid var(--line); }
+  .cfgrow:last-child { border-bottom:0; }
+  .cfgmeta { width:340px; flex:0 0 340px; }
+  .cfgmeta .k { font-family:Consolas, monospace; font-size:13px; color:#cfd6e4; }
+  .cfgmeta .d { font-size:12px; color:var(--muted); line-height:1.4; }
+  .cfgrow .ctl { flex:1; display:flex; min-width:0; }
+  .cfgrow .ctl input, .cfgrow .ctl select { width:100%; max-width:460px; }
+  .field { display:flex; flex-direction:column; gap:4px; }
+  .field input, .field select { width:100%; }
+  .muted { color:var(--muted); font-size:12px; }
+  /* ---- 对话页：DSH 风格（侧栏 + 消息流 + 底部输入） ---- */
+  .chatlayout { flex:1; min-height:0; display:flex; gap:14px; }
+  .chatside { width:210px; flex:0 0 210px; display:flex; flex-direction:column; gap:10px;
+              border-right:1px solid var(--line); padding-right:14px; }
+  .chatside .field { display:flex; flex-direction:column; gap:4px; }
+  .chatside input, .chatside select { width:100%; }
+  .sidemeta { margin-top:auto; color:var(--muted); font-size:12px; line-height:1.8;
+              word-break:break-all; }
+  .chatmain { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
+  .msgs { flex:1; min-height:0; overflow:auto; padding:2px 2px 10px; }
+  .msg { display:flex; gap:10px; margin-bottom:14px; align-items:flex-start; }
+  .msg.user { flex-direction:row-reverse; }
+  .avatar { flex:0 0 28px; height:28px; border-radius:8px; display:flex; align-items:center;
+            justify-content:center; font-size:11px; background:#20242e; color:var(--muted); }
+  .msg.user .avatar { background:#24344f; color:#a9c6ff; }
+  .bubble { max-width:min(780px, 80%); padding:9px 13px; border-radius:12px;
+            background:#141821; border:1px solid var(--line); white-space:pre-wrap;
+            word-break:break-word; line-height:1.7; }
+  .msg.user .bubble { background:#1b2740; border-color:#2b3d5e; }
+  .bubble .meta { margin-top:6px; font-size:11px; color:#6f7788; display:flex; gap:12px; }
+  .bubble .meta a { color:#6f7788; cursor:pointer; }
+  .bubble .meta a:hover { color:var(--accent); }
+  .bubble.typing::after { content:"▍"; margin-left:2px; color:var(--accent);
+                          animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .composer { border:1px solid var(--line); border-radius:12px; background:#0d1015; padding:8px 10px; }
+  .composer textarea { width:100%; border:0; background:transparent; color:var(--fg); resize:none;
+                       outline:none; font:inherit; line-height:1.65; max-height:150px; overflow:auto; }
+  .composerbar { display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap; }
+  .composerbar select { max-width:200px; }
+  .composerbar button { padding:5px 12px; }
+  .spacer { flex:1; }
+  .subtabs { display:flex; align-items:center; gap:6px; margin:2px 0 8px; }
+  .subtabs button { padding:4px 12px; font-size:12px; border-radius:8px; }
+  .subtabs button.on { background:#1b2740; border-color:#2b3d5e; color:#cfdcff; }
+  .srvpane { flex:1; min-height:0; }
+  .siglist { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+  .sigrow { display:flex; align-items:center; gap:12px; padding:10px 12px;
+            border:1px solid var(--line); border-radius:10px; background:#12161d; }
+  .sigrow .name { flex:1; min-width:0; word-break:break-all; }
+  .sigrow .state { font-size:12px; padding:2px 8px; border-radius:8px; border:1px solid var(--line);
+                   white-space:nowrap; }
+  .sigrow .state.ok { color:var(--ok); border-color:var(--ok); }
+  .sigrow .state.no { color:var(--warn); border-color:var(--warn); }
+  .empty { color:var(--muted); text-align:center; padding:60px 0; font-size:13px; }
+  .pypath { max-width:300px; min-width:0; overflow-x:auto; white-space:nowrap;
+            font-family:Consolas, monospace; font-size:12px; color:var(--muted);
+            border:1px solid var(--line); border-radius:6px; padding:3px 8px; }
+  #toast { position:fixed; right:18px; bottom:18px; background:#1d2430; border:1px solid var(--line);
+           padding:10px 14px; border-radius:8px; display:none; max-width:420px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="/logo.ico" class="brand" alt="logo">
+  <h1>鸫楼桥鹊AI大语言模型</h1>
+</header>
+
+<nav>
+  <button data-tab="train" class="on">训练</button>
+  <button data-tab="chat">对话</button>
+  <button data-tab="server">服务</button>
+  <button data-tab="env">环境</button>
+  <button data-tab="config">配置</button>
+  <button data-tab="tool">签名</button>
+</nav>
+
+<main>
+  <section id="train" class="on">
+    <div class="row">
+      <label>配置</label>
+      <select id="trainCfg" style="min-width:240px"></select>
+      <button class="primary" id="btnTrainStart">开始训练</button>
+      <button id="btnTrainResume">继续训练</button>
+      <button class="danger" id="btnTrainStop" disabled>停止</button>
+      <span class="muted" id="trainState">未运行</span>
+      <div class="pypath" id="trainPyPath">—</div>
+      <button id="btnTrainProbe">测试环境</button>
+      <span class="muted" id="trainProbeState">未检测</span>
+      <label class="muted"><input type="checkbox" id="trainProbeOnStart" checked> 启动时检测</label>
+    </div>
+    <div class="log xterm-log" id="trainLog"></div>
+  </section>
+
+  <section id="chat">
+    <div class="chatmain">
+      <div class="msgs" id="chatBox"></div>
+      <div class="composer">
+        <textarea id="chatInput" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+        <div class="composerbar">
+          <select id="chatConfig" title="配置文件（模型、采样参数、语料都由它决定）"></select>
+          <button id="btnNewChat">新对话</button>
+          <div class="pypath" id="chatPyPath">—</div>
+          <button id="btnChatProbe">测试环境</button>
+          <span class="muted" id="chatProbeState">未检测</span>
+          <label class="muted"><input type="checkbox" id="chatProbeOnSend" checked> 发送时检测</label>
+          <span class="muted" id="chatState"></span>
+          <div class="spacer"></div>
+          <button class="danger" id="btnChatStop" disabled>停止</button>
+          <button class="primary" id="btnSend">发送</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="server">
+    <div class="row">
+      <label>配置</label>
+      <select id="srvConfig" title="只服务选中的配置；默认全部"></select>
+      <label>端口</label><input type="number" id="srvPort" value="49128" style="width:110px">
+      <button class="primary" id="btnSrvStart">启动服务</button>
+      <button class="danger" id="btnSrvStop" disabled>停止</button>
+      <div class="pypath" id="srvPyPath">—</div>
+      <button id="btnSrvProbe">测试环境</button>
+      <span class="muted" id="srvProbeState">未检测</span>
+      <label class="muted"><input type="checkbox" id="srvProbeOnStart" checked> 启动服务时检测</label>
+      <span class="muted" id="srvState">未运行</span>
+      <span class="muted" id="srvUrl"></span>
+    </div>
+    <div class="subtabs">
+      <button data-srv="chat" class="on">会话</button>
+      <button data-srv="log">日志</button>
+      <div class="spacer"></div>
+      <button id="btnClearSrv">清空</button>
+    </div>
+    <div class="srvpane msgs" id="srvChat"></div>
+    <div class="srvpane log" id="srvLog" style="display:none"></div>
+  </section>
+
+  <section id="env">
+    <div class="row">
+      <label>项目 Python</label>
+      <div class="pypath" id="envPyPath">—</div>
+      <span class="muted" id="envState">未检测</span>
+    </div>
+    <div class="muted" id="envDetails" style="margin-bottom:6px"></div>
+    <div class="muted" id="envRecommend" style="margin-bottom:10px"></div>
+    <div class="row">
+      <label>PyTorch 版本</label>
+      <input type="text" id="envTorchVersion" placeholder="例如 2.14.1+cu126" style="min-width:260px">
+      <button id="btnEnvDetect">自动检测</button>
+      <label class="muted"><input type="checkbox" id="envNoCache"> 不使用 pip 缓存</label>
+      <button class="primary" id="btnEnvInstall">安装 / 更新训练依赖</button>
+      <span class="muted" id="envInstallState"></span>
+    </div>
+    <div class="muted" style="margin-bottom:8px">
+      随包 Python 只带 WebUI 所需的标准库；torch / numpy / transformers 由这里安装到项目 Python，
+      供训练、对话和桥接服务使用。安装完成后请重新检测环境；选择 CUDA 源会同时安装 NVIDIA
+      专有运行时，需遵守其许可。
+    </div>
+    <div class="log" id="envLog"></div>
+  </section>
+
+  <section id="config">
+    <div class="row">
+      <label>配置文件</label>
+      <select id="cfgSelect" style="min-width:240px"></select>
+      <button class="primary" id="btnCfgSave">保存</button>
+      <span class="muted" id="cfgState"></span>
+    </div>
+    <div class="cfglist" id="cfgForm"></div>
+  </section>
+
+  <section id="tool">
+    <div class="row">
+      <button id="btnRefreshSign">刷新列表</button>
+      <span class="muted" id="signState"></span>
+    </div>
+    <div class="siglist" id="sigList"></div>
+    <div class="log" id="signOut" style="flex:0 0 200px; margin-top:10px"></div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script src="/vendor/xterm.js"></script>
+<script>
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const $ = s => document.querySelector(s);
+const api = (p, opt) => fetch(`/api/${p}${p.includes('?') ? '&' : '?'}t=${TOKEN}`, opt).then(r => r.json());
+function toast(msg, ms = 3000) {
+  const t = $('#toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms);
+}
+function esc(s) { return (s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// ---- 训练日志：xterm.js 终端（保留 \r / ANSI） ----
+let TRAIN_TERM = null;
+function fitTrainTerm() {
+  if (!TRAIN_TERM) return;
+  const el = $('#trainLog');
+  const cols = Math.max(40, Math.floor((el.clientWidth - 16) / 7.2));
+  // 日志窗口固定；终端高度跟内容走，滚动交给外层唯一滚动条。
+  const lines = (TRAIN_TERM.buffer && TRAIN_TERM.buffer.active)
+    ? TRAIN_TERM.buffer.active.length : 0;
+  const rows = Math.max(8, lines + 1);
+  try { TRAIN_TERM.resize(cols, rows); } catch (e) { /* 忽略 */ }
+}
+function initTrainTerm() {
+  const el = $('#trainLog');
+  if (!window.Terminal) {
+    console.error('xterm.js 未加载');
+    return;
+  }
+  try {
+    TRAIN_TERM = new Terminal({
+      convertEol: false,
+      cursorBlink: false,
+      disableStdin: true,
+      scrollback: 100000,
+      fontFamily: 'Consolas, "Courier New", monospace',
+      fontSize: 12,
+      theme: { background: '#0a0c10', foreground: '#d8dee9' },
+    });
+    TRAIN_TERM.open(el);
+    fitTrainTerm();
+    window.addEventListener('resize', fitTrainTerm);
+    requestAnimationFrame(() => {
+      fitTrainTerm();
+      setTimeout(fitTrainTerm, 120);
+    });
+  } catch (e) {
+    console.error('xterm 初始化失败：', e);
+    TRAIN_TERM = null;
+  }
+}
+function trainWrite(data) {
+  if (!data) return;
+  if (TRAIN_TERM) {
+    const el = $('#trainLog');
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    TRAIN_TERM.write(data, () => {
+      fitTrainTerm();
+      if (atBottom) el.scrollTop = el.scrollHeight;
+    });
+  } else {
+    $('#trainLog').textContent += data;
+  }
+}
+function trainReset() {
+  if (TRAIN_TERM) {
+    TRAIN_TERM.reset();
+    fitTrainTerm();
+    $('#trainLog').scrollTop = 0;
+  } else {
+    $('#trainLog').textContent = '';
+  }
+}
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.remove('on'));
+  document.querySelectorAll('section').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); $('#' + b.dataset.tab).classList.add('on');
+});
+
+let CONFIGS = [];
+// 配置文件第一行常是 "# ====" 这种装饰线，不能拿来当说明
+function cleanDesc(desc) {
+  const d = (desc || '').trim();
+  if (!d) return '';
+  if (/^[=\-#*~\s]+$/.test(d)) return '';
+  return d;
+}
+// 把下拉切到某个配置（配置决定模型、语料与采样参数，不需要别的下拉）
+function applyConfigSelection(name) {
+  const c = CONFIGS.find(x => x.name === name);
+  if (!c) return;
+  $('#trainCfg').value = c.name;
+  $('#cfgSelect').value = c.name;
+  renderCfgForm();
+  loadPy('train', c.name);
+}
+async function loadConfigs() {
+  const r = await api('configs');
+  CONFIGS = r.configs || [];
+  $('#trainCfg').innerHTML = CONFIGS.map(c =>
+    `<option value="${c.name}">${c.name}</option>`).join('');
+  $('#cfgSelect').innerHTML = CONFIGS.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+  $('#chatConfig').innerHTML = CONFIGS.map(c =>
+    `<option value="${c.name}">${c.name}</option>`).join('');
+  $('#srvConfig').innerHTML = '<option value="">全部配置</option>' + CONFIGS.map(c =>
+    `<option value="${c.name}">${c.name}</option>`).join('');
+  renderCfgForm();
+  await loadAllPy();
+}
+
+const PY = {
+  chat:  { path: '', verified: false, info: null },
+  train: { path: '', verified: false, info: null },
+  srv:   { path: '', verified: false, info: null },
+};
+const PY_PROBE = { chat: 'btnChatProbe', train: 'btnTrainProbe', srv: 'btnSrvProbe' };
+const PY_RESULT = { chat: 'chatProbeState', train: 'trainProbeState', srv: 'srvProbeState' };
+const PY_ONSTART = { chat: 'chatProbeOnSend', train: 'trainProbeOnStart', srv: 'srvProbeOnStart' };
+const PY_PATH = { chat: 'chatPyPath', train: 'trainPyPath', srv: 'srvPyPath' };
+const PY_BTNS = { chat: ['btnSend'], train: ['btnTrainStart', 'btnTrainResume'], srv: ['btnSrvStart'] };
+let ENV_INSTALLING = false;
+let ENV_POLL = null;
+
+function pyPass(info, needNumpy) {
+  return !!(info && info.ok && info.torch && info.transformers && (!needNumpy || info.numpy));
+}
+function pyResultText(info, needNumpy) {
+  if (!info) return '未检测';
+  if (!info.ok) return '不通过：' + (info.error || '未知错误');
+  const ok = pyPass(info, needNumpy);
+  const tv = info.torch_version ? (' ' + info.torch_version) : '';
+  const parts = [info.version, info.arch, info.torch ? ('torch' + tv) : '无 torch',
+                 info.transformers ? 'transformers' : '无 transformers',
+                 info.numpy ? 'numpy' : '无 numpy'];
+  if (info.torch) parts.push(info.cuda ? ('CUDA：' + (info.gpu || '可用')) : 'CUDA 不可用');
+  return (ok ? '通过：' : '不通过：') + parts.join(' · ');
+}
+function renderPy(page) {
+  const st = PY[page];
+  const info = st.info;
+  const ok = pyPass(info, page === 'train');
+  const pathEl = $(`#${PY_PATH[page]}`);
+  pathEl.textContent = st.path || '—';
+  pathEl.title = st.path || '';
+  const stateEl = $(`#${PY_RESULT[page]}`);
+  stateEl.textContent = pyResultText(info, page === 'train');
+  stateEl.style.color = ok ? 'var(--ok)' : (info ? 'var(--warn)' : 'var(--muted)');
+  const onStart = $(`#${PY_ONSTART[page]}`);
+  const checked = !!(onStart && onStart.checked);
+  const canStart = ok || (checked && !info);
+  const running = {
+    chat: !!chatAbort,
+    train: !$('#btnTrainStop').disabled,
+    srv: !$('#btnSrvStop').disabled,
+  }[page];
+  PY_BTNS[page].forEach(id => { $('#' + id).disabled = !canStart || running; });
+  const probeBtn = $(`#${PY_PROBE[page]}`);
+  if (probeBtn) probeBtn.disabled = ENV_INSTALLING;
+}
+
+function renderEnv(r) {
+  const info = r.info || null;
+  const pathEl = $('#envPyPath');
+  pathEl.textContent = r.python || '—';
+  pathEl.title = r.python || '';
+  const ok = !!(info && info.ok && !(r.missing || []).length);
+  $('#envState').textContent = r.error ? ('不通过：' + r.error)
+    : (info ? pyResultText(info, true) : '未检测');
+  $('#envState').style.color = ok ? 'var(--ok)' : (info || r.error ? 'var(--warn)' : 'var(--muted)');
+  const parts = [];
+  if (info) {
+    parts.push('pip：' + (info.pip ? '有' : '无'),
+               'ensurepip：' + (info.ensurepip ? '有' : '无'));
+    if (r.missing && r.missing.length) parts.push('缺少：' + r.missing.join(' / '));
+  }
+  $('#envDetails').textContent = parts.join(' · ');
+  const gpu = r.system && r.system.gpu;
+  const rec = r.system && r.system.torch_recommend;
+  if (gpu || rec) {
+    const bits = [];
+    if (gpu) {
+      bits.push(gpu.nvidia
+        ? `显卡：${gpu.name} · 驱动 ${gpu.driver}`
+        : '未检测到 NVIDIA 显卡');
+    }
+    if (rec) {
+      bits.push(`推荐：${rec.install} · ${rec.reason}`);
+    }
+    $('#envRecommend').textContent = bits.join('；');
+  }
+  $('#envInstallState').textContent = r.installing ? '安装中…' : '';
+  $('#btnEnvInstall').disabled = !!r.installing || !r.python;
+  $('#btnEnvDetect').disabled = !!r.installing;
+  $('#envTorchVersion').disabled = !!r.installing;
+  if (r.installing) startEnvPoll();
+}
+
+function applyEnv(r) {
+  const info = r.info || (r.error ? { ok: false, error: r.error } : null);
+  Object.keys(PY).forEach(page => {
+    PY[page].path = r.python || '';
+    PY[page].verified = !!r.verified;
+    PY[page].info = info;
+    renderPy(page);
+  });
+  ENV_INSTALLING = !!r.installing;
+  renderEnv(r);
+}
+
+async function refreshEnv(check) {
+  try {
+    const r = await api('env' + (check ? '?check=1' : ''));
+    applyEnv(r);
+    return r;
+  } catch (e) {
+    const r = { ok: false, error: e.message, info: null, installing: false };
+    applyEnv(r);
+    return r;
+  }
+}
+async function loadPy(page) { await refreshEnv(false); }
+async function loadAllPy() { await refreshEnv(false); }
+
+function startEnvPoll() {
+  if (ENV_POLL) return;
+  ENV_POLL = setInterval(async () => {
+    const r = await refreshEnv(false);
+    if (!r.installing) {
+      clearInterval(ENV_POLL);
+      ENV_POLL = null;
+      await refreshEnv(true);
+    }
+  }, 2000);
+}
+
+async function probePage(page) {
+  const r = await refreshEnv(true);
+  return pyPass(r.info, page === 'train');
+}
+async function ensurePy(page) {
+  const needNumpy = page === 'train';
+  if (pyPass(PY[page].info, needNumpy)) return true;
+  const cb = $(`#${PY_ONSTART[page]}`);
+  if (!cb || !cb.checked) {
+    toast('请先在「环境」页检测项目 Python');
+    return false;
+  }
+  if (!(await probePage(page))) {
+    toast('项目 Python 缺少训练依赖，请在「环境」页安装');
+    return false;
+  }
+  return true;
+}
+async function installEnv() {
+  const body = {
+    torch_version: $('#envTorchVersion').value.trim(),
+    no_cache: $('#envNoCache').checked,
+  };
+  $('#envLog').textContent = '';
+  const r = await api('env/install', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return toast('安装失败：' + (r.error || '未知错误'));
+  ENV_INSTALLING = true;
+  $('#envInstallState').textContent = '安装中…';
+  renderEnv({ python: PY.train.path, info: PY.train.info, installing: true });
+  startEnvPoll();
+  toast('已开始安装训练依赖，日志看「环境」页');
+}
+
+async function autoDetectEnv() {
+  const r = await refreshEnv(true);
+  const rec = r.system && r.system.torch_recommend;
+  if (rec) {
+    $('#envTorchVersion').value = rec.install;
+    toast('已检测电脑配置，并填入推荐版本：' + rec.install);
+  } else {
+    toast('未取得推荐版本，请检查项目 Python / nvidia-smi');
+  }
+}
+
+Object.keys(PY_PROBE).forEach(page => {
+  $(`#${PY_PROBE[page]}`).onclick = () => probePage(page);
+  $(`#${PY_ONSTART[page]}`).onchange = () => renderPy(page);
+});
+$('#btnEnvDetect').onclick = autoDetectEnv;
+$('#btnEnvInstall').onclick = installEnv;
+$('#chatConfig').addEventListener('change', () => loadPy('chat'));
+$('#srvConfig').addEventListener('change', () => loadPy('srv'));
+$('#trainCfg').addEventListener('change', e => applyConfigSelection(e.target.value));
+// 每个配置键的中文解释（新增键时记得一起补）
+const KEY_INFO = {
+  data_path:       '语料目录，相对工程根；目录里的 .jsonl / .txt 全部参与训练',
+  model:           '模型名，权重存到标准目录 model/<名字>/（config.json + model.safetensors）',
+  cache_dir:       '切词缓存目录，改语料或词表参数后会重新切',
+  chat_mode:       'true = 对话格式（用户：/助手：），false = 纯续写',
+  chat_temperature: '采样温度，越大越随机，越小越保守',
+  chat_top_k:      '每个字只从概率最高的 K 个里采样，0 = 不截断',
+  chat_max_new:    '一次最多生成多少字',
+  n_layer:         'Transformer 层数，越深越慢也越强',
+  n_head:          '注意力头数，必须能整除 n_embd',
+  n_embd:          '隐藏维度，决定模型宽度',
+  block_size:      '上下文长度，一次最多能看多少个字',
+  batch_size:      '每步并行多少段，显存不够就调小',
+  max_iters:       '训练总步数；每步 token = batch_size × block_size',
+  eval_interval:   '每多少步评估一次并打日志',
+  eval_iters:      '每次评估抽多少批，越大越准也越慢',
+  lr:              '学习率，太大发散、太小收敛慢',
+  weight_decay:    '权重衰减，正则化用',
+  grad_clip:       '梯度裁剪阈值，防止梯度爆炸',
+  dropout:         '随机丢弃比例，数据少时调大防止过拟合',
+  seed:            '随机种子，固定后结果可复现',
+  grad_accum:      '梯度累积步数，等效放大 batch 而不多吃显存',
+  warmup_iters:    '学习率线性预热的步数',
+  lr_decay:        '学习率衰减方式：cosine 余弦退火 / none 恒定',
+  min_lr_frac:     '退火终点 = 初始学习率 × 这个比例',
+  grad_checkpoint: '梯度检查点，省显存但慢 20~30%',
+  save_every:      '0 = 只存最优；>0 = 额外每 N 步强制存档（防止长时间无提升时中断白跑）',
+  save_dtype:      '存档精度：fp32 最稳、fp16/bf16 体积减半',
+  save_optimizer:  'true=训练完成后保留优化器（可续训，默认）；false=完成后去掉（发布权重；会卸载当前模型并重新加载最后存档，短暂占用与存档相当的内存）；中途存档始终保留',
+  max_vocab:       '词表上限，只保留最常用的 N 个字',
+  val_frac:        '从语料尾部切多少比例做验证集',
+};
+
+function renderCfgForm() {
+  const c = CONFIGS.find(x => x.name === $('#cfgSelect').value);
+  if (!c) return;
+  const keys = Object.keys(c.props || {});      // 配置里出现过的键全部展示
+  $('#cfgForm').innerHTML = keys.map(k => {
+    const v = c.props[k];
+    const desc = KEY_INFO[k] || '';
+    const ctl = (v === 'true' || v === 'false')
+      ? `<select data-k="${k}">
+           <option ${v==='true'?'selected':''}>true</option>
+           <option ${v==='false'?'selected':''}>false</option></select>`
+      : `<input type="text" data-k="${k}" value="${esc(v)}">`;
+    return `<div class="cfgrow">
+      <div class="cfgmeta"><div class="k">${k}</div><div class="d">${esc(desc)}</div></div>
+      <div class="ctl">${ctl}</div>
+    </div>`;
+  }).join('');
+}
+$('#cfgSelect').onchange = renderCfgForm;
+$('#btnCfgSave').onclick = async () => {
+  const name = $('#cfgSelect').value;
+  const updates = {};
+  document.querySelectorAll('#cfgForm [data-k]').forEach(el => updates[el.dataset.k] = el.value);
+  const r = await api('config/save', {method:'POST', headers:{'Content-Type':'application/json'},
+                                      body: JSON.stringify({name, updates})});
+  $('#cfgState').textContent = r.ok ? `已保存：改 ${r.changed.length} 项，新增 ${r.added.length} 项`
+                                    : ('失败：' + r.error);
+  if (r.ok) loadConfigs();
+};
+
+let MODELS = [];                    // /api/models 的缓存（签名页用）
+async function loadModels() {
+  const r = await api('models');
+  MODELS = r.models || [];
+}
+
+let es = null;
+function bindEvents() {
+  if (es) es.close();
+  es = new EventSource(`/api/events?t=${TOKEN}`);
+  es.addEventListener('train-raw', e => {
+    const d = JSON.parse(e.data);
+    trainWrite(d.data || '');
+    const matches = [...(d.data || '').matchAll(/(?:step|iter)\s+(\d+)/g)];
+    if (matches.length) {
+      $('#trainState').textContent = `训练中 · 已到 ${matches[matches.length - 1][1]} 步`;
+    }
+  });
+  es.addEventListener('server-log', e => {
+    const d = JSON.parse(e.data);
+    const box = $('#srvLog'); box.textContent += d.line + '\n'; box.scrollTop = box.scrollHeight;
+  });
+  es.addEventListener('server-chat', e => {
+    const d = JSON.parse(e.data);
+    srvMsg('user', d.user, d.model, d.ms);
+    srvMsg('assistant', d.assistant, d.model, d.ms);
+  });
+  es.addEventListener('env-log', e => {
+    const d = JSON.parse(e.data);
+    const box = $('#envLog');
+    box.textContent += d.line + '\n';
+    box.scrollTop = box.scrollHeight;
+  });
+}
+$('#btnTrainStart').onclick = () => startTrain(false);
+$('#btnTrainResume').onclick = () => startTrain(true);
+async function startTrain(resume) {
+  if (!(await ensurePy('train'))) return;
+  const r = await api('train/start', {method:'POST', headers:{'Content-Type':'application/json'},
+                                      body: JSON.stringify({config: $('#trainCfg').value, resume})});
+  if (!r.ok) return toast('启动失败：' + r.error);
+  $('#btnTrainStart').disabled = true; $('#btnTrainResume').disabled = true;
+  $('#btnTrainStop').disabled = false;
+  $('#trainState').textContent = resume ? '续训中…' : '启动中…';
+  trainReset();
+  toast(resume ? '从存档续训，日志：' + r.log : '从头训练，日志：' + r.log);
+}
+$('#btnTrainStop').onclick = async () => {
+  await api('train/stop', {method:'POST'});
+  $('#btnTrainStart').disabled = false; $('#btnTrainResume').disabled = false;
+  $('#btnTrainStop').disabled = true;
+  $('#trainState').textContent = '已停止';
+};
+
+/* ---------------- 对话：侧栏 + 消息流 + 底部输入 ---------------- */
+let chatAbort = null;
+let CHAT_INFO = null;
+const HISTORY = [];                       // {role:'user'|'assistant', content}
+
+function el(tag, cls, text) {
+  const d = document.createElement(tag);
+  if (cls) d.className = cls;
+  if (text != null) d.textContent = text;
+  return d;
+}
+function emptyHint() {
+  if (!$('#chatBox').childElementCount) {
+    $('#chatBox').appendChild(el('div', 'empty', '选一个模型，输入问题开始对话'));
+  }
+}
+function renderMsg(role, text) {
+  const empty = $('#chatBox').querySelector('.empty');
+  if (empty) empty.remove();
+  const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot'));
+  const av = el('div', 'avatar', role === 'user' ? '你' : 'AI');
+  const bubble = el('div', 'bubble');
+  const body = el('div', 'body', text || '');
+  const meta = el('div', 'meta');
+  meta.appendChild(el('span', '', new Date().toLocaleTimeString('zh-CN', { hour12: false })));
+  if (role !== 'user') {
+    const cp = el('a', '', '复制');
+    cp.onclick = () => navigator.clipboard.writeText(body.textContent).then(() => toast('已复制'));
+    meta.appendChild(cp);
+  }
+  bubble.appendChild(body);
+  bubble.appendChild(meta);
+  wrap.appendChild(av);
+  wrap.appendChild(bubble);
+  $('#chatBox').appendChild(wrap);
+  $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
+  return { body, bubble };
+}
+
+// 把历史拼成一条提示词：第一条用户话直接给，后面的轮次自带「用户：」「助手：」标记，
+// 后端会在末尾补上「助手：」，正好拼成模型训练时的格式。
+function promptText() {
+  if (!HISTORY.length) return '';
+  let t = HISTORY[0].content;
+  for (let i = 1; i < HISTORY.length; i++) {
+    t += '\n' + (HISTORY[i].role === 'assistant' ? '助手：' : '用户：') + HISTORY[i].content;
+  }
+  const limit = ((CHAT_INFO && CHAT_INFO.block_size) || 256) * 3;
+  while (t.length > limit && HISTORY.length > 2) {
+    HISTORY.shift();                      // 丢最早的一问一答
+    HISTORY.shift();
+    t = promptText();
+  }
+  return t;
+}
+
+async function send() {
+  const text = $('#chatInput').value.trim();
+  if (!text || chatAbort) return;
+  const cfgName = $('#chatConfig').value;
+  if (!cfgName) { toast('先选一个配置'); return; }
+  if (!(await ensurePy('chat'))) return;
+  $('#chatInput').value = '';
+  $('#chatInput').style.height = 'auto';
+  HISTORY.push({ role: 'user', content: text });
+  renderMsg('user', text);
+  const { body, bubble } = renderMsg('assistant', '');
+  bubble.classList.add('typing');
+  $('#btnSend').disabled = true;
+  $('#btnChatStop').disabled = false;
+  $('#chatState').textContent = '生成中…';
+  chatAbort = new AbortController();
+  let acc = '';
+  try {
+    const resp = await fetch(`/api/chat?t=${TOKEN}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      // 默认只发当前这一句：小模型（256 上下文）带历史会顺着上一轮答案复读
+      body: JSON.stringify({ config: cfgName, text }),
+      signal: chatAbort.signal });
+    if (!resp.ok) { body.textContent = '请求失败：' + (await resp.text()); return; }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const ev = /event: (\w+)\ndata: ([\s\S]*)/.exec(chunk);
+        if (!ev) continue;
+        const data = JSON.parse(ev[2]);
+        if (ev[1] === 'meta') { CHAT_INFO = data.info; }
+        else if (ev[1] === 'token') {
+          acc += data.text; body.textContent = acc;
+          $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
+        } else if (ev[1] === 'done') { acc = data.text; body.textContent = acc; }
+        else if (ev[1] === 'error') { body.textContent = '错误：' + data.error; }
+      }
+    }
+    if (acc) HISTORY.push({ role: 'assistant', content: acc });
+  } catch (e) {
+    if (e.name === 'AbortError') body.textContent = acc + '（已停止）';
+    else body.textContent = '出错：' + e.message;
+  } finally {
+    bubble.classList.remove('typing');
+    $('#btnSend').disabled = false;
+    $('#btnChatStop').disabled = true;
+    chatAbort = null;
+    $('#chatState').textContent = '';
+    $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
+  }
+}
+
+$('#btnSend').onclick = send;
+$('#btnNewChat').onclick = () => { HISTORY.length = 0; $('#chatBox').innerHTML = ''; emptyHint(); };
+$('#chatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$('#chatInput').addEventListener('input', e => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
+});
+$('#btnChatStop').onclick = () => { if (chatAbort) chatAbort.abort(); };
+emptyHint();
+
+/* ---------------- 服务页：会话 / 日志 两个子页 ---------------- */
+function srvMsg(role, text, model, ms) {
+  const box = $('#srvChat');
+  const empty = box.querySelector('.empty');
+  if (empty) empty.remove();
+  const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot'));
+  wrap.appendChild(el('div', 'avatar', role === 'user' ? '你' : 'AI'));
+  const bubble = el('div', 'bubble');
+  bubble.appendChild(el('div', 'body', text || ''));
+  const meta = el('div', 'meta');
+  meta.appendChild(el('span', '', new Date().toLocaleTimeString('zh-CN', { hour12: false })));
+  if (model) meta.appendChild(el('span', '', model + (ms ? ' · ' + ms + 'ms' : '')));
+  bubble.appendChild(meta);
+  wrap.appendChild(bubble);
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+}
+document.querySelectorAll('.subtabs button[data-srv]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.subtabs button[data-srv]').forEach(x => x.classList.remove('on'));
+  b.classList.add('on');
+  const isChat = b.dataset.srv === 'chat';
+  $('#srvChat').style.display = isChat ? 'block' : 'none';
+  $('#srvLog').style.display = isChat ? 'none' : 'block';
+});
+$('#btnClearSrv').onclick = () => { $('#srvChat').innerHTML = ''; $('#srvLog').textContent = ''; };
+
+$('#btnSrvStart').onclick = async () => {
+  if (!(await ensurePy('srv'))) return;
+  const cfg = $('#srvConfig').value;
+  const r = await api('server/start', {method:'POST', headers:{'Content-Type':'application/json'},
+                                       body: JSON.stringify({port: +$('#srvPort').value,
+                                                             configs: cfg ? [cfg] : []})});
+  if (!r.ok) return toast('启动失败：' + r.error);
+  $('#btnSrvStart').disabled = true; $('#btnSrvStop').disabled = false;
+  $('#srvState').textContent = '运行中'; $('#srvUrl').textContent = `http://127.0.0.1:${r.port}/v1`;
+};
+$('#btnSrvStop').onclick = async () => {
+  await api('server/stop', {method:'POST'});
+  $('#btnSrvStart').disabled = false; $('#btnSrvStop').disabled = true;
+  $('#srvState').textContent = '已停止'; $('#srvUrl').textContent = '';
+};
+
+async function signOne(mode, file) {
+  $('#signState').textContent = '执行中…';
+  const r = await api('sign', { method:'POST', headers:{'Content-Type':'application/json'},
+                                body: JSON.stringify({ mode, file }) });
+  $('#signState').textContent = r.ok ? '完成' : '失败';
+  $('#signOut').textContent = (r.out || '') + (r.err ? '\n[stderr]\n' + r.err : '');
+  await loadModels();            // 重新拉一次，签名状态才会更新
+  renderSignList();
+}
+function renderSignList() {
+  const box = $('#sigList');
+  if (!MODELS.length) {
+    box.innerHTML = '<div class="empty">model\\ 下还没有标准模型目录</div>';
+    return;
+  }
+  box.innerHTML = MODELS.map(m => `
+    <div class="sigrow">
+      <div class="name">${esc(m.path)}
+        <div class="muted">${m.size_mb} MB · ${m.mtime}</div>
+      </div>
+      <span class="state ${m.signed ? 'ok' : 'no'}">${m.signed ? '数字签名已生成' : '数字签名未生成'}</span>
+      ${m.signed
+        ? `<button data-sign="verify" data-file="${m.path}">校验签名</button>
+           <button data-sign="compute" data-file="${m.path}">重新生成</button>`
+        : `<button class="primary" data-sign="compute" data-file="${m.path}">生成数字签名</button>`}
+    </div>`).join('');
+  box.querySelectorAll('button[data-sign]').forEach(b =>
+    b.onclick = () => signOne(b.dataset.sign, b.dataset.file));
+}
+$('#btnRefreshSign').onclick = async () => { await loadModels(); renderSignList(); };
+
+// ---- 刷新页面后把后端状态同步回来（训练/服务可能还在跑）----
+async function backfillTrainLog() {
+  try {
+    const lg = await api('train/log');
+    if (!lg.ok) return;
+    const raw = lg.raw || (lg.lines && lg.lines.length ? lg.lines.join('\n') + '\n' : '');
+    if (!raw) return;
+    trainReset();
+    trainWrite(raw);
+  } catch (e) { /* 忽略 */ }
+}
+
+async function syncState() {
+  const [tr, sv] = await Promise.all([api('train/status'), api('server/status')]);
+  if (tr.ok) {
+    if (tr.running) {
+      $('#btnTrainStart').disabled = true;
+      $('#btnTrainResume').disabled = true;
+      $('#btnTrainStop').disabled = false;
+      $('#trainState').textContent = '训练中 · ' + (tr.config || '');
+      if (tr.config && tr.config !== syncState._applied) {
+        applyConfigSelection(tr.config);      // 只在状态变化时切一次，避免每 5 秒抢用户的选择
+        syncState._applied = tr.config;
+      }
+    } else if (!$('#btnTrainStart').disabled) {
+      syncState._applied = null;
+      $('#trainState').textContent = '未运行';
+    } else {
+      // 之前是"训练中"，现在停了：把按钮恢复
+      $('#btnTrainStart').disabled = false;
+      $('#btnTrainResume').disabled = false;
+      $('#btnTrainStop').disabled = true;
+      $('#trainState').textContent = '已结束';
+      syncState._applied = null;
+    }
+  }
+  if (sv.ok) {
+    if (sv.running) {
+      $('#btnSrvStart').disabled = true;
+      $('#btnSrvStop').disabled = false;
+      $('#srvState').textContent = '运行中';
+      $('#srvUrl').textContent = `http://127.0.0.1:${sv.port}/v1`;
+    } else if ($('#btnSrvStart').disabled) {
+      $('#btnSrvStart').disabled = false;
+      $('#btnSrvStop').disabled = true;
+      $('#srvState').textContent = '已停止';
+      $('#srvUrl').textContent = '';
+    }
+  }
+}
+
+(async () => {
+  initTrainTerm();            // xterm 必须在回填日志前初始化
+  await loadConfigs();
+  await loadModels();
+  renderSignList();           // 签名页：列出所有标准模型目录及其签名状态
+  await syncState();          // 先进来同步一次：训练/服务还在跑就把按钮和状态点亮
+  await backfillTrainLog();   // 再把之前的训练日志补回来
+  bindEvents();               // 然后才连 SSE，接后续增量
+  // 浏览器 bfcache / 会话恢复时重新拉一次日志并确保 SSE 仍在
+  window.addEventListener('pageshow', async () => {
+    if (!es || es.readyState === 2) bindEvents();
+    await backfillTrainLog();
+  });
+  setInterval(syncState, 5000);   // 每 5 秒和后端对一次，训练结束后按钮会自动恢复
+})();
+</script>
+</body>
+</html>

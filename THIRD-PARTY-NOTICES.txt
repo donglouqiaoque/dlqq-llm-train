@@ -1,0 +1,20 @@
+Third-party notices for dlqq-llm-train
+========================================
+
+This file covers only components distributed with dlqq-llm-train. Training
+dependencies (torch / numpy / transformers and their transitive dependencies)
+are installed by the user into the project Python from the Environment tab;
+they are not shipped with this repository or its release package, and their
+licenses are not bundled here.
+
+Bundled Python runtime
+----------------------
+CPython 3.13.9      PSF-2.0     .runtime/python/licenses/PYTHON-LICENSE.txt
+pip (ensurepip)      MIT         .runtime/python/licenses/
+
+Web frontend
+------------
+xterm.js 5.3.0       MIT         web/vendor/LICENSE.xterm
+
+Note: the license files under .runtime/python/licenses/ are supplied by the
+make_python_env build script for the bundled Python and ensurepip only.
