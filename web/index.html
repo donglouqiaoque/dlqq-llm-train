@@ -49,6 +49,10 @@
                       height:auto !important; padding:8px; }
   .xterm-log .xterm-viewport { overflow:hidden !important;
                                background:#0a0c10 !important; }
+  .xterm-progress { position:sticky; bottom:0; z-index:3; display:none;
+                    padding:2px 8px 8px; background:#0a0c10; color:#d8dee9;
+                    font:12px Consolas, "Courier New", monospace;
+                    white-space:pre; overflow:hidden; text-overflow:ellipsis; }
   .chat { flex:1; min-height:200px; overflow:auto; background:#0a0c10; border:1px solid var(--line);
           border-radius:8px; padding:12px; margin-bottom:10px; }
   .msg { margin-bottom:10px; }
@@ -256,6 +260,36 @@ function esc(s) { return (s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt
 
 // ---- 训练日志：xterm.js 终端（保留 \r / ANSI） ----
 let TRAIN_TERM = null;
+let TRAIN_PROGRESS = null;
+let TRAIN_PENDING = '';
+let TRAIN_FIT_TIMER = 0;
+
+function stripAnsi(s) {
+  return (s || '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+}
+function scheduleTrainFit() {
+  clearTimeout(TRAIN_FIT_TIMER);
+  TRAIN_FIT_TIMER = setTimeout(() => {
+    fitTrainTerm();
+    const el = $('#trainLog');
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 60) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, 40);
+}
+function updateTrainProgress() {
+  if (!TRAIN_PROGRESS) return;
+  // 只显示当前未以 \n 结束的那一行；有 \r 时取最后一个片段。
+  const cut = TRAIN_PENDING.lastIndexOf('\r');
+  const text = stripAnsi(TRAIN_PENDING.slice(cut + 1)).replace(/\r/g, '');
+  if (!text) {
+    TRAIN_PROGRESS.textContent = '';
+    TRAIN_PROGRESS.style.display = 'none';
+    return;
+  }
+  TRAIN_PROGRESS.textContent = text;
+  TRAIN_PROGRESS.style.display = 'block';
+}
 function fitTrainTerm() {
   if (!TRAIN_TERM) return;
   const el = $('#trainLog');
@@ -283,6 +317,9 @@ function initTrainTerm() {
       theme: { background: '#0a0c10', foreground: '#d8dee9' },
     });
     TRAIN_TERM.open(el);
+    TRAIN_PROGRESS = document.createElement('div');
+    TRAIN_PROGRESS.className = 'xterm-progress';
+    el.appendChild(TRAIN_PROGRESS);
     fitTrainTerm();
     window.addEventListener('resize', fitTrainTerm);
     requestAnimationFrame(() => {
@@ -296,18 +333,30 @@ function initTrainTerm() {
 }
 function trainWrite(data) {
   if (!data) return;
-  if (TRAIN_TERM) {
+  if (!TRAIN_TERM) {
+    $('#trainLog').textContent += data;
+    return;
+  }
+  TRAIN_PENDING += data;
+  let pos;
+  while ((pos = TRAIN_PENDING.indexOf('\n')) >= 0) {
+    const line = TRAIN_PENDING.slice(0, pos + 1);
+    TRAIN_PENDING = TRAIN_PENDING.slice(pos + 1);
     const el = $('#trainLog');
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    TRAIN_TERM.write(data, () => {
-      fitTrainTerm();
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    TRAIN_TERM.write(line, () => {
+      scheduleTrainFit();
       if (atBottom) el.scrollTop = el.scrollHeight;
     });
-  } else {
-    $('#trainLog').textContent += data;
   }
+  updateTrainProgress();
 }
 function trainReset() {
+  TRAIN_PENDING = '';
+  if (TRAIN_PROGRESS) {
+    TRAIN_PROGRESS.textContent = '';
+    TRAIN_PROGRESS.style.display = 'none';
+  }
   if (TRAIN_TERM) {
     TRAIN_TERM.reset();
     fitTrainTerm();
