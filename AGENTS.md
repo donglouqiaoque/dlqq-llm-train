@@ -185,7 +185,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / xterm 的许可证清单（人工维�
 | `max_iters` / `eval_interval` / `eval_iters` | 步数与评估节奏 |
 | `lr` / `warmup_iters` / `lr_decay` / `min_lr_frac` / `weight_decay` / `grad_clip` / `dropout` / `seed` | 优化 |
 | `grad_accum` / `grad_checkpoint` | 等效 batch / 省显存 |
-| `save_every` / `save_dtype` / `save_optimizer` | 定时存档 / 存档精度 / 训练完成后是否保留优化器 |
+| `save_every` / `keep_best_checkpoints` / `keep_forced_checkpoints` / `save_dtype` | 定时存档 / 最优存档上限 / 强制存档上限 / 存档精度 |
 | `max_vocab` / `val_frac` | 词表上限 / 尾部验证集比例 |
 
 ## 六、运行时行为（改代码前先理解）
@@ -201,9 +201,11 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / xterm 的许可证清单（人工维�
 
 **保存策略**：验证损失变好时更新 `model\<名字>\` 最佳模型，并写一个
 `checkpoint-<step>\`；`save_every > 0` 时额外写 checkpoint。
-`save_optimizer=true`（默认）让 checkpoint 保留 `optimizer.pt` / `scheduler.pt` / `rng_state.pth`，
-可续训；`false` 时训练结束后从所有 checkpoint 删除优化器，root 只保留发布权重。
-root 目录始终只有 `config.json` / `model.safetensors` / `chars.json` / `meta.json`。
+checkpoint 始终保留 `optimizer.pt` / `scheduler.pt` / `rng_state.pth`，可续训；
+`keep_best_checkpoints` / `keep_forced_checkpoints` 分别限制最近 N 个最优/强制
+checkpoint（0 = 不保留，-1 = 不限制）。
+root 目录始终只有 `config.json` / `model.safetensors` / `chars.json` / `meta.json`，
+不含优化器，可直接发布。
 
 **对话参数优先级**：`显式参数` > `properties\<配置名>.properties` > `模型文件里存的` > `默认值`
 （网页对话与桥接服务都按这个顺序取，`chat.py` 与 `http_server.py` 各实现一份，改一处要同步另一处）。

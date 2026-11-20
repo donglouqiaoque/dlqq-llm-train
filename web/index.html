@@ -612,8 +612,9 @@ const KEY_INFO = {
   min_lr_frac:     '退火终点 = 初始学习率 × 这个比例',
   grad_checkpoint: '梯度检查点，省显存但慢 20~30%',
   save_every:      '0 = 只存最优；>0 = 额外每 N 步强制存档（防止长时间无提升时中断白跑）',
+  keep_best_checkpoints: '保留最近 N 个“验证变好”的 checkpoint；0 = 不保留，-1 = 不限制',
+  keep_forced_checkpoints: '保留最近 N 个强制保存的 checkpoint；0 = 不保留，-1 = 不限制',
   save_dtype:      '存档精度：fp32 最稳、fp16/bf16 体积减半',
-  save_optimizer:  'true=训练完成后保留优化器（可续训，默认）；false=完成后去掉（发布权重；会卸载当前模型并重新加载最后存档，短暂占用与存档相当的内存）；中途存档始终保留',
   max_vocab:       '词表上限，只保留最常用的 N 个字',
   val_frac:        '从语料尾部切多少比例做验证集',
 };

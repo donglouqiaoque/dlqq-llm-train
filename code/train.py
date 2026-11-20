@@ -24,7 +24,8 @@
 jsonl 里会自动找问答字段（input/target、Q/A、question/answer、src/tgt …），
 也可以用 q_field= 和 a_field= 显式指定。切词缓存放 .cache\\。
 """
-import os, sys, math, time, json, hashlib, gc, random   # 标准库：路径 / 退出 / 数学 / 计时 / JSON / 哈希 / 垃圾回收
+import os, sys, math, time, json, hashlib, random   # 标准库：路径 / 退出 / 数学 / 计时 / JSON / 哈希 / 随机
+import shutil                                     # 清理超过上限的旧 checkpoint
 
 try:
     import numpy as np
@@ -86,8 +87,9 @@ CONFIG = dict(
     grad_checkpoint = False,    # 梯度检查点：省显存，慢约 20-30%
     resume          = False,    # True = 从 out_path 续训（要有 iter；优化器状态可选）
     save_every      = 0,        # 每 N 步强制存一次盘（0 = 只在验证变好时存）
-    save_dtype      = "fp32",   # fp32 / fp16 / bf16 —— 发到 Gitee 时用 fp16 体积减半
-    save_optimizer  = True,     # true=训练完成后保留优化器（可续训）；false=完成后去掉（发布权重）
+    keep_best_checkpoints = 1,  # 保留最近 N 个“验证变好”的 checkpoint；0 = 不保留，-1 = 不限制
+    keep_forced_checkpoints = 1, # 保留最近 N 个强制保存的 checkpoint；0 = 不保留，-1 = 不限制
+    save_dtype      = "fp32",   # fp32 / fp16 / bf16 —— 只影响权重文件
 )
 
 # ------------------------------------------------------------------
@@ -765,7 +767,43 @@ def _checkpoints(out_dir):
     return sorted(found)
 
 
-def save_ckpt(it, best, finished=False, update_root=True, global_step=None):
+def _checkpoint_kind(path):
+    """读取 checkpoint 类型；旧 checkpoint 没有 kind，按 best 处理。"""
+    state = read_json(os.path.join(path, "trainer_state.json"), {}) or {}
+    kind = str(state.get("kind") or "best")
+    return kind if kind in ("best", "forced") else "best"
+
+
+def prune_checkpoints(out_dir):
+    """按类型分别保留最近 N 个 checkpoint。
+
+    keep_best_checkpoints / keep_forced_checkpoints：
+      -1 = 不限制；0 = 不保留该类；>0 = 保留最近 N 个。
+    清理放在新 checkpoint 完整写完之后，避免删到正在写入的目录。
+    """
+    groups = {"best": [], "forced": []}
+    for step, path in _checkpoints(out_dir):
+        groups[_checkpoint_kind(path)].append((step, path))
+
+    for kind, limits_key in (("best", "keep_best_checkpoints"),
+                             ("forced", "keep_forced_checkpoints")):
+        try:
+            keep = int(CONFIG.get(limits_key, 1))
+        except (TypeError, ValueError):
+            keep = 1
+        if keep < 0:
+            continue
+        items = groups[kind]
+        old = items if keep == 0 else items[:-keep]
+        for _step, path in old:
+            try:
+                shutil.rmtree(path)
+                print(f"[存档] 清理旧 {kind} checkpoint：{os.path.basename(path)}")
+            except OSError as e:
+                print(f"[警告] 无法清理旧 checkpoint {path}：{e}")
+
+
+def save_ckpt(it, best, update_root=True, global_step=None, kind="best"):
     """保存 Trainer 风格 checkpoint 目录。
 
     checkpoint-<step>/
@@ -773,10 +811,12 @@ def save_ckpt(it, best, finished=False, update_root=True, global_step=None):
         chars.json / meta.json            项目元数据
         optimizer.pt                      AdamW 状态
         scheduler.pt                      LambdaLR 状态
-        trainer_state.json                global_step / best_metric
+        trainer_state.json                global_step / best_metric / kind
         rng_state.pth                     Python / numpy / torch / CUDA 随机状态
 
-    根目录 model/<名字>/ 只保留最佳模型，供对话和服务直接加载。
+    kind=best 表示验证变好时保存；kind=forced 表示 save_every 定时保存。
+    checkpoint 始终保存优化器；根目录 model/<名字>/ 只保留最佳权重，
+    发布时直接使用根目录即可。
     """
     out = CONFIG["out_path"]
     step = int(it if global_step is None else global_step)
@@ -787,13 +827,12 @@ def save_ckpt(it, best, finished=False, update_root=True, global_step=None):
     write_json(os.path.join(ckpt, CHARS_FILE), chars)
     write_json(os.path.join(ckpt, META_FILE), {"config": CONFIG})
     write_json(os.path.join(ckpt, "trainer_state.json"),
-               {"global_step": step, "best_metric": best})
+               {"global_step": step, "best_metric": best, "kind": kind})
 
-    keep_opt = (not finished) or bool(CONFIG.get("save_optimizer", True))
-    if keep_opt:
-        torch.save(opt.state_dict(), os.path.join(ckpt, "optimizer.pt"))
-        torch.save(scheduler.state_dict(), os.path.join(ckpt, "scheduler.pt"))
-        torch.save(_rng_state(), os.path.join(ckpt, "rng_state.pth"))
+    # checkpoint 的职责是续训/回退，优化器状态始终保留。
+    torch.save(opt.state_dict(), os.path.join(ckpt, "optimizer.pt"))
+    torch.save(scheduler.state_dict(), os.path.join(ckpt, "scheduler.pt"))
+    torch.save(_rng_state(), os.path.join(ckpt, "rng_state.pth"))
 
     if update_root:
         _save_model_dir(out)
@@ -804,20 +843,7 @@ def save_ckpt(it, best, finished=False, update_root=True, global_step=None):
         if os.path.isfile(legacy_state):
             os.remove(legacy_state)
 
-
-def strip_optimizer(out_dir):
-    """发布权重：去掉 checkpoint 里的优化器状态。"""
-    removed = 0
-    for _step, ckpt in _checkpoints(out_dir):
-        path = os.path.join(ckpt, "optimizer.pt")
-        if os.path.isfile(path):
-            os.remove(path)
-            removed += 1
-    if removed:
-        print(f"[存档] 训练完成，已从 {removed} 个 checkpoint 去掉优化器")
-    else:
-        print("[存档] 已是发布权重（不含优化器）")
-    return True
+    prune_checkpoints(out)
 
 
 best_val = float("inf")                           # 历史最好验证损失
@@ -896,7 +922,7 @@ for it in range(start_it, CONFIG["max_iters"] + 1):
     tokens_done += tokens_per_step                # 累计 token 数
 
     if CONFIG["save_every"] and it > 0 and it % CONFIG["save_every"] == 0:
-        save_ckpt(it, best_val, update_root=False, global_step=it + 1)
+        save_ckpt(it, best_val, update_root=False, global_step=it + 1, kind="forced")
         print(f"  step {it:>6} | 定时存档")
 
 print(f"[训练] 完成，用时 {time.time()-t0:.1f}s，最好验证损失 {best_val:.4f}")
@@ -918,18 +944,9 @@ print(decode(out[0].tolist()))                    # id 解码回文字
 print("\n====================")
 
 finished = last_it >= CONFIG["max_iters"]         # 是否正常跑到 max_iters（而不是中途退出）
-if finished:
-    if not saved:                                 # 一次都没存过就补一份最终存档
-        save_ckpt(last_it, best_val, finished=True, global_step=last_it + 1)
-        saved = True
-    if not CONFIG.get("save_optimizer", True):    # 用户要求发布权重：去掉优化器
-        # 发布权重：先释放当前训练状态，再读最后存档去掉优化器，避免两份同时占内存
-        del model
-        del opt
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        strip_optimizer(CONFIG["out_path"])
+if finished and not saved:                        # 一次都没存过就补一份最终存档
+    save_ckpt(last_it, best_val, global_step=last_it + 1)
+    saved = True
 
 if saved:
     print(f"模型已保存到 {CONFIG['out_path']}")

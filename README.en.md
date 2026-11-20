@@ -193,9 +193,9 @@ All under **`properties\`**, one `key=value` per line, `#` starts a comment:
 | File | Corpus | Tier | Notes |
 |---|---|---|---|
 | `chat_demo.properties` | `res\chat_demo\` | small (~0.9 M params) | 30 hand-written Q&A pairs, seconds |
-| `dlqq_exam.properties` | `res\dlqq_exam\` | medium (13.7 M params) | 4,562 exam questions, a few minutes |
-| `dlqq_llm.properties` | `res\dlqq_llm\` | large (31.5 M params) | GB-scale corpus |
-| `dlqq_poem.properties` | `res\dlqq_poem\` | small (14.1 M params) | poetry (classical + Song ci + modern) |
+| `dlqq_exam.properties` | `res\dlqq_exam\` | medium (12.55 M params) | 4,562 exam questions, a few minutes |
+| `dlqq_llm.properties` | `res\dlqq_llm\` | large (31.44 M params) | GB-scale corpus |
+| `dlqq_poem.properties` | `res\dlqq_poem\` | small (13.40 M params) | poetry (classical + Song ci + modern) |
 
 **Every parameter lives in the file.** You can edit it on the **Config** tab: saving only rewrites
 the values, keeping comments, blank lines and key order, and backs the old file up under
@@ -354,7 +354,8 @@ Common keys:
 | `min_lr_frac` | 0.1 | Decay floor = `lr × this` |
 | `grad_checkpoint` | `False` | Checkpointing: less VRAM, ~20–30% slower |
 | `save_every` | 0 | Extra forced save every N steps (0 = only keep the best model) |
-| `save_optimizer` | `True` | `True` = keep the optimizer in checkpoints (resumable); `False` = remove it from checkpoints at the end (release weights); the root model directory only ever contains weights |
+| `keep_best_checkpoints` | 1 | Keep the latest N validation-best checkpoints; 0 = keep none, -1 = unlimited |
+| `keep_forced_checkpoints` | 1 | Keep the latest N forced checkpoints; 0 = keep none, -1 = unlimited |
 | `chat_mode` | `True` | `False` = pure continuation model (poetry), no `用户：/助手：` |
 | `chat_temperature` | 0.8 | Sampling temperature; higher is wilder |
 | `chat_top_k` | 40 | Sample from the top K; 0 = no truncation |
@@ -381,6 +382,8 @@ that file — no extra config needed:
 | `warmup_iters` / `lr_decay` / `min_lr_frac` | Warmup + cosine decay; a must for long runs |
 | `grad_checkpoint` | Checkpointing: less VRAM, 20–30% slower |
 | `save_every` | Extra forced checkpoint every N steps (0 = only keep the best model) |
+| `keep_best_checkpoints` | Keep the latest N best checkpoints; 0 = none, -1 = unlimited |
+| `keep_forced_checkpoints` | Keep the latest N forced checkpoints; 0 = none, -1 = unlimited |
 
 Example: set `max_iters=60000`, run `.runtime\start.bat`, pick `dlqq_llm` on the Train tab and press
 **Resume training** (the checkpoint must contain optimizer state).
@@ -404,17 +407,21 @@ REM    Double-click .runtime\start.bat, pick dlqq_exam on the Train tab.
 REM    Then pick dlqq_exam on the Chat tab to chat.
 ```
 
-Staying under 50 MB comes down to two lines in `properties\dlqq_exam.properties`:
+Staying under 50 MB comes down to these lines in `properties\dlqq_exam.properties`:
 
 ```properties
 # half-precision weights, half the size
 save_dtype=fp16
-# drop the optimizer after training finishes (smaller release)
-save_optimizer=false
+# checkpoints always keep the optimizer; cap best and forced snapshots separately
+keep_best_checkpoints=1
+keep_forced_checkpoints=1
 ```
 
-Measured: 4,562 records tokenise to ~2.7 M tokens; 13.7 M parameters at fp16 with the optimizer
-removed after training ≈ **27 MB**. `chat_demo` is smaller still: 0.9 M parameters ≈ **1.9 MB**.
+`model\dlqq_exam\` only holds the best weights and never contains an optimizer; checkpoints are for
+resuming training.
+
+Measured: 4,562 records tokenise to ~2.7 M tokens; 12.55 M parameters at fp16 give a release weight
+of about **27 MB**. `chat_demo` is smaller still: 0.9 M parameters ≈ **1.9 MB**.
 
 > **⚠ Attribute the source**: `dlqq_exam` trains on the questions themselves, so the model
 > **memorises them**. Credit the datasets (ModelScope: C-Eval / gaokao-benchmark / …) and
@@ -464,7 +471,7 @@ fineweb  AI-ModelScope/chinese-fineweb-edu
 
 2 GB is chosen from the model size:
 
-- `dlqq_llm` is 31.5 M parameters; at "20 tokens per parameter" it needs ≈ **630 M tokens**;
+- `dlqq_llm` is 31.44 M parameters; at "20 tokens per parameter" it needs ≈ **630 M tokens**;
 - 2 GB of Chinese text ≈ 700 M tokens, plus the existing `firefly-train-1.1M.jsonl`
   (1.1 GB ≈ 400 M tokens) gives ~1.1 B tokens — already more than enough;
 - Downloading all 12.7 GB buys a 29.4 M model nothing but 1–2 hours and 13 GB of disk.
@@ -582,7 +589,7 @@ pick `dlqq_llm` on the Train tab.
 
 ## Training a poetry model (`dlqq_poem`)
 
-A small model dedicated to classical Chinese poetry: 6 layers × 384 dim (14.1 M parameters),
+A small model dedicated to classical Chinese poetry: 6 layers × 384 dim (13.40 M parameters),
 trained on **Tang/Song/Yuan/Ming/Qing poems + Song ci + modern poetry**; about 30 minutes on
 8 GB VRAM.
 
@@ -618,7 +625,7 @@ REM Double-click .runtime\start.bat, then pick dlqq_poem on the Train tab.
 
 | Item | Value | Rationale |
 |---|---|---|
-| Shape | 6 layers, 384 dim (14.1 M) | ~40 M characters / 14 M params ≈ 2.8 tokens per parameter |
+| Shape | 6 layers, 384 dim (13.40 M) | ~40 M characters / 13.4 M params ≈ 2.9 tokens per parameter |
 | `block_size` | 256 | Modern poems average 210 chars, 90% under 136 — 256 fits a whole poem |
 | `batch_size` | 32 | 32 × 256 = 8,192 tokens/step (same steps as 64×128, double the context) |
 | `max_iters` | 15000 | ≈ 123 M tokens ≈ 3.1 passes over the 39.2 M-token corpus |

@@ -209,7 +209,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / xterm (ma
 | `max_iters` / `eval_interval` / `eval_iters` | step count and eval cadence |
 | `lr` / `warmup_iters` / `lr_decay` / `min_lr_frac` / `weight_decay` / `grad_clip` / `dropout` / `seed` | optimisation |
 | `grad_accum` / `grad_checkpoint` | effective batch / memory saving |
-| `save_every` / `save_dtype` / `save_optimizer` | periodic checkpoint / dtype / keep optimizer after finish |
+| `save_every` / `keep_best_checkpoints` / `keep_forced_checkpoints` / `save_dtype` | periodic checkpoint / best checkpoint cap / forced checkpoint cap / dtype |
 | `max_vocab` / `val_frac` | vocabulary cap / tail validation split |
 
 ## 6. Runtime behaviour (understand before editing)
@@ -227,10 +227,11 @@ is reduced automatically with a warning.
 
 **Checkpoint policy**: when validation loss improves, update the best model in
 `model\<name>\` and write a `checkpoint-<step>\`; `save_every > 0` writes extra checkpoints.
-`save_optimizer=true` (default) keeps `optimizer.pt` / `scheduler.pt` / `rng_state.pth` in
-checkpoints for resuming; `false` removes the optimizer from every checkpoint after training,
-and the root directory keeps release weights only. The root directory always contains only
-`config.json` / `model.safetensors` / `chars.json` / `meta.json`.
+Checkpoints always keep `optimizer.pt` / `scheduler.pt` / `rng_state.pth` for resuming;
+`keep_best_checkpoints` / `keep_forced_checkpoints` independently cap the latest N best/forced
+checkpoints (0 = keep none, -1 = unlimited). The root directory
+always contains only `config.json` / `model.safetensors` / `chars.json` / `meta.json`, never an
+optimizer, so it can be published directly.
 
 **Chat parameter precedence**: explicit args > `properties\<config>.properties` > values stored in
 the model directory (`meta.json`) > defaults (used by both the web chat and the bridge; implemented

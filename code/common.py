@@ -90,8 +90,10 @@ def coerce_like(value, old):
     return str(value)
 
 
-# properties 里有、但 CONFIG 里没有的键：不是错误，只是不参与训练
-IGNORED_KEYS = ("python",)
+# properties 里有、但当前 CONFIG 已不使用的键：
+#   python 是旧版解释器配置；save_optimizer 已取消，checkpoint 始终保留优化器；
+#   max_checkpoints 已拆成 keep_best_checkpoints / keep_forced_checkpoints。
+IGNORED_KEYS = ("python", "save_optimizer", "max_checkpoints")
 
 
 def apply_properties(config, props, root=None):

@@ -296,7 +296,8 @@ max_iters=5000
 | `min_lr_frac` | 0.1 | 退火终点 = `lr × 这个比例` |
 | `grad_checkpoint` | `False` | 梯度检查点：省显存，慢约 20–30% |
 | `save_every` | 0 | 0 = 只存最优；>0 = 额外每 N 步强制存档 |
-| `save_optimizer` | `True` | `True` = checkpoint 保留优化器（可续训）；`False` = 完成后去掉 checkpoint 里的优化器（发布权重）；root 模型目录始终只有权重 |
+| `keep_best_checkpoints` | 1 | 保留最近 N 个“验证变好”的 checkpoint；0 = 不保留，-1 = 不限制 |
+| `keep_forced_checkpoints` | 1 | 保留最近 N 个强制保存的 checkpoint；0 = 不保留，-1 = 不限制 |
 | `chat_mode` | `True` | `False` = 纯续写模型（诗词），提示词不加「用户：／助手：」 |
 | `chat_temperature` | 0.8 | 对话采样温度，越大越发散 |
 | `chat_top_k` | 40 | 只从概率最高的 K 个里采样；0 = 不截断 |
@@ -323,6 +324,8 @@ max_iters=5000
 | `warmup_iters` / `lr_decay` / `min_lr_frac` | 学习率预热 + 余弦退火，长训练必开 |
 | `grad_checkpoint` | 梯度检查点，省显存（慢 20–30%） |
 | `save_every` | 0 = 只存最优；>0 = 额外每 N 步强制存档，防止「验证损失一直没变好 → 一直不存盘」 |
+| `keep_best_checkpoints` | 保留最近 N 个最优 checkpoint；0 = 不保留，-1 = 不限制 |
+| `keep_forced_checkpoints` | 保留最近 N 个强制存档；0 = 不保留，-1 = 不限制 |
 
 例：把 `max_iters` 调到 60000，双击 `.runtime\start.bat`，在「训练」页选 `dlqq_llm`、点【继续训练】
 即可接着上次的存档（存档里要有优化器状态）。
@@ -345,16 +348,19 @@ REM    双击 .runtime\start.bat，在「训练」页选 dlqq_exam 开始训练
 REM    在「对话」页选 dlqq_exam 进行对话
 ```
 
-体积控制在 50 MB 以内的关键是 `properties\dlqq_exam.properties` 里这两行：
+体积控制的关键是 `properties\dlqq_exam.properties` 里这几行：
 
 ```properties
 # 权重存半精度，体积减半
 save_dtype=fp16
-# 训练完成后去掉优化器，发布权重更小
-save_optimizer=false
+# checkpoint 始终带优化器；分别限制最优存档和强制存档
+keep_best_checkpoints=1
+keep_forced_checkpoints=1
 ```
 
-实测：4,562 条语料切出约 270 万 token，13.7 M 参数存成 fp16 + 训练完成后去掉优化器约 **27 MB**；
+根目录 `model\dlqq_exam\` 只保留最佳权重，不含优化器；checkpoint 才用于续训。
+
+实测：4,562 条语料切出约 270 万 token，12.55 M 参数存成 fp16 的发布权重约 **27 MB**；
 `chat_demo` 更小，0.9 M 参数约 **1.9 MB**。
 
 > **⚠ 数据来源要写明**：`dlqq_exam` 把题库全部用于训练，模型是**记住了这些题**，
@@ -404,7 +410,7 @@ fineweb  AI-ModelScope/chinese-fineweb-edu
 
 默认 2 GB 是按模型规模算的：
 
-- `dlqq_llm` 是 31.5 M 参数，按「每参数 20 token」≈ **6.3 亿 token** 就够；
+- `dlqq_llm` 是 31.44 M 参数，按「每参数 20 token」≈ **6.3 亿 token** 就够；
 - 2 GB 中文文本 ≈ 7 亿 token，加上原来的 `firefly-train-1.1M.jsonl`（1.1 GB ≈ 4 亿 token），
   总量约 11 亿 token，已经超过所需；
 - 全下 12.7 GB 对 29.4 M 模型没有收益，只是多花 1–2 小时下载和 13 GB 硬盘。
@@ -514,7 +520,7 @@ data_path=res/dlqq_llm
 
 ## 训练一个写诗模型 dlqq_poem
 
-专门写诗的小模型：6 层 384 维（14.1 M 参数），语料是**古诗 + 宋词 + 近现代诗**，
+专门写诗的小模型：6 层 384 维（13.40 M 参数），语料是**古诗 + 宋词 + 近现代诗**，
 在 8 GB 显存上半小时左右训完。
 
 语料里**只有诗词正文，没有「诗：」「词：」这类标注**，所以它写出来的就是诗本身，
@@ -547,7 +553,7 @@ REM 双击 .runtime\start.bat，在「训练」页选 dlqq_poem
 
 | 项 | 值 | 依据 |
 |---|---|---|
-| 结构 | 6 层 384 维（14.1 M） | 约 4000 万字 / 14 M 参数 ≈ 2.8 token/参数 |
+| 结构 | 6 层 384 维（13.40 M） | 约 4000 万字 / 13.4 M 参数 ≈ 2.9 token/参数 |
 | `block_size` | 256 | 现代诗平均 210 字、90% 在 136 字内，256 能完整装下一首 |
 | `batch_size` | 32 | 32 × 256 = 每步 8192 token（与 64×128 步数相同，上下文翻倍） |
 | `max_iters` | 15000 | ≈ 1.23 亿 token ≈ 语料（3920 万 token）3.1 轮 |
