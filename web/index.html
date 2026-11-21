@@ -373,6 +373,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
 });
 
 let CONFIGS = [];
+let CHAT_CONFIGS = [];               // 本地 + Ollama，独立于训练配置
 // 配置文件第一行常是 "# ====" 这种装饰线，不能拿来当说明
 function cleanDesc(desc) {
   const d = (desc || '').trim();
@@ -395,12 +396,19 @@ async function loadConfigs() {
   $('#trainCfg').innerHTML = CONFIGS.map(c =>
     `<option value="${c.name}">${c.name}</option>`).join('');
   $('#cfgSelect').innerHTML = CONFIGS.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
-  $('#chatConfig').innerHTML = CONFIGS.map(c =>
-    `<option value="${c.name}">${c.name}</option>`).join('');
-  $('#srvConfig').innerHTML = '<option value="">全部配置</option>' + CONFIGS.map(c =>
-    `<option value="${c.name}">${c.name}</option>`).join('');
   renderCfgForm();
   await loadAllPy();
+  await loadChatConfigs();
+}
+
+async function loadChatConfigs() {
+  const r = await api('chat/configs');
+  CHAT_CONFIGS = r.configs || [];
+  const label = c => c.backend === 'ollama' ? `${c.name}（Ollama）` : `${c.name}（本地）`;
+  $('#chatConfig').innerHTML = CHAT_CONFIGS.map(c =>
+    `<option value="${c.name}">${label(c)}</option>`).join('');
+  $('#srvConfig').innerHTML = '<option value="">全部配置</option>' + CHAT_CONFIGS.map(c =>
+    `<option value="${c.name}">${label(c)}</option>`).join('');
 }
 
 const PY = {
@@ -764,7 +772,8 @@ async function send() {
   if (!text || chatAbort) return;
   const cfgName = $('#chatConfig').value;
   if (!cfgName) { toast('先选一个配置'); return; }
-  if (!(await ensurePy('chat'))) return;
+  const selected = CHAT_CONFIGS.find(x => x.name === cfgName) || {};
+  if (selected.backend !== 'ollama' && !(await ensurePy('chat'))) return;
   $('#chatInput').value = '';
   $('#chatInput').style.height = 'auto';
   HISTORY.push({ role: 'user', content: text });
@@ -777,10 +786,13 @@ async function send() {
   chatAbort = new AbortController();
   let acc = '';
   try {
+    const payload = selected.backend === 'ollama'
+      ? { config: cfgName, messages: HISTORY }
+      : { config: cfgName, text };
     const resp = await fetch(`/api/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      // 默认只发当前这一句：小模型（256 上下文）带历史会顺着上一轮答案复读
-      body: JSON.stringify({ config: cfgName, text }),
+      // 本地小模型默认只发当前这一句；Ollama 后端发送完整 messages
+      body: JSON.stringify(payload),
       signal: chatAbort.signal });
     if (!resp.ok) { body.textContent = '请求失败：' + (await resp.text()); return; }
     const reader = resp.body.getReader();

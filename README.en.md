@@ -710,6 +710,7 @@ code\                   all Python
   chat.py               chat core: ChatSession (load / streaming reply / set params)
   chat_worker.py        chat child: keeps ChatSession alive, JSON lines over stdin/stdout
   http_server.py        OpenAI-compatible bridge (lazy multi-model loading)
+  ollama_client.py      Ollama HTTP adapter (discovery / forwarding / SSE parsing)
   common.py             find_root / order-preserving properties I/O / watchdog / hide dir
   model.py              GPT-2 wrapper (transformers)
   model_signature.py    weight SHA-256 signatures (stdlib only)
@@ -822,6 +823,39 @@ The service is OpenAI-compatible: `/v1/models` and `/v1/chat/completions` (with 
 Models come from the `properties\` configs whose `model=` points at an existing standard model
 directory (no more directory scanning), and chat parameters are read from the same config. Models
 load only on first use.
+
+### Optional Ollama backend
+
+The bridge and chat page can also forward requests to Ollama. Ollama is an external inference
+backend and is not used for training:
+
+```text
+local model       → existing HF model directory
+ollama/xxx        → http://127.0.0.1:11434/v1/chat/completions
+```
+
+It reads this environment variable by default:
+
+```text
+OLLAMA_URL=http://127.0.0.1:11434
+```
+
+Or pass it when starting the bridge:
+
+```text
+python code\http_server.py --port 49128 --ollama-url http://127.0.0.1:11434
+```
+
+Pass `--no-ollama` to disable the proxy and serve local models only.
+
+Ollama models are listed as:
+
+```text
+ollama/qwen3:8b
+```
+
+Pick a model marked `(Ollama)` in the chat page. Remote requests forward the original `messages`
+without the local 256-character truncation. Local models still work when Ollama is unavailable.
 
 ---
 

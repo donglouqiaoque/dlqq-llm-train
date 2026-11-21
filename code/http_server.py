@@ -52,6 +52,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+import ollama_client as ollama                                  # noqa: E402
+
 
 # ==================================================================
 # 桥接服务必须有 torch；没有就直接报错退出，绝不自动换解释器
@@ -446,10 +448,25 @@ class Handler(BaseHTTPRequestHandler):
                     created = int(time.time())
                 data.append({"id": mid, "object": "model", "created": created,
                              "owned_by": "local"})
+            if not getattr(ARGS, "no_ollama", False):
+                for name in ollama.list_models(getattr(ARGS, "ollama_url", None)):
+                    data.append({"id": ollama.model_id(name), "object": "model",
+                                 "created": int(time.time()), "owned_by": "ollama"})
             self._send(200, {"object": "list", "data": data})
         elif path.startswith("/v1/models/"):
-            mid = path[len("/v1/models/"):]
-            real = POOL.resolve(urllib.parse.unquote(mid))
+            mid = urllib.parse.unquote(path[len("/v1/models/"):])
+            if ollama.is_remote(mid):
+                if getattr(ARGS, "no_ollama", False):
+                    self._err(404, f"没有这个模型：{mid}", "model_not_found", "model")
+                    return
+                tag = ollama.model_tag(mid)
+                if tag not in ollama.list_models(getattr(ARGS, "ollama_url", None)):
+                    self._err(404, f"没有这个模型：{mid}", "model_not_found", "model")
+                    return
+                self._send(200, {"id": mid, "object": "model",
+                                 "created": int(time.time()), "owned_by": "ollama"})
+                return
+            real = POOL.resolve(mid)
             if not real:
                 self._err(404, f"没有这个模型：{mid}", "model_not_found", "model")
                 return
@@ -471,7 +488,96 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._err(400, f"请求体不是合法 JSON：{e}")
             return
+
+        if ollama.is_remote(req.get("model")):
+            self.handle_ollama(req)
+            return
+
         self.handle_chat(req)
+
+    def handle_ollama(self, req):
+        """把 OpenAI 兼容请求原样转给 Ollama。"""
+        if getattr(ARGS, "no_ollama", False):
+            self._err(400, "Ollama 后端已关闭（--no-ollama）", "unsupported_feature", "model")
+            return
+
+        want = str(req.get("model") or "")
+        tag = ollama.model_tag(want)
+        payload = dict(req)
+        payload["model"] = tag
+        if payload.get("stream"):
+            payload["stream"] = True
+        else:
+            payload["stream"] = False
+
+        user = _last_user_text(req)
+        t0 = time.time()
+        try:
+            conn, resp = ollama.open_chat(payload, getattr(ARGS, "ollama_url", None))
+        except Exception as e:
+            self._err(502, f"无法连接 Ollama：{type(e).__name__}: {e}", "upstream_error")
+            return
+
+        ctype = (resp.getheader("Content-Type") or "application/json").lower()
+        try:
+            if resp.status < 200 or resp.status >= 300:
+                body = resp.read()
+                self.send_response(resp.status)
+                self.send_header("Content-Type", ctype or "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            if payload["stream"]:
+                self.send_response(resp.status)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                parts = []
+                for raw in resp:
+                    self.wfile.write(raw)
+                    self.wfile.flush()
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if line.startswith("data:"):
+                        data = line[5:].strip()
+                        if data and data != "[DONE]":
+                            try:
+                                obj = json.loads(data)
+                            except ValueError:
+                                obj = None
+                            if isinstance(obj, dict):
+                                parts.append(ollama.delta_text(obj))
+                text = "".join(parts)
+                emit_event(t="chat", model=want, turns=1, ms=int((time.time() - t0) * 1000),
+                           user=user, assistant=text, prompt_chars=0, stream=True)
+                return
+
+            body = resp.read()
+            self.send_response(resp.status)
+            self.send_header("Content-Type", ctype or "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+            try:
+                obj = json.loads(body.decode("utf-8", errors="replace"))
+                text = ollama.delta_text(obj) if isinstance(obj, dict) else ""
+            except ValueError:
+                text = ""
+            emit_event(t="chat", model=want, turns=1, ms=int((time.time() - t0) * 1000),
+                       user=user, assistant=text, prompt_chars=0, stream=False)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            # 客户端中途关闭连接，不需要再写错误响应
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def handle_chat(self, req):
         # DSH 是 agent 框架，请求里默认会带 tools；而界面里没有「关掉工具」的开关。
@@ -650,6 +756,9 @@ def main():
                     help="同时留在显存里的模型数，默认 1（切模型就卸载上一个）")
     ap.add_argument("--host", default="127.0.0.1", help="监听地址，默认只绑本机")
     ap.add_argument("--port", type=int, default=49128, help="监听端口，默认 49128")
+    ap.add_argument("--ollama-url", default=None,
+                    help="Ollama 根地址；默认取环境变量 OLLAMA_URL，再退回 http://127.0.0.1:11434")
+    ap.add_argument("--no-ollama", action="store_true", help="关闭 Ollama 代理，只服务本地模型")
     ap.add_argument("--device", default=None, choices=["cpu", "cuda"],
                     help="推理设备，默认自动（有 CUDA 就用 CUDA）")
     ap.add_argument("--temperature", type=float, default=0.8, help="默认温度")
@@ -745,6 +854,13 @@ def main():
         mark = "  ← 默认" if mid == default else ""
         print(f"       {mid:<24} {mb:>8.1f} MB  {mt}{mark}")
     print(f"[设备] {a.device} | 同时最多留 {a.max_loaded} 个模型在显存里")
+    if not a.no_ollama:
+        names = ollama.list_models(a.ollama_url)
+        if names:
+            print(f"[Ollama] {ollama.base_url(a.ollama_url)} | "
+                  f"{len(names)} 个模型：{', '.join(ollama.model_id(n) for n in names)}")
+        else:
+            print(f"[Ollama] {ollama.base_url(a.ollama_url)} 未发现可用模型（服务仍可用本地模型）")
     print(f"[工具] " + ("带 tools 的请求直接返回 400（--reject-tools）"
                        if a.reject_tools else
                        "忽略请求里的 tools，只回普通文本，不返回 tool_calls"))

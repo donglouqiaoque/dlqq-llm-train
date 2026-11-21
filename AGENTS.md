@@ -28,6 +28,9 @@
 
    **允许**用 `from_pretrained(model\<名字>\)` 读取**本项目自己刚训练出的标准 HF 目录**；
    它只是加载自己的训练结果，不能作为预训练起点，也不能加载 `model\` 之外的模型。
+
+   **例外（仅推理代理）**：`ollama_client.py` 可以把 HTTP 请求转发给用户自己启动的 Ollama，
+   不读取、不保存、不训练任何第三方权重；它只作为可选外部推理后端，不参与本项目训练链路。
 3. **git 权限分三层，禁止放宽**：写操作（`commit` / `push` / `add` / `reset` / `checkout` 等）
    **无论用户是否授权都绝对禁止**；`.git` 目录**无论用户是否授权都绝对禁止读写**，无论是标准
    编辑工具（读/写/编辑）还是执行脚本或命令，一律禁止读写 `.git` 目录下的任何文件（读也不行，
@@ -85,6 +88,7 @@ code/                   所有 Python
   chat.py               对话核心：ChatSession（load / reply_stream / set_params）
   chat_worker.py        对话子进程：常驻 ChatSession，stdin/stdout 走 JSON 行
   http_server.py        OpenAI 兼容桥接服务（ThreadingHTTPServer，多模型懒加载）
+  ollama_client.py      Ollama HTTP 适配（/api/tags、/v1/chat/completions、SSE）
   common.py             find_root / properties 保序读写 / 路径解析 / 父进程看门狗 / 隐藏目录
   model.py              GPT-2 封装（transformers）
   model_signature.py    权重 SHA-256 签名（compute / verify，纯标准库）
@@ -144,7 +148,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / xterm 的许可证清单（人工维�
 | GET | `/api/env` | 查询/检测项目 Python（`check=1` 才 probe；返回 torch/numpy/transformers/pip/CUDA，以及 `system.torch_recommend` 显卡/驱动推荐） |
 | GET | `/api/configs` | 配置列表 + 解析后的键值 |
 | GET | `/api/models` | `model\` 下的标准模型目录清单（含是否已签名） |
-| GET | `/api/chat/configs` | 对话下拉用：能对上权重的配置名 + 模型名 |
+| GET | `/api/chat/configs` | 对话下拉用：本地配置 + Ollama 模型（带 backend 标记） |
 | GET | `/api/corpora` | `res\` 下的语料目录（文件数、体积） |
 | GET | `/api/train/status` `train/log` | 训练状态与增量日志 |
 | GET | `/api/server/status` | 桥接服务状态与端口 |
@@ -209,6 +213,10 @@ root 目录始终只有 `config.json` / `model.safetensors` / `chars.json` / `me
 
 **对话参数优先级**：`显式参数` > `properties\<配置名>.properties` > `模型文件里存的` > `默认值`
 （网页对话与桥接服务都按这个顺序取，`chat.py` 与 `http_server.py` 各实现一份，改一处要同步另一处）。
+
+**Ollama 代理**：`ollama_client.py` 从 `OLLAMA_URL`（默认 `http://127.0.0.1:11434`）
+发现模型；模型 id 加 `ollama/` 前缀。桥接服务和 WebUI 对话页只把 Ollama 请求转发到
+`/v1/chat/completions`，不加载 GGUF，也不参与训练；Ollama 不可用时本地模型不受影响。
 
 **生成停止**：提示词用 `用户：` / `助手：`；生成到下一个 `用户：` 直接截断；词表缺这两个标记时
 自动切「续写模式」。

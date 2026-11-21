@@ -30,6 +30,10 @@
    **Allowed**: `from_pretrained(model\<name>\)` to load a standard HF directory that **this project
    just trained itself**. It only reads our own output; it must never be used as a pretrained
    starting point, and must never load a model outside `model\`.
+
+   **Exception (inference proxy only)**: `ollama_client.py` may forward HTTP requests to a
+   user-managed Ollama instance. It never reads, stores, or trains third-party weights and is not
+   part of the training pipeline.
 3. **Three-tier git permissions; never widen them**: write operations (`commit` / `push` / `add` /
    `reset` / `checkout`, etc.) are **absolutely forbidden even if the user authorizes them**; the
    `.git` directory must **never be read or written, even if the user authorizes it** — no
@@ -100,6 +104,7 @@ code/                   all Python
   chat.py               chat core: ChatSession (load / reply_stream / set_params)
   chat_worker.py        chat child: keeps ChatSession alive, JSON lines over stdin/stdout
   http_server.py        OpenAI-compatible bridge (ThreadingHTTPServer, lazy multi-model)
+  ollama_client.py      Ollama HTTP adapter (/api/tags, /v1/chat/completions, SSE)
   common.py             find_root / order-preserving properties I/O / paths / watchdog / hide dir
   model.py              GPT-2 wrapper (transformers)
   model_signature.py    weight SHA-256 signatures (compute / verify, stdlib only)
@@ -164,7 +169,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / xterm (ma
 | GET | `/api/env` | inspect/check the project Python (`check=1` probes; returns torch/numpy/transformers/pip/CUDA plus `system.torch_recommend` GPU/driver recommendation) |
 | GET | `/api/configs` | config list with parsed key/values |
 | GET | `/api/models` | standard model directories under `model\` (with signed flag) |
-| GET | `/api/chat/configs` | configs that map to an existing weight (name + model) |
+| GET | `/api/chat/configs` | chat dropdown: local configs + Ollama models (with backend tag) |
 | GET | `/api/corpora` | corpus directories under `res\` (file count, size) |
 | GET | `/api/train/status` `train/log` | training state and incremental log |
 | GET | `/api/server/status` | bridge state and port |
@@ -236,6 +241,11 @@ optimizer, so it can be published directly.
 **Chat parameter precedence**: explicit args > `properties\<config>.properties` > values stored in
 the model directory (`meta.json`) > defaults (used by both the web chat and the bridge; implemented
 twice in `chat.py` and `http_server.py` — keep them in sync).
+
+**Ollama proxy**: `ollama_client.py` discovers models from `OLLAMA_URL` (default
+`http://127.0.0.1:11434`) and prefixes their ids with `ollama/`. The bridge and the WebUI chat page
+only forward requests to `/v1/chat/completions`; GGUF is never loaded and training is unaffected.
+Local models keep working when Ollama is unavailable.
 
 **Stopping**: prompts use `用户：` / `助手：`; generation stops at the next `用户：`. If the vocabulary
 lacks those markers, the session falls back to plain continuation mode.

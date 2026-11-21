@@ -37,6 +37,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import common                                                     # noqa: E402
+import ollama_client as ollama                                    # noqa: E402
 
 common.setup_stdio()
 ROOT = common.find_root()
@@ -420,8 +421,14 @@ def list_models():
 
 
 def list_chat_configs():
-    """对话下拉用：只给配置名和模型名，不带 data_path 之类的细节。"""
-    return [{"name": c["name"], "model": c["model"]} for c in common.chat_configs(ROOT)]
+    """对话下拉用：本地配置 + Ollama 模型，统一带 backend 标记。"""
+    out = []
+    for c in common.chat_configs(ROOT):
+        out.append({"name": c["name"], "model": c["model"], "backend": "local"})
+    for name in ollama.list_models():
+        out.append({"name": ollama.model_id(name), "model": name,
+                    "backend": "ollama"})
+    return out
 
 
 def list_corpora():
@@ -736,6 +743,10 @@ class Handler(BaseHTTPRequestHandler):
             parts = []
             for i, m in enumerate(msgs):
                 c = m.get("content") or ""
+                if isinstance(c, list):
+                    c = "".join(p.get("text", "") for p in c
+                                if isinstance(p, dict) and p.get("type") == "text")
+                c = str(c)
                 if m.get("role") == "user":
                     parts.append(c if i == 0 else "用户：" + c)
                 else:
@@ -745,6 +756,10 @@ class Handler(BaseHTTPRequestHandler):
             text = (body.get("text") or "").strip()
         if not text:
             return self._err(400, "消息为空")
+
+        # Ollama 模型：直接把原始 messages 转给 Ollama，不进入本地 ChatSession
+        if ollama.is_remote(cfg):
+            return self._chat_ollama(cfg, body, text, lan)
 
         # 按配置加载：模型路径和对话参数都来自 properties\<配置>.properties
         if cfg:
@@ -825,6 +840,55 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
 
+    def _chat_ollama(self, cfg, body, text, lan=False):
+        """把 WebUI 的对话请求转给 Ollama，并把 SSE 转成前端 token 事件。"""
+        tag = ollama.model_tag(cfg)
+        msgs = body.get("messages")
+        if not isinstance(msgs, list) or not msgs:
+            msgs = [{"role": "user", "content": text}]
+        payload = {"model": tag, "messages": msgs, "stream": True}
+        for key in ("temperature", "top_p", "max_tokens",
+                    "max_completion_tokens", "tools"):
+            if key in body and body[key] is not None:
+                payload[key] = body[key]
+
+        try:
+            conn, resp = ollama.open_chat(payload)
+        except Exception as e:
+            return self._err(502, f"无法连接 Ollama：{type(e).__name__}: {e}")
+
+        if resp.status < 200 or resp.status >= 300:
+            try:
+                raw = resp.read().decode("utf-8", errors="replace")
+            except Exception:
+                raw = ""
+            conn.close()
+            return self._err(resp.status, f"Ollama 返回错误：{raw[:500]}")
+
+        self._sse_start()
+        parts = []
+        try:
+            self._sse("meta", {"model": cfg, "config": cfg,
+                               "info": {"backend": "ollama"}})
+            for obj in ollama.iter_sse(resp):
+                piece = ollama.delta_text(obj)
+                if piece:
+                    parts.append(piece)
+                    self._sse("token", {"text": piece})
+            self._sse("done", {"text": "".join(parts)})
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        except Exception as e:
+            try:
+                self._sse("error", {"error": f"{type(e).__name__}: {e}"})
+            except OSError:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     def _server_start(self, body):
         c = STATE["server"]
         if c and c.alive():
@@ -855,7 +919,9 @@ class Handler(BaseHTTPRequestHandler):
         args = [py, os.path.join(ROOT, "code", "http_server.py"),
                 "--port", str(port), "--events", "--parent-pid", str(os.getpid())]
         for name in targets:
-            args += ["--config", name]
+            # Ollama 模型由 http_server 自动发现，不作为本地 --config 传进去
+            if not ollama.is_remote(name):
+                args += ["--config", name]
 
         def on_line(line):
             if line.startswith("@@EV@@ "):

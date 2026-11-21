@@ -635,6 +635,7 @@ code\                   所有 Python
   chat.py               对话核心：ChatSession（加载 / 流式回复 / 改参数）
   chat_worker.py        对话子进程：常驻 ChatSession，stdin/stdout 走 JSON 行
   http_server.py        OpenAI 兼容桥接服务（多模型懒加载）
+  ollama_client.py      Ollama HTTP 适配（模型发现 / 请求转发 / SSE 解析）
   common.py             find_root / properties 保序读写 / 父进程看门狗 / 隐藏目录
   model.py              GPT-2 封装（transformers）
   model_signature.py    权重 SHA-256 签名（只依赖标准库）
@@ -738,6 +739,38 @@ jsonl 会自动找问答字段（`{"text": ...}` 这种单字段的当纯文本�
 服务本身是 OpenAI 兼容的：`/v1/models`、`/v1/chat/completions`（支持 `stream`），
 模型清单来自 `properties\` 里能对上标准模型目录的配置（不再扫描旧 `.pt` 文件），谁被调用才加载谁；
 对话参数也读同一份配置。
+
+### 接入 Ollama（可选）
+
+桥接服务和对话页也可以把请求转发给 Ollama。Ollama 是外部推理后端，不参与训练：
+
+```text
+本地模型       → 现有 HF 模型目录
+ollama/xxx     → http://127.0.0.1:11434/v1/chat/completions
+```
+
+默认读取环境变量：
+
+```text
+OLLAMA_URL=http://127.0.0.1:11434
+```
+
+也可以启动桥接服务时指定：
+
+```text
+python code\http_server.py --port 49128 --ollama-url http://127.0.0.1:11434
+```
+
+加 `--no-ollama` 可关闭代理，只服务本地模型。
+
+模型清单会把 Ollama 模型显示成：
+
+```text
+ollama/qwen3:8b
+```
+
+对话时选择带 `（Ollama）` 的模型即可；远程请求会把原始 `messages` 转发给 Ollama，
+不经过本地 256 字截断。不可用时本地模型仍可正常使用。
 
 ---
 
