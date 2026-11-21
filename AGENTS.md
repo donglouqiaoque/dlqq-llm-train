@@ -16,7 +16,8 @@
 
 1. **技术栈固定**：Python 3.11+ / PyTorch 2.x / transformers。后端允许 `torch`、`numpy`、
    `transformers` 三个第三方库，其余一律标准库；前端以原生 HTML/CSS/JS 为主，
-   **唯一允许的第三方前端库是本地 `web/vendor/xterm.js`（MIT）**，用于训练日志终端；
+   **前端允许的本地第三方库**：`web/vendor/` 中的 `xterm.js`（MIT）、`marked`（MIT）、
+   `DOMPurify`（Apache-2.0 / MPL-2.0）和 `KaTeX`（代码 MIT，字体 OFL-1.1）；
    **不引其他框架、不引 CDN**（断网也要能用）。
 2. **只使用算法和框架，禁止任何已有模型权重**：字符级模型，词表由 `code/train.py` 自己统计；
    网络使用 `transformers.GPT2LMHeadModel`，但必须从 `GPT2Config(...)` 随机初始化开始训练。
@@ -93,14 +94,14 @@ code/                   所有 Python
   model.py              GPT-2 封装（transformers）
   model_signature.py    权重 SHA-256 签名（compute / verify，纯标准库）
 web/                    前端（被 webui.py 托管，不需要单独服务器）
-  index.html            六个页签：训练 / 对话 / 服务 / 环境 / 配置 / 签名
+  index.html            七个页签：训练 / 对话 / 服务 / 环境 / 配置 / 签名 / 版权鸣谢
   chat.html             局域网只读对话页（LANHandler 托管）
-  vendor/               本地第三方前端资源：xterm.js / xterm.css / LICENSE.xterm
+  vendor/               本地第三方前端资源：xterm.js / marked / DOMPurify / KaTeX
 properties/             四个训练配置（要开源，注释写给外人看）
 model/                  本地权重（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\）
 res/                    语料目录（不进版本库）
 .cache/                 训练缓存/日志/配置备份（目录进版本库，内容忽略）
-THIRD-PARTY-NOTICES.txt  Python / 依赖 / xterm 的许可证清单（人工维护）
+THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
 
 - 工程根目录靠「向上找到含 `code\train.py` 的那一级」定位（`common.find_root`），脚本搬家不失效。
@@ -163,9 +164,9 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / xterm 的许可证清单（人工维�
 - 桥接服务每次完成对话会往 stdout 打一行 `@@EV@@ {json}`（`--events`），
   webui 读线程按前缀识别后转成 SSE `server-chat`，页面「服务」页据此显示问答。
 - SSE 用 `data: <json>\n\n`，一条连接一个线程；新增长连接接口要考虑线程上限。
-- **局域网端口**（`LANHandler`）只放行 `GET /`、`/chat.html`、`/logo.ico`、`/api/models`、
-  `/api/chat/configs` 与 `POST /api/chat`，其余路径一律 403；`POST /api/chat` 的 `config`
-  必须是配置清单里的名字。改局域网接口时同步 `web/chat.html`。
+- **局域网端口**（`LANHandler`）只放行 `GET /`、`/chat.html`、`/logo.ico`、
+  `/vendor/*`、`/api/models`、`/api/chat/configs` 与 `POST /api/chat`，其余路径一律 403；
+  `POST /api/chat` 的 `config` 必须是配置清单里的名字。改局域网接口时同步 `web/chat.html`。
 
 ## 五、配置文件（properties）约定
 

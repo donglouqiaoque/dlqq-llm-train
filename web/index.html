@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <title>鸫楼桥鹊AI大语言模型</title>
 <link rel="icon" type="image/x-icon" href="/logo.ico">
-<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/vendor/xterm/xterm.css">
+<link rel="stylesheet" href="/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/vendor/markdown.css">
 <style>
   :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e8ee;
           --muted:#8b93a3; --accent:#4f8cff; --ok:#39b26e; --warn:#e0a03a; --err:#e05656; }
@@ -122,6 +124,10 @@
             border:1px solid var(--line); border-radius:6px; padding:3px 8px; }
   #toast { position:fixed; right:18px; bottom:18px; background:#1d2430; border:1px solid var(--line);
            padding:10px 14px; border-radius:8px; display:none; max-width:420px; }
+  .licenses { width:100%; border-collapse:collapse; margin-top:8px; }
+  .licenses th, .licenses td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  .licenses th { color:var(--muted); font-weight:600; font-size:12px; }
+  .licenses a { color:#7db0ff; }
 </style>
 </head>
 <body>
@@ -137,6 +143,7 @@
   <button data-tab="env">环境</button>
   <button data-tab="config">配置</button>
   <button data-tab="tool">签名</button>
+  <button data-tab="credits">版权鸣谢</button>
 </nav>
 
 <main>
@@ -243,11 +250,42 @@
     <div class="siglist" id="sigList"></div>
     <div class="log" id="signOut" style="flex:0 0 200px; margin-top:10px"></div>
   </section>
+
+  <section id="credits">
+    <div class="row"><h2 style="margin:0;font-size:18px">版权鸣谢</h2></div>
+    <div class="muted" style="margin-bottom:8px">
+      本项目代码采用 MIT 许可证。下列第三方组件仅用于本地 WebUI，
+      均随工程放在 <code>web/vendor/</code>，不从 CDN 加载。
+    </div>
+    <table class="licenses">
+      <thead><tr><th>组件</th><th>版本</th><th>许可证</th><th>本地许可证</th></tr></thead>
+      <tbody>
+        <tr><td>xterm.js</td><td>5.3.0</td><td>MIT</td>
+            <td><a href="/vendor/xterm/LICENSE" target="_blank" rel="noopener">LICENSE</a></td></tr>
+        <tr><td>marked</td><td>18.2.1</td><td>MIT</td>
+            <td><a href="/vendor/marked/LICENSE" target="_blank" rel="noopener">LICENSE</a></td></tr>
+        <tr><td>DOMPurify</td><td>3.4.18</td><td>Apache-2.0</td>
+            <td><a href="/vendor/dompurify/LICENSE" target="_blank" rel="noopener">LICENSE</a></td></tr>
+        <tr><td>KaTeX</td><td>0.19.1</td><td>MIT</td>
+            <td><a href="/vendor/katex/LICENSE" target="_blank" rel="noopener">LICENSE</a></td></tr>
+        <tr><td>KaTeX fonts</td><td>0.19.1</td><td>SIL OFL 1.1</td>
+            <td><a href="/vendor/katex/fonts/OFL.txt" target="_blank" rel="noopener">OFL.txt</a></td></tr>
+      </tbody>
+    </table>
+    <div class="muted" style="margin-top:10px">
+      KaTeX 的 JavaScript/CSS 使用 MIT；其字体文件使用 SIL Open Font License 1.1，
+      字体原样分发，未修改。
+    </div>
+  </section>
 </main>
 
 <div id="toast"></div>
 
-<script src="/vendor/xterm.js"></script>
+<script src="/vendor/xterm/xterm.js"></script>
+<script src="/vendor/marked/marked.umd.js"></script>
+<script src="/vendor/dompurify/purify.min.js"></script>
+<script src="/vendor/katex/katex.min.js"></script>
+<script src="/vendor/markdown.js"></script>
 <script>
 const TOKEN = new URLSearchParams(location.search).get('t') || '';
 const $ = s => document.querySelector(s);
@@ -734,11 +772,12 @@ function renderMsg(role, text) {
   const av = el('div', 'avatar', role === 'user' ? '你' : 'AI');
   const bubble = el('div', 'bubble');
   const body = el('div', 'body', text || '');
+  body.dataset.raw = text || '';
   const meta = el('div', 'meta');
   meta.appendChild(el('span', '', new Date().toLocaleTimeString('zh-CN', { hour12: false })));
   if (role !== 'user') {
     const cp = el('a', '', '复制');
-    cp.onclick = () => navigator.clipboard.writeText(body.textContent).then(() => toast('已复制'));
+    cp.onclick = () => navigator.clipboard.writeText(body.dataset.raw || body.textContent).then(() => toast('已复制'));
     meta.appendChild(cp);
   }
   bubble.appendChild(body);
@@ -813,8 +852,14 @@ async function send() {
         else if (ev[1] === 'token') {
           acc += data.text; body.textContent = acc;
           $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
-        } else if (ev[1] === 'done') { acc = data.text; body.textContent = acc; }
-        else if (ev[1] === 'error') { body.textContent = '错误：' + data.error; }
+        } else if (ev[1] === 'done') {
+          acc = data.text || acc;
+          body.dataset.raw = acc;
+          if (typeof renderMarkdown === 'function') renderMarkdown(body, acc);
+          else body.textContent = acc;
+        } else if (ev[1] === 'error') {
+          body.textContent = '错误：' + data.error;
+        }
       }
     }
     if (acc) HISTORY.push({ role: 'assistant', content: acc });
@@ -851,7 +896,15 @@ function srvMsg(role, text, model, ms) {
   const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot'));
   wrap.appendChild(el('div', 'avatar', role === 'user' ? '你' : 'AI'));
   const bubble = el('div', 'bubble');
-  bubble.appendChild(el('div', 'body', text || ''));
+  const body = el('div', 'body');
+  if (role === 'user') {
+    body.textContent = text || '';
+  } else {
+    body.dataset.raw = text || '';
+    if (typeof renderMarkdown === 'function') renderMarkdown(body, text || '');
+    else body.textContent = text || '';
+  }
+  bubble.appendChild(body);
   const meta = el('div', 'meta');
   meta.appendChild(el('span', '', new Date().toLocaleTimeString('zh-CN', { hour12: false })));
   if (model) meta.appendChild(el('span', '', model + (ms ? ' · ' + ms + 'ms' : '')));

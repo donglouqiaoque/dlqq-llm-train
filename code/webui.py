@@ -517,7 +517,11 @@ class Handler(BaseHTTPRequestHandler):
         ext = os.path.splitext(fp)[1].lower()
         ctype = {".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8", ".png": "image/png", ".svg": "image/svg+xml",
-                 ".ico": "image/x-icon"}.get(ext, "application/octet-stream")
+                 ".ico": "image/x-icon", ".woff2": "font/woff2", ".woff": "font/woff",
+                 ".ttf": "font/ttf", ".otf": "font/otf",
+                 ".txt": "text/plain; charset=utf-8"}.get(ext, "application/octet-stream")
+        if ext == "" and os.path.basename(fp).lower().startswith("license"):
+            ctype = "text/plain; charset=utf-8"
         with open(fp, "rb") as f:
             data = f.read()
         self.send_response(200)
@@ -983,6 +987,9 @@ class LANHandler(Handler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path.startswith("/vendor/"):
+            self._static(path)
+            return
         if path not in self.GET_WHITELIST:
             self._err(403, "局域网只开放对话页")
             return

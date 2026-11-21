@@ -15,9 +15,9 @@
 ## 1. Hard rules
 
 1. **Fixed stack**: Python 3.11+ / PyTorch 2.x / transformers. The backend may use `torch`, `numpy`
-   and `transformers`; everything else is stdlib. The frontend is plain HTML/CSS/JS with one
-   exception: local `web/vendor/xterm.js` (MIT) for the training-log terminal. **No other frontend
-   framework and no CDN** (must work offline).
+   and `transformers`; everything else is stdlib. The frontend may use these local libraries under
+   `web/vendor/`: `xterm.js` (MIT), `marked` (MIT), `DOMPurify` (Apache-2.0 / MPL-2.0), and
+   `KaTeX` (MIT code, OFL-1.1 fonts). **No other frontend frameworks and no CDN** (must work offline).
 2. **Use only the algorithm/framework — never any existing model weights**: this is a character-level
    model; the vocabulary is built by `code/train.py` itself. The network uses
    `transformers.GPT2LMHeadModel`, but it must start from random initialisation via
@@ -109,14 +109,14 @@ code/                   all Python
   model.py              GPT-2 wrapper (transformers)
   model_signature.py    weight SHA-256 signatures (compute / verify, stdlib only)
 web/                    frontend, served by webui.py (no separate web server)
-  index.html            six tabs: train / chat / server / environment / config / signature
+  index.html            seven tabs: train / chat / server / environment / config / signature / credits
   chat.html             LAN read-only chat page (served by LANHandler)
-  vendor/               local third-party assets: xterm.js / xterm.css / LICENSE.xterm
+  vendor/               local third-party assets: xterm.js / marked / DOMPurify / KaTeX
 properties/             four training configs (open-sourced, comments written for outsiders)
 model/                  local weights (`model\<name>\` standard HF directory + `checkpoint-<step>\`)
 res/                    corpora (not in git)
 .cache/                 training cache/logs/config backups (directory tracked, contents ignored)
-THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / xterm (maintained manually)
+THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
 
 - The project root is found by walking up to the directory containing `code\train.py`
@@ -185,10 +185,10 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / xterm (ma
   turns it into an SSE `server-chat` event, which the "server" tab renders as a Q&A list.
 - SSE frames are `data: <json>\n\n`; one thread per connection, so new long-lived endpoints
   must consider the thread budget.
-- **LAN port** (`LANHandler`) only allows `GET /`, `/chat.html`, `/logo.ico`, `/api/models`,
-  `/api/chat/configs` and `POST /api/chat`; everything else returns 403. `POST /api/chat` only
-  accepts a `config` that appears in the config list. Changing LAN endpoints means updating
-  `web/chat.html` too.
+- **LAN port** (`LANHandler`) only allows `GET /`, `/chat.html`, `/logo.ico`, `/vendor/*`,
+  `/api/models`, `/api/chat/configs` and `POST /api/chat`; everything else returns 403.
+  `POST /api/chat` only accepts a `config` that appears in the config list. Changing LAN endpoints
+  means updating `web/chat.html` too.
 
 ## 5. Config (properties) conventions
 

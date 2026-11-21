@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <title>鸫楼桥鹊AI大语言模型 · 对话</title>
 <link rel="icon" type="image/x-icon" href="/logo.ico">
+<link rel="stylesheet" href="/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/vendor/markdown.css">
 <style>
   :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e8ee;
           --muted:#8b93a3; --accent:#4f8cff; --err:#e05656; }
@@ -69,6 +71,10 @@
   </div>
 </main>
 
+<script src="/vendor/marked/marked.umd.js"></script>
+<script src="/vendor/dompurify/purify.min.js"></script>
+<script src="/vendor/katex/katex.min.js"></script>
+<script src="/vendor/markdown.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 let abort = null;
@@ -187,7 +193,9 @@ async function send() {
           $('#box').scrollTop = $('#box').scrollHeight;
         } else if (ev[1] === 'done') {
           acc = data.text || acc;
-          bubble.textContent = acc;
+          bubble.dataset.raw = acc;
+          if (acc && typeof renderMarkdown === 'function') renderMarkdown(bubble, acc);
+          else bubble.textContent = acc;
           if (acc) HISTORY.push({ role: 'assistant', content: acc });
         } else if (ev[1] === 'error') {
           bubble.textContent = '错误：' + (data.error || '未知错误');

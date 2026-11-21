@@ -40,7 +40,7 @@
 ## 快速开始
 双击 `.runtime\start.bat`，浏览器会自动打开本地控制台（地址形如
 `http://127.0.0.1:49134/?t=...`）。端口被占用时不会自动换端口，会提示输入新端口，
-直接回车则退出。页面有六个标签：
+直接回车则退出。页面有七个标签：
 
 | 标签 | 用途 |
 |---|---|
@@ -50,6 +50,7 @@
 | 环境 | 检测项目 Python、安装 / 更新 torch / numpy / transformers |
 | 配置 | 在表单里改 `properties\*.properties`，保存时保留注释与键顺序 |
 | 签名 | 给 `model\<名字>\` 下的标准权重文件计算或校验 SHA-256 |
+| 版权鸣谢 | 列出前端第三方组件、版本、许可证和本地许可证文件 |
 
 > **关掉 `start.bat` 的 cmd 窗口 = 退出**：训练、桥接服务、签名任务都会一起结束。
 > 关掉浏览器标签**不算**退出，训练照跑，重新访问控制台地址即可。
@@ -193,7 +194,9 @@ make_python_env.bat <Python目录> autoyes nopause
 - 切换模型不用重启页面：旧模型会被释放（含显存）再加载新的；
 - 训练正在跑时，**只能选不同的模型**——与训练配置同名的模型会被拒绝，避免拖慢训练或读到半成品；
 - 对话上下文按模型的 `block_size` 截断，拼提示词的规则是 `用户：…` / `助手：…`；
-  词表里没有这两个标记的模型会自动切「续写模式」。
+  词表里没有这两个标记的模型会自动切「续写模式」；
+- 助手回复会按 Markdown 渲染，支持 `$...$` 和 `$$...$$` 数学公式（本地 KaTeX）；
+  用户消息仍按纯文本显示。
 
 ## 用自己的语料
 
@@ -640,16 +643,16 @@ code\                   所有 Python
   model.py              GPT-2 封装（transformers）
   model_signature.py    权重 SHA-256 签名（只依赖标准库）
 web\                    前端页面（由 webui.py 托管）
-  index.html            六个标签：训练 / 对话 / 服务 / 环境 / 配置 / 签名
+  index.html            七个标签：训练 / 对话 / 服务 / 环境 / 配置 / 签名 / 版权鸣谢
   chat.html             局域网只读对话页
-  vendor\               本地 xterm.js / xterm.css / LICENSE.xterm（MIT，训练日志终端）
+  vendor\               本地第三方前端资源：xterm.js / marked / DOMPurify / KaTeX
 properties\             四个训练配置
 res\                    语料目录（不进版本库）
 model\                  训练产物（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\ + .sha256）
                         每个目录含 config.json / model.safetensors / chars.json / meta.json
 .cache\                 训练缓存/日志/配置备份（目录纳入版本控制，内容忽略）
 .ai_res\                AI 临时目录（不进版本库，不参与训练）
-THIRD-PARTY-NOTICES.txt  Python / 依赖 / xterm 的许可证清单（人工维护）
+THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
 
 - 工程根目录靠「向上找到含 `code\train.py` 的那一级」定位，整个目录搬到哪都能跑；

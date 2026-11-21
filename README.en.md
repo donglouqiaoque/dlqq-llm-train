@@ -42,7 +42,7 @@ The default tier has ~0.8 M parameters; an 8 GB laptop GPU trains it in minutes.
 ## Quick start
 Double-click `.runtime\start.bat`; the browser opens the local console at an address like
 `http://127.0.0.1:49134/?t=...`. If the port is busy it does not switch silently: it asks for a
-new port, and an empty Enter exits. Six tabs:
+new port, and an empty Enter exits. Seven tabs:
 
 | Tab | What it does |
 |---|---|
@@ -52,6 +52,7 @@ new port, and an empty Enter exits. Six tabs:
 | Environment | inspect the project Python and install / update torch / numpy / transformers |
 | Config | edit `properties\*.properties` in a form; comments and key order are preserved |
 | Signature | compute or verify SHA-256 for the standard weight file in every `model\<name>\` |
+| Credits | list frontend third-party components, versions, licenses and local license files |
 
 > **Closing the cmd window of `start.bat` means exit**: training, the bridge and any signature job
 > stop with it. Closing the browser tab is not an exit — training keeps running; reopen the URL.
@@ -236,7 +237,9 @@ Use the **Chat** tab:
 - Switching models does not need a page reload: the old model is released first (VRAM included);
 - while training is running you may only pick a **different** model; the model named by the running
   config is rejected, so training is not slowed down and you never read a half-written file;
-- the conversation is truncated to the model's `block_size`.
+- the conversation is truncated to the model's `block_size`;
+- assistant replies are rendered as Markdown, including `$...$` and `$$...$$` math via local KaTeX;
+  user messages stay plain text.
 
 ### Two modes
 
@@ -715,16 +718,16 @@ code\                   all Python
   model.py              GPT-2 wrapper (transformers)
   model_signature.py    weight SHA-256 signatures (stdlib only)
 web\                    frontend served by webui.py
-  index.html            six tabs: train / chat / server / environment / config / signature
+  index.html            seven tabs: train / chat / server / environment / config / signature / credits
   chat.html             LAN read-only chat page
-  vendor\               local xterm.js / xterm.css / LICENSE.xterm (MIT, training terminal)
+  vendor\               local third-party assets: xterm.js / marked / DOMPurify / KaTeX
 properties\             four training configs
 res\                    corpora (not in git)
 model\                  training output (model\<name>\ standard HF directory + checkpoint-<step>\ + .sha256)
                         config.json / model.safetensors / chars.json / meta.json
 .cache\                 training cache/logs/config backups (directory tracked, contents ignored)
 .ai_res\                AI scratch area (not in git, never used for training)
-THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / xterm (maintained manually)
+THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
 
 - The project root is found by walking up to the directory containing `code\train.py`.
