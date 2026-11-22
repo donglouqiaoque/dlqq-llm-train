@@ -16,6 +16,7 @@ r"""本地 WebUI 服务
 """
 import argparse
 import codecs
+import concurrent.futures
 import ctypes
 import json
 import os
@@ -28,6 +29,8 @@ import sys
 import threading
 import time
 import traceback
+import urllib.error
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
@@ -599,6 +602,15 @@ class Handler(BaseHTTPRequestHandler):
                 "webui_python": sys.executable,
                 "system": {"gpu": gpu, "torch_recommend": recommend},
             })
+        elif path == "/api/env/latest":
+            py, _ = common.resolve_python(ROOT)
+            known = verified_info(py) if py else None
+            info = known["info"] if known else None
+            if py and not info:
+                info = probe_python(py, use_cache=True)
+            gpu = detect_nvidia()
+            latest = latest_versions(info, gpu)
+            self._json(latest)
         elif path == "/api/events":
             self._events()
         else:
@@ -665,24 +677,66 @@ class Handler(BaseHTTPRequestHandler):
         if not py:
             return self._err(400, source)
         index = (body.get("torch_index") or "auto").strip()
+        torch_type = (body.get("torch_type") or "").strip().lower()
         spec = (body.get("torch_version") or "").strip()
         torch_version = spec
+        suffix = ""
         if spec:
-            m = re.fullmatch(r"([0-9][0-9A-Za-z.!_-]*)(?:\+(cpu|cu126|cu128))?", spec)
+            m = re.fullmatch(r"([0-9][0-9A-Za-z.!_-]*)(?:\+(cpu|cu\d+|xpu))?", spec)
             if not m:
-                return self._err(400, "torch_version 不合法，示例：2.14.1+cu126")
+                return self._err(400, "torch_version 不合法，示例：2.14.1 或 2.14.1+cu126")
             torch_version = m.group(1)
-            if m.group(2):
-                index = m.group(2)
-        if (index not in ("auto", "cpu", "cu126", "cu128")
+            suffix = m.group(2) or ""
+        if suffix:
+            index = suffix
+        elif torch_type in ("cpu", "xpu"):
+            index = torch_type
+        elif torch_type == "gpu" and index not in ("cu126", "cu128"):
+            index = recommend_torch(detect_nvidia())["index"]
+        if (index not in ("auto", "cpu", "cu126", "cu128", "cu130", "xpu")
                 and not index.startswith(("https://", "http://"))):
             return self._err(400, "torch_index 不合法")
         if index == "auto":
             index = recommend_torch(detect_nvidia())["index"]
+        numpy_version = (body.get("numpy_version") or "").strip()
+        transformers_version = (body.get("transformers_version") or "").strip()
+        for label, value in (("numpy_version", numpy_version),
+                             ("transformers_version", transformers_version)):
+            if value and not re.fullmatch(r"[0-9][0-9A-Za-z.!_-]*", value):
+                return self._err(400, f"{label} 不合法，示例：2.5.4")
+
+        known = verified_info(py)
+        info = known["info"] if known else probe_python(py, use_cache=True)
+        installed_torch = (info.get("torch_version") or "").strip()
+        installed_base = installed_torch.split("+", 1)[0]
+        m = re.search(r"\+(cpu|cu\d+|xpu)", installed_torch)
+        installed_channel = m.group(1) if m else ""
+        torch_match = (index == installed_channel) if installed_channel else (index == "cpu")
+        skip_torch = bool(info.get("torch")) and (
+            (not torch_version or torch_version == installed_base) and torch_match)
+        skip_numpy = bool(info.get("numpy")) and (
+            not numpy_version or numpy_version == (info.get("numpy_version") or ""))
+        skip_transformers = bool(info.get("transformers")) and (
+            not transformers_version or
+            transformers_version == (info.get("transformers_version") or ""))
+        if skip_torch and skip_numpy and skip_transformers:
+            return self._json({"ok": True, "skipped": True,
+                               "message": "已安装，无需重复安装"})
+
         args = [py, os.path.join(ROOT, "code", "env_install.py"),
                 "--torch-index", index]
-        if torch_version:
+        if skip_torch:
+            args.append("--skip-torch")
+        if skip_numpy:
+            args.append("--skip-numpy")
+        if skip_transformers:
+            args.append("--skip-transformers")
+        if torch_version and not skip_torch:
             args += ["--torch-version", torch_version]
+        if numpy_version and not skip_numpy:
+            args += ["--numpy-version", numpy_version]
+        if transformers_version and not skip_transformers:
+            args += ["--transformers-version", transformers_version]
         if body.get("no_cache"):
             args.append("--no-cache-dir")
         name = f"env-install-{time.strftime('%Y%m%d-%H%M%S')}.log"
@@ -855,6 +909,10 @@ class Handler(BaseHTTPRequestHandler):
                     "max_completion_tokens", "tools"):
             if key in body and body[key] is not None:
                 payload[key] = body[key]
+        if "thinking" in body:
+            thinking = bool(body["thinking"])
+            payload["think"] = thinking
+            payload["reasoning_effort"] = "medium" if thinking else "none"
 
         try:
             conn, resp = ollama.open_chat(payload)
@@ -871,15 +929,22 @@ class Handler(BaseHTTPRequestHandler):
 
         self._sse_start()
         parts = []
+        reasoning_parts = []
         try:
             self._sse("meta", {"model": cfg, "config": cfg,
-                               "info": {"backend": "ollama"}})
+                               "info": {"backend": "ollama",
+                                        "thinking": bool(body.get("thinking"))}})
             for obj in ollama.iter_sse(resp):
+                reason = ollama.delta_reasoning(obj)
+                if reason:
+                    reasoning_parts.append(reason)
+                    self._sse("reasoning", {"text": reason})
                 piece = ollama.delta_text(obj)
                 if piece:
                     parts.append(piece)
                     self._sse("token", {"text": piece})
-            self._sse("done", {"text": "".join(parts)})
+            self._sse("done", {"text": "".join(parts),
+                               "reasoning": "".join(reasoning_parts)})
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         except Exception as e:
@@ -917,7 +982,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(400, source)
         known = verified_info(py)
         if not known:
-            return self._err(400, "项目 Python 还没检测过；请先在「环境」页点“检测环境”")
+            info = probe_python(py, use_cache=False)
+            if not info.get("ok"):
+                return self._err(400, info.get("error") or "项目 Python 检测失败")
+            remember_verified(py, info)
+            known = {"info": info}
         if not known["info"].get("torch") or not known["info"].get("transformers"):
             return self._err(400, "项目 Python 缺少 torch / transformers；请先在「环境」页安装训练依赖")
         args = [py, os.path.join(ROOT, "code", "http_server.py"),
@@ -1134,6 +1203,133 @@ def recommend_torch(gpu, info=None):
                       "建议更新驱动，或手动填写 CUDA 版本")
 
 
+def latest_versions(info=None, gpu=None):
+    """查询 PyPI / PyTorch 源，返回实际可选的 PyTorch 变体和最新版本。
+
+    变体不是写死的 UI 分类：只有在该 PyTorch 源里确实查到 wheel 的变体才会返回。
+    """
+    info = info or {}
+    gpu = gpu or {}
+    cache = LATEST_CACHE.get("all")
+    now = time.time()
+    if cache and now - cache[0] < 1800:
+        return cache[1]
+
+    def get_json(url):
+        req = urllib.request.Request(url, headers={"User-Agent": "dlqq-llm-webui/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+    def get_text(url):
+        req = urllib.request.Request(url, headers={"User-Agent": "dlqq-llm-webui/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+
+    def pypi(name):
+        data = get_json(f"https://pypi.org/pypi/{name}/json")
+        return str((data.get("info") or {}).get("version") or "")
+
+    def channel_label(channel):
+        if channel == "cpu":
+            return "CPU"
+        if channel == "xpu":
+            return "XPU"
+        if re.fullmatch(r"cu\d+", channel):
+            digits = channel[2:]
+            return f"GPU / CUDA {digits[:-1]}.{digits[-1]}"
+        return channel
+
+    def channel_cuda(channel):
+        if re.fullmatch(r"cu\d+", channel):
+            digits = channel[2:]
+            return f"{digits[:-1]}.{digits[-1]}"
+        return ""
+
+    def torch_channel(channel):
+        html = unquote(get_text(f"https://download.pytorch.org/whl/{channel}/torch/"))
+        versions = {}
+        for mm in re.finditer(r"torch-([0-9][0-9A-Za-z.]*)(?:\+([0-9A-Za-z]+))?-", html):
+            base, tag = mm.group(1), mm.group(2) or channel
+            versions[f"{base}+{tag}"] = (base, tuple(int(x) for x in re.findall(r"\d+", base)))
+        if not versions:
+            return "", ""
+        full = max(versions, key=lambda v: versions[v][1])
+        return versions[full][0], full
+
+    result = {"ok": False, "torch": "", "torch_base": "", "torch_variant": "",
+              "torch_cuda": "", "torch_variants": [], "numpy": "", "transformers": "",
+              "source": "network", "error": ""}
+    errors = []
+
+    # 已知 PyTorch wheel 源；只有真正返回 wheel 的源才会进入下拉框。
+    channels = ["cpu", "cu126", "cu128", "cu130", "xpu"]
+    torch_results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {
+            "numpy": pool.submit(pypi, "numpy"),
+            "transformers": pool.submit(pypi, "transformers"),
+        }
+        for ch in channels:
+            futures["torch:" + ch] = pool.submit(torch_channel, ch)
+        for key, fut in futures.items():
+            try:
+                value = fut.result()
+            except (OSError, ValueError, urllib.error.URLError) as e:
+                errors.append(f"{key}: {type(e).__name__}")
+                continue
+            if key == "numpy":
+                result["numpy"] = value
+            elif key == "transformers":
+                result["transformers"] = value
+            else:
+                channel = key.split(":", 1)[1]
+                base, full = value
+                if full:
+                    torch_results[channel] = {"id": channel,
+                                              "label": channel_label(channel),
+                                              "cuda": channel_cuda(channel),
+                                              "torch": base, "full": full}
+
+    for ch in channels:
+        if ch in torch_results:
+            result["torch_variants"].append({k: v for k, v in torch_results[ch].items()
+                                             if k != "full"})
+
+    installed = (info.get("torch_version") or "").strip()
+    m = re.search(r"\+(cpu|cu\d+|xpu)", installed)
+    rec = recommend_torch(gpu, info)
+    selected = m.group(1) if m else rec.get("index") or "cpu"
+    if selected not in torch_results and torch_results:
+        selected = next(iter(torch_results))
+    if selected in torch_results:
+        result["torch"] = torch_results[selected]["full"]
+        result["torch_base"] = torch_results[selected]["torch"]
+        result["torch_variant"] = selected
+        result["torch_cuda"] = torch_results[selected]["cuda"]
+    else:
+        full = rec.get("install") or ""
+        base = full.split("+", 1)[0] if full else ""
+        result["torch"] = full
+        result["torch_base"] = base
+        result["torch_variant"] = selected
+        result["torch_cuda"] = channel_cuda(selected)
+        result["torch_variants"] = [{"id": selected,
+                                     "label": channel_label(selected),
+                                     "cuda": channel_cuda(selected),
+                                     "torch": base}]
+        result["source"] = "fallback"
+    if not result["numpy"]:
+        result["numpy"] = info.get("numpy_version") or ""
+    if not result["transformers"]:
+        result["transformers"] = info.get("transformers_version") or ""
+    result["error"] = "；".join(errors)
+    result["ok"] = bool(result["torch"] or result["numpy"] or result["transformers"])
+    if result["ok"]:
+        LATEST_CACHE["all"] = (now, result)
+    return result
+
+
+LATEST_CACHE = {}
 PROBE_CACHE = {}
 
 
@@ -1198,6 +1394,24 @@ def probe_python(py, use_cache=True):
     else:
         info["torch_version"] = ""
         info["cuda"], info["gpu"] = False, ""
+    info["numpy_version"] = ""
+    info["transformers_version"] = ""
+    try:
+        r3 = subprocess.run(
+            [py, "-s", "-P", "-c",
+             "import importlib.metadata as m\n"
+             "for n in ('numpy','transformers'):\n"
+             "    try: print(n + '=' + m.version(n))\n"
+             "    except Exception: print(n + '=')"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, env=env)
+        for line in (r3.stdout or "").splitlines():
+            if line.startswith("numpy="):
+                info["numpy_version"] = line.split("=", 1)[1].strip()
+            elif line.startswith("transformers="):
+                info["transformers_version"] = line.split("=", 1)[1].strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
     if use_cache:
         PROBE_CACHE[key] = (now, info)
     return info

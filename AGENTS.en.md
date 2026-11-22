@@ -144,9 +144,13 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
   and never falls back to PATH. If missing, it tells the user to run `make_python_env.bat`.
 - **Dependency install**: the bundled Python ships only the standard library + `ensurepip`; the
   Environment tab runs `code\env_install.py` to install training / chat dependencies into the same
-  project Python. Users are not told to install a separate system Python. `torch_version` may be
-  `2.14.1+cu126` / `2.14.1+cpu`; auto detection fills the recommended value into the text box and
-  the user may override the version/source suffix.
+  project Python. Users are not told to install a separate system Python. `torch_type` may be
+  The form has three rows: PyTorch / Numpy / transformers. The PyTorch chip-type dropdown lists the
+  actually supported hardware backends (CPU / GPU NVIDIA / AMD / Apple / XPU); the driver-version
+  input takes a numeric version (CUDA 12.6 / ROCm 6.2), and the Torch library version is separate.
+  `cu126` and similar tags are internal mappings only. Auto-detect handles the chip type/driver
+  version and reads installed versions into the form; installation skips already-installed
+  libraries with the same version.
 - **Lifecycle**: closing the cmd window of `start.bat` means exit — children are `terminate()`d,
   and `taskkill /F /T` is the fallback after 5 seconds. **Closing the browser tab is not an exit**;
   training keeps running and you can simply reopen the URL.
@@ -167,6 +171,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/env` | inspect/check the project Python (`check=1` probes; returns torch/numpy/transformers/pip/CUDA plus `system.torch_recommend` GPU/driver recommendation) |
+| GET | `/api/env/latest` | query PyPI / PyTorch for the latest torch, numpy and transformers versions plus the actually available PyTorch build list; falls back to installed/recommended versions when the network is down |
 | GET | `/api/configs` | config list with parsed key/values |
 | GET | `/api/models` | standard model directories under `model\` (with signed flag) |
 | GET | `/api/chat/configs` | chat dropdown: local configs + Ollama models (with backend tag) |
@@ -175,9 +180,9 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | GET | `/api/server/status` | bridge state and port |
 | GET | `/api/events` | SSE: `train-raw` / `server-log` / `server-chat` / `env-log`; `train-raw` keeps `\r` for xterm |
 | POST | `/api/config/save` | line-level value update (keeps comments/order), backs up first |
-| POST | `/api/env/install` | install torch / numpy / transformers into the project Python; `torch_version` may be `2.14.1+cu126` / `2.14.1+cpu`; `torch_index=cpu|cu126|cu128|auto` remains supported; output via `env-log` |
+| POST | `/api/env/install` | install torch / numpy / transformers into the project Python; `torch_type=cpu|gpu|xpu|auto`; `torch_version` / `numpy_version` / `transformers_version` may be empty; legacy `torch_index=cpu|cu126|cu128|xpu|auto` remains supported; output via `env-log` |
 | POST | `/api/train/start` `train/stop` | start / stop the training child |
-| POST | `/api/chat` | chat, returns SSE: `meta` / `token` / `done` / `error` |
+| POST | `/api/chat` | chat, returns SSE: `meta` / `reasoning` / `token` / `done` / `error` |
 | POST | `/api/server/start` `server/stop` | start / stop the bridge child |
 | POST | `/api/sign` | `mode=compute|verify`, runs the signature tool |
 
@@ -245,7 +250,9 @@ twice in `chat.py` and `http_server.py` — keep them in sync).
 **Ollama proxy**: `ollama_client.py` discovers models from `OLLAMA_URL` (default
 `http://127.0.0.1:11434`) and prefixes their ids with `ollama/`. The bridge and the WebUI chat page
 only forward requests to `/v1/chat/completions`; GGUF is never loaded and training is unaffected.
-Local models keep working when Ollama is unavailable.
+Reasoning is extracted from `message.thinking` / `delta.reasoning_content` and used for display only,
+never added to history. Local HTTP `stream=true` now generates and sends character by character; the
+Ollama proxy passes the upstream SSE stream through.
 
 **Stopping**: prompts use `用户：` / `助手：`; generation stops at the next `用户：`. If the vocabulary
 lacks those markers, the session falls back to plain continuation mode.

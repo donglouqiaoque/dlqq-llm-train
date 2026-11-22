@@ -21,6 +21,8 @@ TORCH_INDEX = {
     "cpu": "https://download.pytorch.org/whl/cpu",
     "cu126": "https://download.pytorch.org/whl/cu126",
     "cu128": "https://download.pytorch.org/whl/cu128",
+    "cu130": "https://download.pytorch.org/whl/cu130",
+    "xpu": "https://download.pytorch.org/whl/xpu",
 }
 
 
@@ -50,18 +52,36 @@ def ensure_pip():
 def main():
     ap = argparse.ArgumentParser(description="安装训练和对话依赖")
     ap.add_argument("--torch-index", default="auto",
-                    help="auto / cpu / cu126 / cu128，或自定义 PyTorch wheel 索引 URL")
+                    help="auto / cpu / cu126 / cu128 / cu130 / xpu，或自定义 PyTorch wheel 索引 URL")
     ap.add_argument("--torch-version", default="",
                     help="torch 版本，例如 2.14.1；留空 = 当前源最新版")
+    ap.add_argument("--numpy-version", default="",
+                    help="numpy 版本，例如 2.5.4；留空 = 最新版")
+    ap.add_argument("--transformers-version", default="",
+                    help="transformers 版本，例如 5.22.2；留空 = 最新版")
+    ap.add_argument("--skip-torch", action="store_true",
+                    help="跳过已安装的 torch")
+    ap.add_argument("--skip-numpy", action="store_true",
+                    help="跳过已安装的 numpy")
+    ap.add_argument("--skip-transformers", action="store_true",
+                    help="跳过已安装的 transformers")
     ap.add_argument("--no-cache-dir", action="store_true",
                     help="不保留 pip 下载缓存")
     a = ap.parse_args()
 
     torch_version = (a.torch_version or "").strip()
-    if torch_version and not re.fullmatch(r"[0-9][0-9A-Za-z.+!_-]*", torch_version):
-        print(f"[错误] torch 版本不合法：{torch_version}", flush=True)
-        return 1
+    numpy_version = (a.numpy_version or "").strip()
+    transformers_version = (a.transformers_version or "").strip()
+    for name, version in (("torch", torch_version),
+                          ("numpy", numpy_version),
+                          ("transformers", transformers_version)):
+        if version and not re.fullmatch(r"[0-9][0-9A-Za-z.+!_-]*", version):
+            print(f"[错误] {name} 版本不合法：{version}", flush=True)
+            return 1
     torch_spec = f"torch=={torch_version}" if torch_version else "torch"
+    numpy_spec = f"numpy=={numpy_version}" if numpy_version else "numpy"
+    transformers_spec = (f"transformers=={transformers_version}"
+                         if transformers_version else "transformers")
 
     rc = ensure_pip()
     if rc != 0:
@@ -76,11 +96,30 @@ def main():
 
     if index and index != "auto":
         # PyTorch 必须先按指定源装，numpy / transformers 再走默认源
-        rc = run(pip + cache + [torch_spec, "--index-url", index])
-        if rc == 0:
-            rc = run(pip + cache + ["numpy", "transformers"])
+        if not a.skip_torch:
+            rc = run(pip + cache + [torch_spec, "--index-url", index])
+            if rc != 0:
+                return rc
+        deps = []
+        if not a.skip_numpy:
+            deps.append(numpy_spec)
+        if not a.skip_transformers:
+            deps.append(transformers_spec)
+        if deps:
+            rc = run(pip + cache + deps)
     else:
-        rc = run(pip + cache + [torch_spec, "numpy", "transformers"])
+        packages = []
+        if not a.skip_torch:
+            packages.append(torch_spec)
+        if not a.skip_numpy:
+            packages.append(numpy_spec)
+        if not a.skip_transformers:
+            packages.append(transformers_spec)
+        if packages:
+            rc = run(pip + cache + packages)
+        else:
+            print("[环境] 全部依赖已安装，无需安装", flush=True)
+            rc = 0
 
     return rc
 

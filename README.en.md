@@ -86,19 +86,19 @@ Every Python entry point — WebUI, training, chat, bridge and signature — use
 
 1. Double-click `.runtime\start.bat`;
 2. Open the **Environment** tab;
-3. Press **Auto detect**: it shows the NVIDIA GPU/driver and fills the PyTorch version box with
-   a recommendation such as `2.14.1+cu126`;
-4. Edit the box to override it:
-   - `2.14.1+cu126` for CUDA 12.6;
-   - `2.14.1+cu128` for CUDA 12.8;
-   - `2.14.1+cpu` for CPU;
-   - empty means no exact version, so pip chooses the newest compatible build from that source;
+3. Press **Auto detect**: it detects the chip type/driver version and fills the
+   currently installed Torch / Numpy / transformers versions into the form;
+4. Fill the install form row by row:
+   - **PyTorch**: choose the chip type; enter the numeric driver version
+     (e.g. CUDA `12.6`); the Torch library version may be empty (= latest) or pinned;
+   - **Numpy**: empty means latest, or enter `2.5.4`;
+   - **transformers**: empty means latest, or enter `5.22.2`;
 5. Press **Install / update training dependencies** and wait for pip to finish;
-6. Press **Auto detect** again and confirm torch / numpy / transformers / CUDA.
+   already-installed libraries with the same version are skipped;
+6. Press **Auto detect** again to confirm the chip type/driver version and installed versions.
 
-The auto check is a heuristic based on `nvidia-smi` and the driver: no NVIDIA GPU recommends CPU;
-an old driver recommends CPU and suggests updating it; the text box always wins. `2.14.1` is only
-the default recommendation, not the only version that can be installed.
+Auto detect handles the chip type/driver version and reads installed versions; empty version
+fields mean latest, or pin them manually. `2.14.1` is only an example.
 
 Dependencies are installed into `.runtime\python\Lib\site-packages`, the same project Python that
 runs the WebUI. The WebUI itself imports only the standard library and never imports torch, so the
@@ -108,9 +108,6 @@ UI stays usable during installation.
 `.runtime\python\licenses\`. torch, numpy and transformers are installed by the user into the project
 Python and are not part of the distributed package, so their licenses are not collected. Files
 outside the Python environment are maintained manually; make does not create or overwrite them.
-
-The CUDA source also installs NVIDIA CUDA runtime components; those are proprietary and require
-compliance with the NVIDIA licence.
 
 ### Rebuilding the project Python
 
@@ -239,7 +236,8 @@ Use the **Chat** tab:
   config is rejected, so training is not slowed down and you never read a half-written file;
 - the conversation is truncated to the model's `block_size`;
 - assistant replies are rendered as Markdown, including `$...$` and `$$...$$` math via local KaTeX;
-  user messages stay plain text.
+  user messages stay plain text;
+- Ollama models show a collapsible thinking block and a “deep thinking” switch; local models do not.
 
 ### Two modes
 
@@ -823,9 +821,10 @@ into the DSH provider settings. Every request then appears in the session list b
 Press Stop to shut it down — closing the `start.bat` window also stops it.
 
 The service is OpenAI-compatible: `/v1/models` and `/v1/chat/completions` (with `stream`).
-Models come from the `properties\` configs whose `model=` points at an existing standard model
-directory (no more directory scanning), and chat parameters are read from the same config. Models
-load only on first use.
+Local models now generate and send token by token when `stream=true`; the Ollama proxy passes the
+upstream SSE stream through. Models come from the `properties\` configs whose `model=` points at an
+existing standard model directory (no more directory scanning), and chat parameters are read from
+the same config. Models load only on first use.
 
 ### Optional Ollama backend
 

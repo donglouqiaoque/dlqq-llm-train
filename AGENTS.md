@@ -128,8 +128,11 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
   也不回退 PATH，缺失时直接提示运行 `make_python_env.bat`。
 - **依赖安装**：随包 Python 只带标准库 + `ensurepip`；训练 / 对话依赖由「环境」页调用
   `code\env_install.py` 安装到同一个项目 Python，不引导用户另装系统 Python。
-  `torch_version` 可写 `2.14.1+cu126` / `2.14.1+cpu`，自动检测会把推荐值填入文本框；
-  用户可手动修改版本和源后缀。
+  安装表单按 PyTorch / Numpy / transformers 三行填写；PyTorch 的芯片类型下拉框来自实际可用的
+  硬件后端（CPU / GPU NVIDIA / AMD / Apple / XPU 等），驱动版本输入框填数字版本
+  （CUDA 12.6 / ROCm 6.2），Torch 库版本单独填写。`cu126` 等只做内部映射。
+  自动检测只负责芯片类型/驱动版本；同时读取当前已安装版本填入版本框，
+  安装时跳过已安装且版本相同的库。版本输入框留空即安装最新版。
 - **生命周期**：关掉 `start.bat` 的 cmd 窗口 = 退出（先 `terminate()` 子进程，5 秒不退再
   `taskkill /F /T`）；**关浏览器标签不算退出**，训练照常跑，重新访问控制台地址即可。
 - **看门狗**：子进程按 `--parent-pid` 每 3 秒用 `ctypes` `WaitForSingleObject` 检查父进程句柄，
@@ -147,6 +150,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/env` | 查询/检测项目 Python（`check=1` 才 probe；返回 torch/numpy/transformers/pip/CUDA，以及 `system.torch_recommend` 显卡/驱动推荐） |
+| GET | `/api/env/latest` | 查询 PyPI / PyTorch 源的最新 torch、numpy、transformers 版本，并返回实际可用的 PyTorch 构建列表；网络失败时回退到已安装/推荐版本 |
 | GET | `/api/configs` | 配置列表 + 解析后的键值 |
 | GET | `/api/models` | `model\` 下的标准模型目录清单（含是否已签名） |
 | GET | `/api/chat/configs` | 对话下拉用：本地配置 + Ollama 模型（带 backend 标记） |
@@ -155,9 +159,9 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | GET | `/api/server/status` | 桥接服务状态与端口 |
 | GET | `/api/events` | SSE：`train-raw` / `server-log` / `server-chat` / `env-log`；`train-raw` 保留 `\r`，由 xterm 渲染 |
 | POST | `/api/config/save` | 逐行改 value 保存（保注释与键顺序），先备份 |
-| POST | `/api/env/install` | 用项目 Python 安装 torch / numpy / transformers；`torch_version` 可写 `2.14.1+cu126` / `2.14.1+cpu`；`torch_index=cpu|cu126|cu128|auto` 兼容旧调用；输出走 `env-log` |
+| POST | `/api/env/install` | 用项目 Python 安装 torch / numpy / transformers；`torch_type=cpu|gpu|xpu|auto`，`torch_version` / `numpy_version` / `transformers_version` 可留空；兼容旧 `torch_index=cpu|cu126|cu128|xpu|auto`；输出走 `env-log` |
 | POST | `/api/train/start` `train/stop` | 启动 / 停止训练子进程 |
-| POST | `/api/chat` | 对话，返回 SSE：`meta` / `token` / `done` / `error` |
+| POST | `/api/chat` | 对话，返回 SSE：`meta` / `reasoning` / `token` / `done` / `error` |
 | POST | `/api/server/start` `server/stop` | 启停桥接服务 |
 | POST | `/api/sign` | `mode=compute|verify`，跑签名工具 |
 
@@ -218,6 +222,8 @@ root 目录始终只有 `config.json` / `model.safetensors` / `chars.json` / `me
 **Ollama 代理**：`ollama_client.py` 从 `OLLAMA_URL`（默认 `http://127.0.0.1:11434`）
 发现模型；模型 id 加 `ollama/` 前缀。桥接服务和 WebUI 对话页只把 Ollama 请求转发到
 `/v1/chat/completions`，不加载 GGUF，也不参与训练；Ollama 不可用时本地模型不受影响。
+思考内容从 `message.thinking` / `delta.reasoning_content` 等字段提取，只用于显示，不进入历史。
+本地 HTTP 的 `stream=true` 现在逐字符生成并发送；Ollama 代理直接透传上游 SSE。
 
 **生成停止**：提示词用 `用户：` / `助手：`；生成到下一个 `用户：` 直接截断；词表缺这两个标记时
 自动切「续写模式」。

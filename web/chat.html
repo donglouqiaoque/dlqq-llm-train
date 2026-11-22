@@ -29,6 +29,11 @@
   .bubble { max-width:min(780px, 82%); padding:9px 13px; border-radius:12px;
             background:#141821; border:1px solid var(--line); white-space:pre-wrap;
             word-break:break-word; line-height:1.7; }
+  .thinking { margin:0 0 8px; border:1px solid #2b3444; border-radius:8px;
+              background:#0e1219; white-space:normal; }
+  .thinking summary { cursor:pointer; color:var(--muted); font-size:12px; padding:6px 9px; }
+  .thinking pre { margin:0; padding:0 10px 9px; white-space:pre-wrap; word-break:break-word;
+                  max-height:220px; overflow:auto; color:#aab4c4; font:12px/1.55 Consolas, monospace; }
   .msg.user .bubble { background:#1b2740; border-color:#2b3d5e; }
   .bubble.typing::after { content:"▍"; margin-left:2px; color:var(--accent);
                           animation:blink 1s steps(1) infinite; }
@@ -144,6 +149,16 @@ async function send() {
   HISTORY.push({ role: 'user', content: text });
   addMsg('user', text);
   const bubble = addMsg('assistant', '');
+  bubble.textContent = '';
+  const think = document.createElement('details');
+  think.className = 'thinking';
+  think.style.display = 'none';
+  think.appendChild(Object.assign(document.createElement('summary'), { textContent: '思考过程' }));
+  const thinkPre = document.createElement('pre');
+  think.appendChild(thinkPre);
+  bubble.appendChild(think);
+  const answer = document.createElement('div');
+  bubble.appendChild(answer);
   bubble.classList.add('typing');
   $('#btnSend').disabled = true;
   $('#btnStop').disabled = false;
@@ -164,7 +179,7 @@ async function send() {
     if (!resp.ok) {
       let msg = await resp.text();
       try { msg = JSON.parse(msg).error || msg; } catch (e) {}
-      bubble.textContent = '请求失败：' + msg;
+      answer.textContent = '请求失败：' + msg;
       return;
     }
     const reader = resp.body.getReader();
@@ -187,24 +202,33 @@ async function send() {
           if (info) {
             setState(`${info.name || ''} · ${info.device || ''} · ${info.params_m || '?'} M`);
           }
+        } else if (ev[1] === 'reasoning') {
+          think.style.display = '';
+          think.open = true;
+          thinkPre.textContent += data.text || '';
+          $('#box').scrollTop = $('#box').scrollHeight;
         } else if (ev[1] === 'token') {
           acc += data.text || '';
-          bubble.textContent = acc;
+          answer.textContent = acc;
           $('#box').scrollTop = $('#box').scrollHeight;
         } else if (ev[1] === 'done') {
           acc = data.text || acc;
-          bubble.dataset.raw = acc;
-          if (acc && typeof renderMarkdown === 'function') renderMarkdown(bubble, acc);
-          else bubble.textContent = acc;
+          answer.dataset.raw = acc;
+          if (data.reasoning && !thinkPre.textContent) {
+            think.style.display = '';
+            thinkPre.textContent = data.reasoning;
+          }
+          if (acc && typeof renderMarkdown === 'function') renderMarkdown(answer, acc);
+          else answer.textContent = acc;
           if (acc) HISTORY.push({ role: 'assistant', content: acc });
         } else if (ev[1] === 'error') {
-          bubble.textContent = '错误：' + (data.error || '未知错误');
+          answer.textContent = '错误：' + (data.error || '未知错误');
         }
       }
     }
   } catch (e) {
-    if (e.name === 'AbortError') bubble.textContent = acc + '（已停止）';
-    else bubble.textContent = '出错：' + e.message;
+    if (e.name === 'AbortError') answer.textContent = acc + '（已停止）';
+    else answer.textContent = '出错：' + e.message;
   } finally {
     bubble.classList.remove('typing');
     $('#btnSend').disabled = false;

@@ -247,20 +247,21 @@ class Engine:
         return "".join(c for c in str(text) if c in self.stoi)
 
     # ---- 采样 ----
-    def generate(self, prompt, max_chars, temperature=0.8, top_k=40, stop_on_user=True):
+    def generate_stream(self, prompt, max_chars, temperature=0.8, top_k=40,
+                        stop_on_user=True):
+        """逐字符产出，供 HTTP 真流式使用。"""
         import torch
         import torch.nn.functional as F
 
         ids = [self.stoi[c] for c in prompt if c in self.stoi]
         if not ids:
-            return ""
+            return
         tags = (USER_TAG, ASSIST_TAG)
         # 回看窗口要比最长的标记多一格：判断「刚生成的字符会不会凑成标记」时，
         # 需要看到包括它在内的完整后缀，否则生成到「助手：」的冒号那一刻还看不到标记。
         lookback = max(len(t) for t in tags) + 1
         with self.lock:
             idx = torch.tensor([ids], dtype=torch.long, device=self.device)
-            out_chars = []
             tail = ""
             for _ in range(max(1, int(max_chars))):
                 cond = idx[:, -self.block:]
@@ -277,8 +278,12 @@ class Engine:
                 if stop_on_user and (tail + ch).endswith(tags):
                     break
                 tail = (tail + ch)[-lookback:]
-                out_chars.append(ch)
-        return _clean_reply("".join(out_chars))
+                yield ch
+
+    def generate(self, prompt, max_chars, temperature=0.8, top_k=40, stop_on_user=True):
+        """非流式路径：生成完整文本并做收尾清理。"""
+        return _clean_reply("".join(self.generate_stream(
+            prompt, max_chars, temperature, top_k, stop_on_user)))
 
 
 def _clean_reply(text):
@@ -505,6 +510,11 @@ class Handler(BaseHTTPRequestHandler):
         tag = ollama.model_tag(want)
         payload = dict(req)
         payload["model"] = tag
+        # WebUI 的“深度思考”开关：同时兼容原生 think 与 OpenAI 的 reasoning_effort。
+        if "thinking" in payload:
+            thinking = bool(payload.pop("thinking"))
+            payload["think"] = thinking
+            payload.setdefault("reasoning_effort", "medium" if thinking else "none")
         if payload.get("stream"):
             payload["stream"] = True
         else:
@@ -512,9 +522,15 @@ class Handler(BaseHTTPRequestHandler):
 
         user = _last_user_text(req)
         t0 = time.time()
+        cid = "chat-" + uuid.uuid4().hex[:20]
+        # 先发 start，让服务页立刻显示用户问题；不能等 Ollama 返回首个 token，
+        # 否则上游连接和首包延迟会把问题一起拖到最后才显示。
+        emit_event(t="chat", phase="start", id=cid, model=want, user=user, turns=1)
         try:
             conn, resp = ollama.open_chat(payload, getattr(ARGS, "ollama_url", None))
         except Exception as e:
+            emit_event(t="chat", phase="error", id=cid, model=want,
+                       error=f"无法连接 Ollama：{type(e).__name__}: {e}")
             self._err(502, f"无法连接 Ollama：{type(e).__name__}: {e}", "upstream_error")
             return
 
@@ -538,6 +554,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 parts = []
+                reasoning_parts = []
                 for raw in resp:
                     self.wfile.write(raw)
                     self.wfile.flush()
@@ -550,10 +567,21 @@ class Handler(BaseHTTPRequestHandler):
                             except ValueError:
                                 obj = None
                             if isinstance(obj, dict):
-                                parts.append(ollama.delta_text(obj))
+                                piece = ollama.delta_text(obj)
+                                reason = ollama.delta_reasoning(obj)
+                                if piece:
+                                    parts.append(piece)
+                                    emit_event(t="chat", phase="delta", id=cid,
+                                               model=want, text=piece)
+                                if reason:
+                                    reasoning_parts.append(reason)
+                                    emit_event(t="chat", phase="reasoning", id=cid,
+                                               model=want, text=reason)
                 text = "".join(parts)
-                emit_event(t="chat", model=want, turns=1, ms=int((time.time() - t0) * 1000),
-                           user=user, assistant=text, prompt_chars=0, stream=True)
+                emit_event(t="chat", phase="done", id=cid, model=want, turns=1,
+                           ms=int((time.time() - t0) * 1000), user=user,
+                           reasoning="".join(reasoning_parts), assistant=text,
+                           prompt_chars=0, stream=True)
                 return
 
             body = resp.read()
@@ -566,10 +594,14 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 obj = json.loads(body.decode("utf-8", errors="replace"))
                 text = ollama.delta_text(obj) if isinstance(obj, dict) else ""
+                reasoning = ollama.delta_reasoning(obj) if isinstance(obj, dict) else ""
             except ValueError:
                 text = ""
-            emit_event(t="chat", model=want, turns=1, ms=int((time.time() - t0) * 1000),
-                       user=user, assistant=text, prompt_chars=0, stream=False)
+                reasoning = ""
+            emit_event(t="chat", phase="done", id=cid, model=want, turns=1,
+                       ms=int((time.time() - t0) * 1000), user=user,
+                       reasoning=reasoning, assistant=text,
+                       prompt_chars=0, stream=False)
         except (BrokenPipeError, ConnectionResetError, OSError):
             # 客户端中途关闭连接，不需要再写错误响应
             pass
@@ -637,15 +669,12 @@ class Handler(BaseHTTPRequestHandler):
         max_chars = max(1, min(int(max_chars), ARGS.max_chars_cap))
 
         t0 = time.time()
-        text = eng.generate(prompt, max_chars, temperature, top_k,
-                            stop_on_user=(eng.chat_mode and not ARGS.no_stop_on_user))
-        dt = time.time() - t0
         cid = "chatcmpl-" + uuid.uuid4().hex[:24]
         created = int(time.time())
-        print(f"  → [{model_id}] 轮数 {turns} | 提示 {len(prompt)} 字 | 生成 {len(text)} 字 | {dt:.2f}s", flush=True)
-        emit_event(t="chat", model=model_id, turns=turns, ms=int(dt * 1000),
-                   user=_last_user_text(req), assistant=text,
-                   prompt_chars=len(prompt), stream=bool(req.get("stream")))
+        stop_on_user = (eng.chat_mode and not ARGS.no_stop_on_user)
+        user_text = _last_user_text(req)
+        emit_event(t="chat", phase="start", id=cid, model=model_id,
+                   user=user_text, turns=turns, prompt_chars=len(prompt))
 
         if req.get("stream"):
             self.send_response(200)
@@ -658,20 +687,57 @@ class Handler(BaseHTTPRequestHandler):
                        "model": model_id,
                        "choices": [{"index": 0, "delta": {"role": "assistant"},
                                     "finish_reason": None}]})
-            for i in range(0, len(text), 8):      # 按小块推，让客户端一点点显示
-                self._sse({"id": cid, "object": "chat.completion.chunk", "created": created,
-                           "model": model_id,
-                           "choices": [{"index": 0, "delta": {"content": text[i:i + 8]},
-                                        "finish_reason": None}]})
+            parts = []
+            pending = ""
+            gen = eng.generate_stream(prompt, max_chars, temperature, top_k,
+                                      stop_on_user=stop_on_user)
+            try:
+                for ch in gen:
+                    parts.append(ch)
+                    pending += ch
+                    if len(pending) >= 4:
+                        emit_event(t="chat", phase="delta", id=cid, model=model_id,
+                                   text=pending)
+                        pending = ""
+                    if not self._sse({"id": cid, "object": "chat.completion.chunk",
+                                      "created": created, "model": model_id,
+                                      "choices": [{"index": 0,
+                                                   "delta": {"content": ch},
+                                                   "finish_reason": None}]}):
+                        break
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                try:
+                    gen.close()
+                except Exception:
+                    pass
+            if pending:
+                emit_event(t="chat", phase="delta", id=cid, model=model_id, text=pending)
+            text = _clean_reply("".join(parts))
             self._sse({"id": cid, "object": "chat.completion.chunk", "created": created,
                        "model": model_id,
                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
-            self.wfile.write(b"data: [DONE]\n\n")
             try:
+                self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
             except Exception:
                 pass
+            dt = time.time() - t0
+            print(f"  → [{model_id}] 轮数 {turns} | 提示 {len(prompt)} 字 | "
+                  f"生成 {len(text)} 字 | {dt:.2f}s | stream", flush=True)
+            emit_event(t="chat", phase="done", id=cid, model=model_id, turns=turns,
+                       ms=int(dt * 1000), user=user_text, assistant=text,
+                       prompt_chars=len(prompt), stream=True)
             return
+
+        text = eng.generate(prompt, max_chars, temperature, top_k,
+                            stop_on_user=stop_on_user)
+        dt = time.time() - t0
+        print(f"  → [{model_id}] 轮数 {turns} | 提示 {len(prompt)} 字 | 生成 {len(text)} 字 | {dt:.2f}s", flush=True)
+        emit_event(t="chat", phase="done", id=cid, model=model_id, turns=turns,
+                   ms=int(dt * 1000), user=user_text, assistant=text,
+                   prompt_chars=len(prompt), stream=False)
 
         self._send(200, {
             "id": cid,
@@ -694,8 +760,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.wfile.write(("data: " + json.dumps(obj, ensure_ascii=False) + "\n\n").encode("utf-8"))
             self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+            return True
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return False
 
     def _dump_debug(self, req, prompt, turns):
         """--debug 时把客户端发来的消息与我拼出的提示词打出来，便于排查"""

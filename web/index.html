@@ -19,6 +19,25 @@
            background:var(--panel); border-bottom:1px solid var(--line); }
   header h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.5px; }
   header .brand { width:26px; height:26px; border-radius:6px; object-fit:contain; }
+  .env-bar { display:flex; align-items:center; gap:8px; min-width:0;
+             padding:7px 18px; border-top:1px solid var(--line);
+             border-bottom:1px solid var(--line); background:rgba(23,26,33,.55); }
+  .env-bar button { flex:0 0 auto; white-space:nowrap; }
+  .env-bar .env-check { flex:0 0 auto; white-space:nowrap; display:flex; align-items:center; gap:4px; }
+  .env-bar .pypath { flex:0 1 320px; max-width:min(320px, 24vw); }
+  .env-bar .status-scroll { flex:1 1 auto; min-width:180px; }
+  .select-scroll { width:150px; max-width:230px; min-width:140px; overflow-x:auto; overflow-y:hidden;
+                    border-radius:8px; scrollbar-width:thin; scrollbar-color:#43546d transparent;
+                    transition:width .16s ease; }
+  .select-scroll select { width:210px; min-width:100%; max-width:none; border-radius:8px;
+                          background:linear-gradient(180deg, #121923, #0d1219);
+                          border-color:#2b3648; box-shadow:inset 0 1px 0 rgba(255,255,255,.03); }
+  .select-scroll select:hover { border-color:#3b4a60; }
+  .select-scroll:focus-within { box-shadow:0 0 0 2px rgba(79,140,255,.18); }
+  .select-scroll::-webkit-scrollbar { height:5px; }
+  .select-scroll::-webkit-scrollbar-track { background:#0a0f16; border-radius:999px; }
+  .select-scroll::-webkit-scrollbar-thumb { background:linear-gradient(90deg, #40536e, #586d8b);
+                                             border:1px solid #0a0f16; border-radius:999px; }
   #env { color:var(--muted); font-size:12px; }
   nav { display:flex; gap:4px; padding:10px 18px 0; }
   nav button { background:transparent; border:1px solid transparent; color:var(--muted);
@@ -32,10 +51,14 @@
   section.on { display:flex; }
   section > .row { flex:0 0 auto; }
   .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .row.oneline { flex-wrap:nowrap; min-width:0; }
   label { color:var(--muted); font-size:12px; }
   select, input[type=text], input[type=number], textarea, button {
     background:#0d1015; color:var(--fg); border:1px solid var(--line);
     border-radius:7px; padding:6px 9px; font:inherit; font-size:13px; }
+  select { color-scheme:dark; }
+  select option { background:#111722; color:var(--fg); }
+  select option:checked { background:#2b3f58; color:#fff; }
   button { cursor:pointer; }
   button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
   button.danger { border-color:var(--err); color:var(--err); }
@@ -83,7 +106,20 @@
   .sidemeta { margin-top:auto; color:var(--muted); font-size:12px; line-height:1.8;
               word-break:break-all; }
   .chatmain { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
-  .msgs { flex:1; min-height:0; overflow:auto; padding:2px 2px 10px; }
+  .msgs { flex:1; min-height:0; overflow:auto; padding:2px 2px 10px;
+          scrollbar-width:thin; scrollbar-color:#43546d transparent; }
+  .msgs::-webkit-scrollbar { width:8px; }
+  .msgs::-webkit-scrollbar-track { background:#0a0f16; border-radius:999px; margin:2px 0; }
+  .msgs::-webkit-scrollbar-thumb { background:linear-gradient(180deg, #40536e, #5a708e);
+                                    border:2px solid #0a0f16; border-radius:999px; }
+  .msgs::-webkit-scrollbar-thumb:hover { background:linear-gradient(180deg, #526987, #7088a5); }
+  .msgs::-webkit-scrollbar-button { display:none; width:0; height:0; }
+  .log { scrollbar-width:thin; scrollbar-color:#43546d transparent; }
+  .log::-webkit-scrollbar { width:8px; }
+  .log::-webkit-scrollbar-track { background:#0a0f16; border-radius:999px; }
+  .log::-webkit-scrollbar-thumb { background:linear-gradient(180deg, #40536e, #5a708e);
+                                  border:2px solid #0a0f16; border-radius:999px; }
+  .log::-webkit-scrollbar-button { display:none; width:0; height:0; }
   .msg { display:flex; gap:10px; margin-bottom:14px; align-items:flex-start; }
   .msg.user { flex-direction:row-reverse; }
   .avatar { flex:0 0 28px; height:28px; border-radius:8px; display:flex; align-items:center;
@@ -102,7 +138,7 @@
   .composer { border:1px solid var(--line); border-radius:12px; background:#0d1015; padding:8px 10px; }
   .composer textarea { width:100%; border:0; background:transparent; color:var(--fg); resize:none;
                        outline:none; font:inherit; line-height:1.65; max-height:150px; overflow:auto; }
-  .composerbar { display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:wrap; }
+  .composerbar { display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:nowrap; min-width:0; }
   .composerbar select { max-width:200px; }
   .composerbar button { padding:5px 12px; }
   .spacer { flex:1; }
@@ -119,15 +155,51 @@
   .sigrow .state.ok { color:var(--ok); border-color:var(--ok); }
   .sigrow .state.no { color:var(--warn); border-color:var(--warn); }
   .empty { color:var(--muted); text-align:center; padding:60px 0; font-size:13px; }
-  .pypath { max-width:300px; min-width:0; overflow-x:auto; white-space:nowrap;
+  .pypath { max-width:min(360px, 32vw); min-width:160px; overflow-x:auto; overflow-y:hidden;
+            white-space:nowrap;
+            overscroll-behavior-x:contain; scrollbar-width:thin; scrollbar-color:#43546d transparent;
             font-family:Consolas, monospace; font-size:12px; color:var(--muted);
-            border:1px solid var(--line); border-radius:6px; padding:3px 8px; }
+            line-height:1.55; padding:5px 9px 4px; border:1px solid #283244; border-radius:8px;
+            background:linear-gradient(180deg, #111823, #0c121a);
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.03); }
+  .pypath::-webkit-scrollbar { height:6px; }
+  .pypath::-webkit-scrollbar-track { background:#0a0f16; border-radius:999px; }
+  .pypath::-webkit-scrollbar-thumb { background:linear-gradient(90deg, #40536e, #586d8b);
+                                     border:1px solid #0a0f16; border-radius:999px; }
+  .pypath::-webkit-scrollbar-thumb:hover { background:linear-gradient(90deg, #526987, #7088a5); }
+  .pypath::-webkit-scrollbar-button { display:none; width:0; height:0; }
   #toast { position:fixed; right:18px; bottom:18px; background:#1d2430; border:1px solid var(--line);
            padding:10px 14px; border-radius:8px; display:none; max-width:420px; }
   .licenses { width:100%; border-collapse:collapse; margin-top:8px; }
   .licenses th, .licenses td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
   .licenses th { color:var(--muted); font-weight:600; font-size:12px; }
   .licenses a { color:#7db0ff; }
+  .scroll-text { overflow-x:auto; white-space:nowrap; max-width:100%; min-width:0; display:block; }
+  .scroll-text::-webkit-scrollbar { height:5px; }
+  .scroll-text::-webkit-scrollbar-thumb { background:#3a4353; border-radius:4px; }
+  .status-scroll { flex:1 1 0; min-width:120px; overflow-x:auto; overflow-y:hidden;
+                   white-space:nowrap; align-self:center; }
+  .status-scroll > span { display:inline-block; min-width:max-content; }
+  .status-scroll::-webkit-scrollbar { height:5px; }
+  .status-scroll::-webkit-scrollbar-thumb { background:#3a4353; border-radius:4px; }
+  .thinking { margin:0 0 8px; border:1px solid #2b3444; border-radius:8px; background:#0e1219; }
+  .thinking summary { cursor:pointer; color:var(--muted); font-size:12px; padding:6px 9px; user-select:none; }
+  .thinking pre { margin:0; padding:0 10px 9px; white-space:pre-wrap; word-break:break-word;
+                  max-height:220px; overflow:auto; color:#aab4c4; font:12px/1.55 Consolas, monospace; }
+  .envfields { display:flex; flex-direction:column; gap:8px; margin:2px 0 10px; }
+  .envhelp { margin:0 0 12px; line-height:1.6; }
+  .envfield { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  .envfield .k { flex:0 0 110px; color:var(--muted); }
+  .envfield input[type="text"] { min-width:200px; }
+  .envfield select { min-width:170px; }
+  .torch-driver { display:inline-flex; align-items:center; gap:5px; }
+  .torch-prefix { color:#8fa3bf; font:12px Consolas, monospace; padding:0 1px; }
+  .envfield .installed { flex:1 1 220px; min-width:0; color:var(--muted);
+                          overflow-x:auto; white-space:nowrap; }
+  .envfield .installed.pending { color:var(--fg); }
+  .envfield .installed.ok { color:var(--ok); }
+  .envfield .installed.missing { color:var(--err); }
+  .envfield.actions { margin-top:4px; }
 </style>
 </head>
 <body>
@@ -135,6 +207,15 @@
   <img src="/logo.ico" class="brand" alt="logo">
   <h1>鸫楼桥鹊AI大语言模型</h1>
 </header>
+
+<div class="env-bar">
+  <div class="pypath" id="globalPyPath">—</div>
+  <button id="btnGlobalProbe">测试环境</button>
+  <label class="muted env-check">
+    <input type="checkbox" id="globalProbeOnStart" checked> 训练/对话/服务启动时检测
+  </label>
+  <div class="status-scroll"><span class="muted" id="globalProbeState">未检测</span></div>
+</div>
 
 <nav>
   <button data-tab="train" class="on">训练</button>
@@ -148,17 +229,13 @@
 
 <main>
   <section id="train" class="on">
-    <div class="row">
+    <div class="row oneline">
       <label>配置</label>
       <select id="trainCfg" style="min-width:240px"></select>
       <button class="primary" id="btnTrainStart">开始训练</button>
       <button id="btnTrainResume">继续训练</button>
       <button class="danger" id="btnTrainStop" disabled>停止</button>
       <span class="muted" id="trainState">未运行</span>
-      <div class="pypath" id="trainPyPath">—</div>
-      <button id="btnTrainProbe">测试环境</button>
-      <span class="muted" id="trainProbeState">未检测</span>
-      <label class="muted"><input type="checkbox" id="trainProbeOnStart" checked> 启动时检测</label>
     </div>
     <div class="log xterm-log" id="trainLog"></div>
   </section>
@@ -170,11 +247,10 @@
         <textarea id="chatInput" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
         <div class="composerbar">
           <select id="chatConfig" title="配置文件（模型、采样参数、语料都由它决定）"></select>
+          <label class="muted" id="chatThinkingWrap" style="display:none">
+            <input type="checkbox" id="chatThinking" checked> 开启深度思考
+          </label>
           <button id="btnNewChat">新对话</button>
-          <div class="pypath" id="chatPyPath">—</div>
-          <button id="btnChatProbe">测试环境</button>
-          <span class="muted" id="chatProbeState">未检测</span>
-          <label class="muted"><input type="checkbox" id="chatProbeOnSend" checked> 发送时检测</label>
           <span class="muted" id="chatState"></span>
           <div class="spacer"></div>
           <button class="danger" id="btnChatStop" disabled>停止</button>
@@ -185,18 +261,16 @@
   </section>
 
   <section id="server">
-    <div class="row">
+    <div class="row oneline">
       <label>配置</label>
-      <select id="srvConfig" title="只服务选中的配置；默认全部"></select>
+      <div class="select-scroll">
+        <select id="srvConfig" title="只服务选中的配置；默认全部"></select>
+      </div>
       <label>端口</label><input type="number" id="srvPort" value="49128" style="width:110px">
       <button class="primary" id="btnSrvStart">启动服务</button>
       <button class="danger" id="btnSrvStop" disabled>停止</button>
-      <div class="pypath" id="srvPyPath">—</div>
-      <button id="btnSrvProbe">测试环境</button>
-      <span class="muted" id="srvProbeState">未检测</span>
-      <label class="muted"><input type="checkbox" id="srvProbeOnStart" checked> 启动服务时检测</label>
       <span class="muted" id="srvState">未运行</span>
-      <span class="muted" id="srvUrl"></span>
+      <span class="muted scroll-text" id="srvUrl"></span>
     </div>
     <div class="subtabs">
       <button data-srv="chat" class="on">会话</button>
@@ -209,25 +283,52 @@
   </section>
 
   <section id="env">
+    <div class="muted envhelp">
+      随包 Python 只带 WebUI 所需的标准库；torch / numpy / transformers 由这里安装到项目 Python，
+      供训练、对话和桥接服务使用。安装完成后请重新检测环境。
+    </div>
     <div class="row">
       <label>项目 Python</label>
       <div class="pypath" id="envPyPath">—</div>
-      <span class="muted" id="envState">未检测</span>
+      <span class="muted" id="envPythonVersion"></span>
     </div>
-    <div class="muted" id="envDetails" style="margin-bottom:6px"></div>
-    <div class="muted" id="envRecommend" style="margin-bottom:10px"></div>
-    <div class="row">
-      <label>PyTorch 版本</label>
-      <input type="text" id="envTorchVersion" placeholder="例如 2.14.1+cu126" style="min-width:260px">
-      <button id="btnEnvDetect">自动检测</button>
-      <label class="muted"><input type="checkbox" id="envNoCache"> 不使用 pip 缓存</label>
-      <button class="primary" id="btnEnvInstall">安装 / 更新训练依赖</button>
-      <span class="muted" id="envInstallState"></span>
-    </div>
-    <div class="muted" style="margin-bottom:8px">
-      随包 Python 只带 WebUI 所需的标准库；torch / numpy / transformers 由这里安装到项目 Python，
-      供训练、对话和桥接服务使用。安装完成后请重新检测环境；选择 CUDA 源会同时安装 NVIDIA
-      专有运行时，需遵守其许可。
+    <div class="envfields">
+      <div class="envfield">
+        <label class="k">PyTorch</label>
+        <input type="text" id="envTorchVersion" placeholder="例如 2.14.1；留空 = 最新版">
+        <select id="envTorchCategory" title="芯片类型">
+          <option value="cpu">CPU</option>
+          <option value="nvidia">GPU (NVIDIA)</option>
+          <option value="amd">GPU (AMD)</option>
+          <option value="apple">GPU (Apple)</option>
+          <option value="xpu">XPU</option>
+          <option value="npu">NPU</option>
+          <option value="hpu">HPU</option>
+          <option value="xla">XLA / TPU</option>
+          <option value="mtia">MTIA</option>
+        </select>
+        <span class="torch-driver" id="envTorchSubWrap">
+          <span class="torch-prefix" id="envTorchPrefix">cu</span>
+          <input type="text" id="envTorchSub" placeholder="例如 12.6">
+        </span>
+        <button id="btnEnvDetect">自动检测</button>
+        <span class="installed pending" id="envTorchInstalled">未检测</span>
+      </div>
+      <div class="envfield">
+        <label class="k">Numpy</label>
+        <input type="text" id="envNumpyVersion" placeholder="例如 2.5.4；留空 = 最新版">
+        <span class="installed pending" id="envNumpyInstalled">未检测</span>
+      </div>
+      <div class="envfield">
+        <label class="k">transformers</label>
+        <input type="text" id="envTransformersVersion" placeholder="例如 5.22.2；留空 = 最新版">
+        <span class="installed pending" id="envTransformersInstalled">未检测</span>
+      </div>
+      <div class="envfield actions">
+        <button class="primary" id="btnEnvInstall">安装 / 更新训练依赖</button>
+        <label class="muted"><input type="checkbox" id="envNoCache"> 不使用 pip 缓存</label>
+        <span class="muted" id="envInstallState"></span>
+      </div>
     </div>
     <div class="log" id="envLog"></div>
   </section>
@@ -256,6 +357,11 @@
     <div class="muted" style="margin-bottom:8px">
       本项目代码采用 MIT 许可证。下列第三方组件仅用于本地 WebUI，
       均随工程放在 <code>web/vendor/</code>，不从 CDN 加载。
+    </div>
+    <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <strong>本项目：dlqq-llm-train</strong><br>
+      <span class="muted">MIT License · Copyright (c) 2026 鸫楼桥鹊</span><br>
+      <span class="muted">本项目代码 MIT；第三方组件按各自许可证分发。</span>
     </div>
     <table class="licenses">
       <thead><tr><th>组件</th><th>版本</th><th>许可证</th><th>本地许可证</th></tr></thead>
@@ -447,6 +553,35 @@ async function loadChatConfigs() {
     `<option value="${c.name}">${label(c)}</option>`).join('');
   $('#srvConfig').innerHTML = '<option value="">全部配置</option>' + CHAT_CONFIGS.map(c =>
     `<option value="${c.name}">${label(c)}</option>`).join('');
+  updateChatBackend();
+  fitSrvConfigWidth();
+}
+
+function fitSrvConfigWidth() {
+  const sel = document.getElementById('srvConfig');
+  const wrap = sel && sel.closest('.select-scroll');
+  if (!sel || !wrap) return;
+  const opt = sel.selectedOptions[0];
+  const text = opt ? opt.textContent.trim() : '';
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = getComputedStyle(sel).font || '13px sans-serif';
+  const content = Math.ceil(ctx.measureText(text).width) + 38;
+  const min = 140;
+  const max = 230;
+  sel.style.width = Math.max(min, content) + 'px';
+  wrap.style.width = Math.min(max, Math.max(min, content)) + 'px';
+}
+
+function selectedChatConfig(name) {
+  return CHAT_CONFIGS.find(c => c.name === name) || null;
+}
+
+function updateChatBackend() {
+  const c = selectedChatConfig($('#chatConfig').value);
+  const remote = !!(c && c.backend === 'ollama');
+  const think = $('#chatThinkingWrap');
+  if (think) think.style.display = remote ? '' : 'none';
 }
 
 const PY = {
@@ -454,12 +589,9 @@ const PY = {
   train: { path: '', verified: false, info: null },
   srv:   { path: '', verified: false, info: null },
 };
-const PY_PROBE = { chat: 'btnChatProbe', train: 'btnTrainProbe', srv: 'btnSrvProbe' };
-const PY_RESULT = { chat: 'chatProbeState', train: 'trainProbeState', srv: 'srvProbeState' };
-const PY_ONSTART = { chat: 'chatProbeOnSend', train: 'trainProbeOnStart', srv: 'srvProbeOnStart' };
-const PY_PATH = { chat: 'chatPyPath', train: 'trainPyPath', srv: 'srvPyPath' };
 const PY_BTNS = { chat: ['btnSend'], train: ['btnTrainStart', 'btnTrainResume'], srv: ['btnSrvStart'] };
 let ENV_INSTALLING = false;
+let ENV_DETECTED = false;
 let ENV_POLL = null;
 
 function pyPass(info, needNumpy) {
@@ -467,26 +599,45 @@ function pyPass(info, needNumpy) {
 }
 function pyResultText(info, needNumpy) {
   if (!info) return '未检测';
-  if (!info.ok) return '不通过：' + (info.error || '未知错误');
-  const ok = pyPass(info, needNumpy);
-  const tv = info.torch_version ? (' ' + info.torch_version) : '';
-  const parts = [info.version, info.arch, info.torch ? ('torch' + tv) : '无 torch',
-                 info.transformers ? 'transformers' : '无 transformers',
-                 info.numpy ? 'numpy' : '无 numpy'];
-  if (info.torch) parts.push(info.cuda ? ('CUDA：' + (info.gpu || '可用')) : 'CUDA 不可用');
-  return (ok ? '通过：' : '不通过：') + parts.join(' · ');
+  const parts = [];
+  parts.push([info.version, info.arch].filter(Boolean).join(' ') || 'Python 版本未知');
+  const libs = [];
+  libs.push(info.torch ? ('torch ' + (info.torch_version || '已安装')) : 'torch 未安装');
+  libs.push(info.numpy ? ('numpy ' + (info.numpy_version || '已安装')) : 'numpy 未安装');
+  libs.push(info.transformers
+    ? ('transformers ' + (info.transformers_version || '已安装')) : 'transformers 未安装');
+  parts.push(libs.join(' · '));
+  let chip = 'CPU';
+  let driver = '';
+  const tv = info.torch_version || '';
+  const m = /\+(cu\d+)/.exec(tv);
+  if (m) {
+    chip = 'GPU (NVIDIA)';
+    driver = m[1].slice(2, -1) + '.' + m[1].slice(-1);
+  } else if (/\+(xpu)/.test(tv)) {
+    chip = 'XPU';
+  } else if (info.cuda) {
+    chip = 'GPU (NVIDIA)';
+  }
+  parts.push(chip + (driver ? ' / ' + driver : ''));
+  return parts.join(' · ');
 }
 function renderPy(page) {
   const st = PY[page];
   const info = st.info;
   const ok = pyPass(info, page === 'train');
-  const pathEl = $(`#${PY_PATH[page]}`);
-  pathEl.textContent = st.path || '—';
-  pathEl.title = st.path || '';
-  const stateEl = $(`#${PY_RESULT[page]}`);
-  stateEl.textContent = pyResultText(info, page === 'train');
-  stateEl.style.color = ok ? 'var(--ok)' : (info ? 'var(--warn)' : 'var(--muted)');
-  const onStart = $(`#${PY_ONSTART[page]}`);
+  const pathEl = $('#globalPyPath');
+  if (pathEl) {
+    pathEl.textContent = st.path || '—';
+    pathEl.title = st.path || '';
+  }
+  const stateEl = $('#globalProbeState');
+  const globalOk = pyPass(info, true);
+  if (stateEl) {
+    stateEl.textContent = pyResultText(info, true);
+    stateEl.style.color = globalOk ? 'var(--ok)' : (info ? 'var(--warn)' : 'var(--muted)');
+  }
+  const onStart = $('#globalProbeOnStart');
   const checked = !!(onStart && onStart.checked);
   const canStart = ok || (checked && !info);
   const running = {
@@ -495,44 +646,128 @@ function renderPy(page) {
     srv: !$('#btnSrvStop').disabled,
   }[page];
   PY_BTNS[page].forEach(id => { $('#' + id).disabled = !canStart || running; });
-  const probeBtn = $(`#${PY_PROBE[page]}`);
+  const probeBtn = $('#btnGlobalProbe');
   if (probeBtn) probeBtn.disabled = ENV_INSTALLING;
+  if (page === 'srv' && $('#btnSrvStart').textContent === '启动中…') {
+    $('#btnSrvStart').disabled = true;
+  }
 }
 
+let TORCH_CATEGORIES = [
+  { id: 'cpu', label: 'CPU', sub_type: 'none', subs: [], channel: 'cpu' },
+  { id: 'nvidia', label: 'GPU (NVIDIA)', sub_type: 'number', sub_label: 'CUDA',
+    subs: [], channel: 'cu126' },
+  { id: 'amd', label: 'GPU (AMD)', sub_type: 'number', sub_label: 'ROCm',
+    subs: [], channel: 'rocm' },
+  { id: 'apple', label: 'GPU (Apple)', sub_type: 'none', subs: [], channel: 'mps' },
+  { id: 'xpu', label: 'XPU', sub_type: 'none', subs: [], channel: 'xpu' },
+  { id: 'npu', label: 'NPU', sub_type: 'none', subs: [], channel: '' },
+  { id: 'hpu', label: 'HPU', sub_type: 'none', subs: [], channel: '' },
+  { id: 'xla', label: 'XLA / TPU', sub_type: 'none', subs: [], channel: '' },
+  { id: 'mtia', label: 'MTIA', sub_type: 'none', subs: [], channel: '' },
+];
+
+function torchChannelSub(id) {
+  const m = /^cu(\d+)$/.exec(id || '');
+  return m ? m[1].slice(0, -1) + '.' + m[1].slice(-1) : '';
+}
+function torchCategoryId(channel) {
+  if (channel === 'cpu') return 'cpu';
+  if (channel === 'xpu') return 'xpu';
+  if (/^cu\d+$/.test(channel || '')) return 'nvidia';
+  if (/^rocm/.test(channel || '')) return 'amd';
+  return '';
+}
+function updateTorchCategory(selectedSub, fillVersion) {
+  const cat = TORCH_CATEGORIES.find(c => c.id === $('#envTorchCategory').value);
+  const sub = $('#envTorchSub');
+  const wrap = $('#envTorchSubWrap');
+  const prefix = $('#envTorchPrefix');
+  if (!cat) return;
+  if (cat.sub_type === 'number') {
+    wrap.style.display = 'inline-flex';
+    prefix.textContent = cat.id === 'amd' ? 'rocm' : 'cu';
+    sub.disabled = false;
+    sub.placeholder = '例如 12.6';
+    const values = cat.subs.map(x => x.value);
+    if (values.length) {
+      if (selectedSub && values.includes(selectedSub)) sub.value = selectedSub;
+      else if (!values.includes(sub.value)) sub.value = values[values.length - 1];
+      if (fillVersion) {
+        const hit = cat.subs.find(x => x.value === sub.value);
+        if (hit && hit.torch) $('#envTorchVersion').value = hit.torch;
+      }
+    }
+  } else {
+    wrap.style.display = 'none';
+    sub.value = '';
+    sub.disabled = true;
+    sub.placeholder = '—';
+    if (fillVersion && cat.torch) $('#envTorchVersion').value = cat.torch;
+  }
+}
 function renderEnv(r) {
   const info = r.info || null;
   const pathEl = $('#envPyPath');
   pathEl.textContent = r.python || '—';
   pathEl.title = r.python || '';
-  const ok = !!(info && info.ok && !(r.missing || []).length);
-  $('#envState').textContent = r.error ? ('不通过：' + r.error)
-    : (info ? pyResultText(info, true) : '未检测');
-  $('#envState').style.color = ok ? 'var(--ok)' : (info || r.error ? 'var(--warn)' : 'var(--muted)');
-  const parts = [];
-  if (info) {
-    parts.push('pip：' + (info.pip ? '有' : '无'),
-               'ensurepip：' + (info.ensurepip ? '有' : '无'));
-    if (r.missing && r.missing.length) parts.push('缺少：' + r.missing.join(' / '));
-  }
-  $('#envDetails').textContent = parts.join(' · ');
   const gpu = r.system && r.system.gpu;
-  const rec = r.system && r.system.torch_recommend;
-  if (gpu || rec) {
-    const bits = [];
-    if (gpu) {
-      bits.push(gpu.nvidia
-        ? `显卡：${gpu.name} · 驱动 ${gpu.driver}`
-        : '未检测到 NVIDIA 显卡');
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  const installedTorch = (info && info.torch_version) || '';
+  const iv = /\+(cpu|cu\d+|xpu)/.exec(installedTorch);
+  if (iv) {
+    const catId = torchCategoryId(iv[1]);
+    const cat = TORCH_CATEGORIES.find(c => c.id === catId);
+    if (cat && cat.sub_type === 'number') {
+      const val = torchChannelSub(iv[1]);
+      if (val && !cat.subs.some(x => x.value === val)) {
+        cat.subs.push({ value: val, channel: iv[1],
+                        torch: installedTorch.split('+')[0] });
+      }
     }
-    if (rec) {
-      bits.push(`推荐：${rec.install} · ${rec.reason}`);
+    if (cat) {
+      $('#envTorchCategory').value = catId;
+      updateTorchCategory(cat.sub_type === 'number' ? torchChannelSub(iv[1]) : '', false);
     }
-    $('#envRecommend').textContent = bits.join('；');
   }
+  set('envPythonVersion', info ? [info.version, info.arch].filter(Boolean).join(' ') : '');
+  const setInstallStatus = (id, installed, value) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!ENV_DETECTED) {
+      el.className = 'installed pending';
+      el.textContent = '未检测';
+    } else if (installed) {
+      el.className = 'installed ok';
+      el.textContent = '已安装：' + (value || '版本未知');
+    } else {
+      el.className = 'installed missing';
+      el.textContent = '未安装';
+    }
+  };
+  if (ENV_DETECTED && info) {
+    if (info.torch && info.torch_version) {
+      $('#envTorchVersion').value = info.torch_version.split('+')[0];
+    }
+    if (info.numpy_version) $('#envNumpyVersion').value = info.numpy_version;
+    if (info.transformers_version) {
+      $('#envTransformersVersion').value = info.transformers_version;
+    }
+  }
+  setInstallStatus('envTorchInstalled', info && info.torch,
+    info && info.torch ? `${info.cuda ? 'GPU' : 'CPU'} ${info.torch_version || ''}` : '');
+  setInstallStatus('envNumpyInstalled', info && info.numpy, info && info.numpy_version);
+  setInstallStatus('envTransformersInstalled', info && info.transformers,
+    info && info.transformers_version);
   $('#envInstallState').textContent = r.installing ? '安装中…' : '';
   $('#btnEnvInstall').disabled = !!r.installing || !r.python;
   $('#btnEnvDetect').disabled = !!r.installing;
   $('#envTorchVersion').disabled = !!r.installing;
+  $('#envTorchCategory').disabled = !!r.installing;
+  $('#envTorchSub').disabled = !!r.installing || !TORCH_CATEGORIES.some(c =>
+    c.id === $('#envTorchCategory').value && c.sub_type === 'number');
+  $('#envNumpyVersion').disabled = !!r.installing;
+  $('#envTransformersVersion').disabled = !!r.installing;
   if (r.installing) startEnvPoll();
 }
 
@@ -581,7 +816,7 @@ async function probePage(page) {
 async function ensurePy(page) {
   const needNumpy = page === 'train';
   if (pyPass(PY[page].info, needNumpy)) return true;
-  const cb = $(`#${PY_ONSTART[page]}`);
+  const cb = $('#globalProbeOnStart');
   if (!cb || !cb.checked) {
     toast('请先在「环境」页检测项目 Python');
     return false;
@@ -593,8 +828,24 @@ async function ensurePy(page) {
   return true;
 }
 async function installEnv() {
+  const cat = TORCH_CATEGORIES.find(c => c.id === $('#envTorchCategory').value);
+  const sub = $('#envTorchSub').value.trim();
+  const hit = cat && cat.subs.find(x => x.value === sub);
+  if (!cat) return toast('请先选择 PyTorch 芯片类型');
+  let torchIndex = hit ? hit.channel : cat.channel;
+  if (!hit && cat.id === 'nvidia' && sub) {
+    torchIndex = 'cu' + sub.replace(/\./g, '');
+  } else if (!hit && cat.id === 'amd' && sub) {
+    torchIndex = 'rocm' + sub.replace(/\./g, '');
+  }
+  if (!torchIndex) return toast('这个 PyTorch 芯片类型暂时没有可安装的构建');
   const body = {
+    torch_index: torchIndex,
+    torch_category: cat.id,
+    cuda_version: cat.subs.length ? sub : '',
     torch_version: $('#envTorchVersion').value.trim(),
+    numpy_version: $('#envNumpyVersion').value.trim(),
+    transformers_version: $('#envTransformersVersion').value.trim(),
     no_cache: $('#envNoCache').checked,
   };
   $('#envLog').textContent = '';
@@ -603,6 +854,10 @@ async function installEnv() {
     body: JSON.stringify(body),
   });
   if (!r.ok) return toast('安装失败：' + (r.error || '未知错误'));
+  if (r.skipped) {
+    toast(r.message || '已安装，无需重复安装');
+    return;
+  }
   ENV_INSTALLING = true;
   $('#envInstallState').textContent = '安装中…';
   renderEnv({ python: PY.train.path, info: PY.train.info, installing: true });
@@ -611,24 +866,45 @@ async function installEnv() {
 }
 
 async function autoDetectEnv() {
+  ENV_DETECTED = true;
   const r = await refreshEnv(true);
-  const rec = r.system && r.system.torch_recommend;
-  if (rec) {
-    $('#envTorchVersion').value = rec.install;
-    toast('已检测电脑配置，并填入推荐版本：' + rec.install);
-  } else {
-    toast('未取得推荐版本，请检查项目 Python / nvidia-smi');
+  const info = r.info || null;
+  const gpu = r.system && r.system.gpu;
+  const tv = (info && info.torch_version) || '';
+  let catId = 'cpu';
+  let sub = '';
+  const iv = /\+(cpu|cu\d+|xpu)/.exec(tv);
+  if (gpu && gpu.nvidia) {
+    catId = 'nvidia';
+    if (iv && /^cu\d+$/.test(iv[1])) {
+      sub = iv[1].slice(2, -1) + '.' + iv[1].slice(-1);
+    } else {
+      const idx = (r.system && r.system.torch_recommend && r.system.torch_recommend.index) || '';
+      const m = /^cu(\d+)$/.exec(idx);
+      if (m) sub = m[1].slice(0, -1) + '.' + m[1].slice(-1);
+    }
+  } else if (iv && /^cu\d+$/.test(iv[1])) {
+    catId = 'nvidia';
+    sub = iv[1].slice(2, -1) + '.' + iv[1].slice(-1);
+  } else if (iv && iv[1] === 'xpu') {
+    catId = 'xpu';
+  } else if (/Mac/i.test(navigator.userAgent || '')) {
+    catId = 'apple';
   }
+  const sel = $('#envTorchCategory');
+  if ([...sel.options].some(o => o.value === catId)) sel.value = catId;
+  updateTorchCategory(sub, false);
+  const label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : catId;
+  toast('已检测芯片类型：' + label + (sub ? ' / 驱动 ' + sub : ''));
 }
 
-Object.keys(PY_PROBE).forEach(page => {
-  $(`#${PY_PROBE[page]}`).onclick = () => probePage(page);
-  $(`#${PY_ONSTART[page]}`).onchange = () => renderPy(page);
-});
+$('#globalProbeOnStart').onchange = () => Object.keys(PY).forEach(renderPy);
+$('#btnGlobalProbe').onclick = () => probePage('train');
 $('#btnEnvDetect').onclick = autoDetectEnv;
 $('#btnEnvInstall').onclick = installEnv;
-$('#chatConfig').addEventListener('change', () => loadPy('chat'));
-$('#srvConfig').addEventListener('change', () => loadPy('srv'));
+$('#envTorchCategory').onchange = () => updateTorchCategory('', false);
+$('#chatConfig').addEventListener('change', () => { updateChatBackend(); loadPy('chat'); });
+$('#srvConfig').addEventListener('change', () => { fitSrvConfigWidth(); loadPy('srv'); });
 $('#trainCfg').addEventListener('change', e => applyConfigSelection(e.target.value));
 // 每个配置键的中文解释（新增键时记得一起补）
 const KEY_INFO = {
@@ -719,8 +995,15 @@ function bindEvents() {
   });
   es.addEventListener('server-chat', e => {
     const d = JSON.parse(e.data);
-    srvMsg('user', d.user, d.model, d.ms);
-    srvMsg('assistant', d.assistant, d.model, d.ms);
+    if (d.phase === 'start') srvStart(d);
+    else if (d.phase === 'delta') srvDelta(d);
+    else if (d.phase === 'reasoning') srvReasoning(d);
+    else if (d.phase === 'done') srvDone(d);
+    else if (d.phase === 'error') srvError(d);
+    else {
+      srvMsg('user', d.user, d.model, d.ms);
+      srvMsg('assistant', d.assistant, d.model, d.ms, d.reasoning);
+    }
   });
   es.addEventListener('env-log', e => {
     const d = JSON.parse(e.data);
@@ -752,6 +1035,7 @@ $('#btnTrainStop').onclick = async () => {
 /* ---------------- 对话：侧栏 + 消息流 + 底部输入 ---------------- */
 let chatAbort = null;
 let CHAT_INFO = null;
+let SRV_STARTING = false;
 const HISTORY = [];                       // {role:'user'|'assistant', content}
 
 function el(tag, cls, text) {
@@ -771,6 +1055,16 @@ function renderMsg(role, text) {
   const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot'));
   const av = el('div', 'avatar', role === 'user' ? '你' : 'AI');
   const bubble = el('div', 'bubble');
+  let think = null;
+  if (role !== 'user') {
+    const box = el('details', 'thinking');
+    box.style.display = 'none';
+    box.appendChild(el('summary', '', '思考过程'));
+    const pre = el('pre', '');
+    box.appendChild(pre);
+    bubble.appendChild(box);
+    think = { box, pre };
+  }
   const body = el('div', 'body', text || '');
   body.dataset.raw = text || '';
   const meta = el('div', 'meta');
@@ -786,7 +1080,7 @@ function renderMsg(role, text) {
   wrap.appendChild(bubble);
   $('#chatBox').appendChild(wrap);
   $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
-  return { body, bubble };
+  return { body, bubble, think };
 }
 
 // 把历史拼成一条提示词：第一条用户话直接给，后面的轮次自带「用户：」「助手：」标记，
@@ -817,7 +1111,7 @@ async function send() {
   $('#chatInput').style.height = 'auto';
   HISTORY.push({ role: 'user', content: text });
   renderMsg('user', text);
-  const { body, bubble } = renderMsg('assistant', '');
+  const { body, bubble, think } = renderMsg('assistant', '');
   bubble.classList.add('typing');
   $('#btnSend').disabled = true;
   $('#btnChatStop').disabled = false;
@@ -826,7 +1120,8 @@ async function send() {
   let acc = '';
   try {
     const payload = selected.backend === 'ollama'
-      ? { config: cfgName, messages: HISTORY }
+      ? { config: cfgName, messages: HISTORY,
+          thinking: !!($('#chatThinking') && $('#chatThinking').checked) }
       : { config: cfgName, text };
     const resp = await fetch(`/api/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -849,12 +1144,23 @@ async function send() {
         if (!ev) continue;
         const data = JSON.parse(ev[2]);
         if (ev[1] === 'meta') { CHAT_INFO = data.info; }
-        else if (ev[1] === 'token') {
+        else if (ev[1] === 'reasoning') {
+          if (think) {
+            think.box.style.display = '';
+            think.box.open = true;
+            think.pre.textContent += data.text || '';
+            $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
+          }
+        } else if (ev[1] === 'token') {
           acc += data.text; body.textContent = acc;
           $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
         } else if (ev[1] === 'done') {
           acc = data.text || acc;
           body.dataset.raw = acc;
+          if (data.reasoning && think && !think.pre.textContent) {
+            think.box.style.display = '';
+            think.pre.textContent = data.reasoning;
+          }
           if (typeof renderMarkdown === 'function') renderMarkdown(body, acc);
           else body.textContent = acc;
         } else if (ev[1] === 'error') {
@@ -889,13 +1195,23 @@ $('#btnChatStop').onclick = () => { if (chatAbort) chatAbort.abort(); };
 emptyHint();
 
 /* ---------------- 服务页：会话 / 日志 两个子页 ---------------- */
-function srvMsg(role, text, model, ms) {
+const SRV_STREAMS = new Map();
+
+function srvMsg(role, text, model, ms, reasoning) {
   const box = $('#srvChat');
   const empty = box.querySelector('.empty');
   if (empty) empty.remove();
   const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot'));
   wrap.appendChild(el('div', 'avatar', role === 'user' ? '你' : 'AI'));
   const bubble = el('div', 'bubble');
+  let think = null;
+  if (role !== 'user' && reasoning) {
+    think = el('details', 'thinking');
+    think.open = true;
+    think.appendChild(el('summary', '', '思考过程'));
+    think.appendChild(el('pre', '', reasoning));
+    bubble.appendChild(think);
+  }
   const body = el('div', 'body');
   if (role === 'user') {
     body.textContent = text || '';
@@ -912,6 +1228,76 @@ function srvMsg(role, text, model, ms) {
   wrap.appendChild(bubble);
   box.appendChild(wrap);
   box.scrollTop = box.scrollHeight;
+  return { body, bubble, meta, think };
+}
+
+function srvEnsureThink(st) {
+  if (st.think) return st.think;
+  const box = el('details', 'thinking');
+  box.open = true;
+  box.appendChild(el('summary', '', '思考过程'));
+  const pre = el('pre', '');
+  box.appendChild(pre);
+  st.bubble.insertBefore(box, st.body);
+  st.think = { box, pre };
+  return st.think;
+}
+
+function srvStart(d) {
+  if (!d.id) return;
+  srvMsg('user', d.user, d.model);
+  const st = srvMsg('assistant', '', d.model);
+  st.text = '';
+  st.reasoning = '';
+  SRV_STREAMS.set(d.id, st);
+}
+
+function srvDelta(d) {
+  const st = SRV_STREAMS.get(d.id);
+  if (!st || !d.text) return;
+  st.text += d.text;
+  st.body.textContent = st.text;
+  st.body.dataset.raw = st.text;
+  $('#srvChat').scrollTop = $('#srvChat').scrollHeight;
+}
+
+function srvReasoning(d) {
+  const st = SRV_STREAMS.get(d.id);
+  if (!st || !d.text) return;
+  const think = srvEnsureThink(st);
+  think.pre.textContent += d.text;
+  $('#srvChat').scrollTop = $('#srvChat').scrollHeight;
+}
+
+function srvDone(d) {
+  const st = SRV_STREAMS.get(d.id);
+  if (!st) {
+    // 兼容旧版服务只发最终事件
+    srvMsg('user', d.user, d.model, d.ms);
+    srvMsg('assistant', d.assistant, d.model, d.ms, d.reasoning);
+    return;
+  }
+  if (d.reasoning && !st.reasoning) {
+    const think = srvEnsureThink(st);
+    think.pre.textContent = d.reasoning;
+  }
+  if (d.assistant != null) st.text = d.assistant;
+  st.body.dataset.raw = st.text || '';
+  if (typeof renderMarkdown === 'function') renderMarkdown(st.body, st.text || '');
+  else st.body.textContent = st.text || '';
+  if (d.ms && st.meta) {
+    st.meta.appendChild(el('span', '', d.ms + 'ms'));
+  }
+  SRV_STREAMS.delete(d.id);
+  $('#srvChat').scrollTop = $('#srvChat').scrollHeight;
+}
+
+function srvError(d) {
+  const st = d.id && SRV_STREAMS.get(d.id);
+  if (st) {
+    st.body.textContent = '错误：' + (d.error || '未知错误');
+    SRV_STREAMS.delete(d.id);
+  }
 }
 document.querySelectorAll('.subtabs button[data-srv]').forEach(b => b.onclick = () => {
   document.querySelectorAll('.subtabs button[data-srv]').forEach(x => x.classList.remove('on'));
@@ -923,18 +1309,44 @@ document.querySelectorAll('.subtabs button[data-srv]').forEach(b => b.onclick = 
 $('#btnClearSrv').onclick = () => { $('#srvChat').innerHTML = ''; $('#srvLog').textContent = ''; };
 
 $('#btnSrvStart').onclick = async () => {
-  if (!(await ensurePy('srv'))) return;
+  const btn = $('#btnSrvStart');
   const cfg = $('#srvConfig').value;
-  const r = await api('server/start', {method:'POST', headers:{'Content-Type':'application/json'},
-                                       body: JSON.stringify({port: +$('#srvPort').value,
-                                                             configs: cfg ? [cfg] : []})});
-  if (!r.ok) return toast('启动失败：' + r.error);
-  $('#btnSrvStart').disabled = true; $('#btnSrvStop').disabled = false;
-  $('#srvState').textContent = '运行中'; $('#srvUrl').textContent = `http://127.0.0.1:${r.port}/v1`;
+  const cfgObj = cfg ? selectedChatConfig(cfg) : null;
+  const needPy = cfgObj ? cfgObj.backend !== 'ollama'
+                        : CHAT_CONFIGS.some(c => c.backend !== 'ollama');
+  btn.disabled = true;
+  btn.textContent = '启动中…';
+  SRV_STARTING = true;
+  $('#srvState').textContent = '启动中…';
+  $('#srvUrl').textContent = '';
+  let started = false;
+  try {
+    if (needPy && !(await ensurePy('srv'))) return;
+    const r = await api('server/start', {method:'POST', headers:{'Content-Type':'application/json'},
+                                         body: JSON.stringify({port: +$('#srvPort').value,
+                                                               configs: cfg ? [cfg] : []})});
+    if (!r.ok) { toast('启动失败：' + r.error); return; }
+    started = true;
+    $('#btnSrvStart').disabled = true;
+    $('#btnSrvStop').disabled = false;
+    $('#srvState').textContent = '运行中';
+    $('#srvUrl').textContent = `http://127.0.0.1:${r.port}/v1`;
+  } catch (e) {
+    toast('启动失败：' + e.message);
+  } finally {
+    SRV_STARTING = false;
+    if (!started) {
+      btn.disabled = false;
+      btn.textContent = '启动服务';
+      $('#srvState').textContent = '未运行';
+    }
+  }
 };
 $('#btnSrvStop').onclick = async () => {
   await api('server/stop', {method:'POST'});
-  $('#btnSrvStart').disabled = false; $('#btnSrvStop').disabled = true;
+  $('#btnSrvStart').disabled = false;
+  $('#btnSrvStart').textContent = '启动服务';
+  $('#btnSrvStop').disabled = true;
   $('#srvState').textContent = '已停止'; $('#srvUrl').textContent = '';
 };
 
@@ -1008,11 +1420,13 @@ async function syncState() {
   if (sv.ok) {
     if (sv.running) {
       $('#btnSrvStart').disabled = true;
+      $('#btnSrvStart').textContent = '启动服务';
       $('#btnSrvStop').disabled = false;
       $('#srvState').textContent = '运行中';
       $('#srvUrl').textContent = `http://127.0.0.1:${sv.port}/v1`;
-    } else if ($('#btnSrvStart').disabled) {
+    } else if ($('#btnSrvStart').disabled && !SRV_STARTING) {
       $('#btnSrvStart').disabled = false;
+      $('#btnSrvStart').textContent = '启动服务';
       $('#btnSrvStop').disabled = true;
       $('#srvState').textContent = '已停止';
       $('#srvUrl').textContent = '';
@@ -1021,6 +1435,7 @@ async function syncState() {
 }
 
 (async () => {
+  updateTorchCategory('', false);   // 默认 CPU：不显示驱动版本输入
   initTrainTerm();            // xterm 必须在回填日志前初始化
   await loadConfigs();
   await loadModels();

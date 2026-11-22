@@ -126,3 +126,21 @@ def delta_text(obj):
     if isinstance(msg, dict) and msg.get("content"):
         return str(msg["content"])
     return ""
+
+
+def delta_reasoning(obj):
+    """取 Ollama 的思考内容，兼容原生与 OpenAI 兼容字段。"""
+    choices = obj.get("choices") or []
+    if not choices:
+        return ""
+    ch = choices[0] or {}
+    delta = ch.get("delta") or {}
+    msg = ch.get("message") or {}
+    for part in (delta, msg):
+        if not isinstance(part, dict):
+            continue
+        for key in ("reasoning_content", "thinking", "reasoning"):
+            value = part.get(key)
+            if value:
+                return str(value)
+    return ""
