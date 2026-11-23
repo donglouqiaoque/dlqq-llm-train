@@ -153,11 +153,12 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | GET | `/api/env/latest` | 查询 PyPI / PyTorch 源的最新 torch、numpy、transformers 版本，并返回实际可用的 PyTorch 构建列表；网络失败时回退到已安装/推荐版本 |
 | GET | `/api/configs` | 配置列表 + 解析后的键值 |
 | GET | `/api/models` | `model\` 下的标准模型目录清单（含是否已签名） |
-| GET | `/api/chat/configs` | 对话下拉用：本地配置 + Ollama 模型（带 backend 标记） |
+| GET | `/api/chat/configs` | 对话下拉用：本地配置 + 仅支持对话的 Ollama 模型（带 backend 标记） |
+| GET | `/api/service/configs` | 服务页下拉用：本地配置 + 全部 Ollama 模型（chat / embedding / other） |
 | GET | `/api/corpora` | `res\` 下的语料目录（文件数、体积） |
 | GET | `/api/train/status` `train/log` | 训练状态与增量日志 |
 | GET | `/api/server/status` | 桥接服务状态与端口 |
-| GET | `/api/events` | SSE：`train-raw` / `server-log` / `server-chat` / `env-log`；`train-raw` 保留 `\r`，由 xterm 渲染 |
+| GET | `/api/events` | SSE：`train-raw` / `server-log` / `server-chat` / `server-embedding` / `env-log`；`train-raw` 保留 `\r`，由 xterm 渲染 |
 | POST | `/api/config/save` | 逐行改 value 保存（保注释与键顺序），先备份 |
 | POST | `/api/env/install` | 用项目 Python 安装 torch / numpy / transformers；`torch_type=cpu|gpu|xpu|auto`，`torch_version` / `numpy_version` / `transformers_version` 可留空；兼容旧 `torch_index=cpu|cu126|cu128|xpu|auto`；输出走 `env-log` |
 | POST | `/api/train/start` `train/stop` | 启动 / 停止训练子进程 |
@@ -166,7 +167,8 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/sign` | `mode=compute|verify`，跑签名工具 |
 
 - 桥接服务每次完成对话会往 stdout 打一行 `@@EV@@ {json}`（`--events`），
-  webui 读线程按前缀识别后转成 SSE `server-chat`，页面「服务」页据此显示问答。
+  webui 读线程按前缀识别后转成 SSE `server-chat`，页面「服务」页据此显示问答；
+  embedding 成功时转成 `server-embedding`，在「向量」子页显示摘要。
 - SSE 用 `data: <json>\n\n`，一条连接一个线程；新增长连接接口要考虑线程上限。
 - **局域网端口**（`LANHandler`）只放行 `GET /`、`/chat.html`、`/logo.ico`、
   `/vendor/*`、`/api/models`、`/api/chat/configs` 与 `POST /api/chat`，其余路径一律 403；
@@ -224,6 +226,8 @@ root 目录始终只有 `config.json` / `model.safetensors` / `chars.json` / `me
 `/v1/chat/completions`，不加载 GGUF，也不参与训练；Ollama 不可用时本地模型不受影响。
 思考内容从 `message.thinking` / `delta.reasoning_content` 等字段提取，只用于显示，不进入历史。
 本地 HTTP 的 `stream=true` 现在逐字符生成并发送；Ollama 代理直接透传上游 SSE。
+Ollama 对话列表通过 `/api/show` 的 `capabilities` 过滤 embedding 等非对话模型；
+`/v1/embeddings` 转发到 Ollama 原生 `/api/embed`，再转换成 OpenAI 响应格式。
 
 **生成停止**：提示词用 `用户：` / `助手：`；生成到下一个 `用户：` 直接截断；词表缺这两个标记时
 自动切「续写模式」。

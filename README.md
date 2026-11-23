@@ -738,8 +738,12 @@ jsonl 会自动找问答字段（`{"text": ...}` 这种单字段的当纯文本�
    `@@EV@@` 事件），排错时不用再翻控制台；
 5. 点【停止】关闭服务；关掉 `start.bat` 的窗口时它也会一起退出。
 
-服务本身是 OpenAI 兼容的：`/v1/models`、`/v1/chat/completions`（支持 `stream`），
-本地模型在 `stream=true` 时逐字生成并发送；Ollama 代理直接透传上游 SSE。
+服务本身是 OpenAI 兼容的：`/v1/models`、`/v1/chat/completions`（支持 `stream`）
+和 `/v1/embeddings`（Ollama embedding 模型）。本地模型在 `stream=true` 时逐字生成并发送；
+Ollama 代理直接透传上游 SSE。对话列表会通过 Ollama `/api/show` 的能力字段过滤掉
+embedding 等非对话模型；embedding 请求转发到 Ollama 原生 `/api/embed` 并转换成 OpenAI 格式。
+服务页的「向量」子页显示每次 embedding 请求的模型、条数、维度、耗时，并把完整向量放在
+可折叠详情里（批量请求只展示第 1 条完整向量），不会把完整高维向量塞进会话气泡。
 模型清单来自 `properties\` 里能对上标准模型目录的配置（不再扫描旧 `.pt` 文件），谁被调用才加载谁；
 对话参数也读同一份配置。
 

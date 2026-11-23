@@ -11,6 +11,7 @@ r"""把训练好的模型起成一个 OpenAI 兼容的 HTTP 服务（桥接服�
     GET  /health                 健康检查
     GET  /v1/models              模型清单（DSH 点「获取可用模型」时调它）
     POST /v1/chat/completions    对话（支持流式与非流式）
+    POST /v1/embeddings          Ollama embedding 模型（float / base64）
 
 行为约定 —— 桥接层只做两件事，内容判断一律交给模型：
     · system / developer 角色的消息**直接忽略**（这个模型从没用系统提示训过）；
@@ -33,6 +34,8 @@ import re
 import sys
 import json
 import time
+import base64
+import struct
 import uuid
 import argparse
 import socket
@@ -483,8 +486,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0].rstrip("/")
-        if path != "/v1/chat/completions":
-            self._err(404, f"unknown path: {self.path}（本服务只实现 /v1/chat/completions）",
+        if path not in ("/v1/chat/completions", "/v1/embeddings"):
+            self._err(404, f"unknown path: {self.path}（本服务支持 /v1/chat/completions 和 /v1/embeddings）",
                       "not_found")
             return
         try:
@@ -494,11 +497,113 @@ class Handler(BaseHTTPRequestHandler):
             self._err(400, f"请求体不是合法 JSON：{e}")
             return
 
+        if path == "/v1/embeddings":
+            self.handle_embeddings(req)
+            return
+
         if ollama.is_remote(req.get("model")):
             self.handle_ollama(req)
             return
 
         self.handle_chat(req)
+
+    def handle_embeddings(self, req):
+        """把 OpenAI 兼容 embeddings 请求转给 Ollama 原生 /api/embed。"""
+        if getattr(ARGS, "no_ollama", False):
+            self._err(400, "Ollama 后端已关闭（--no-ollama）",
+                      "unsupported_feature", "model")
+            return
+        want = str(req.get("model") or "")
+        if not ollama.is_remote(want):
+            self._err(400, "本地模型不支持标准 embedding 接口；请使用 ollama/ 模型",
+                      "unsupported_model", "model")
+            return
+        tag = ollama.model_tag(want)
+        if not ollama.is_embedding_model(tag):
+            self._err(400, f"这个模型不支持 embedding：{want}",
+                      "unsupported_model", "model")
+            return
+        if req.get("encoding_format") == "base64":
+            encoding_format = "base64"
+        elif req.get("encoding_format") in (None, "", "float"):
+            encoding_format = "float"
+        else:
+            self._err(400, "encoding_format 只能是 float 或 base64",
+                      "invalid_request", "encoding_format")
+            return
+
+        raw_input = req.get("input")
+        if isinstance(raw_input, str):
+            inputs = [raw_input]
+        elif isinstance(raw_input, list) and all(isinstance(x, str) for x in raw_input):
+            inputs = raw_input
+        else:
+            self._err(400, "input 必须是字符串或字符串数组", "invalid_request", "input")
+            return
+        if not inputs or any(not x.strip() for x in inputs):
+            self._err(400, "input 不能为空", "invalid_request", "input")
+            return
+
+        payload = {"model": tag, "input": inputs}
+        dimensions = req.get("dimensions")
+        if dimensions is not None:
+            if not isinstance(dimensions, int) or dimensions <= 0:
+                self._err(400, "dimensions 必须是正整数", "invalid_request", "dimensions")
+                return
+            payload["dimensions"] = dimensions
+
+        t0 = time.time()
+        try:
+            conn, resp = ollama.open_embed(payload, getattr(ARGS, "ollama_url", None))
+        except Exception as e:
+            self._err(502, f"无法连接 Ollama：{type(e).__name__}: {e}", "upstream_error")
+            return
+        try:
+            if resp.status < 200 or resp.status >= 300:
+                body = resp.read().decode("utf-8", errors="replace")
+                self._err(resp.status, f"Ollama embedding 失败：{body[:500]}",
+                          "upstream_error")
+                return
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            vectors = data.get("embeddings") if isinstance(data, dict) else None
+            if not isinstance(vectors, list) or not vectors:
+                self._err(502, "Ollama 没有返回 embedding", "upstream_error")
+                return
+            if len(vectors) != len(inputs):
+                self._err(502, "Ollama 返回的向量数量与输入数量不一致", "upstream_error")
+                return
+            tokens = int(data.get("prompt_eval_count") or 0)
+            dims = len(vectors[0]) if isinstance(vectors[0], list) else 0
+            emit_event(t="embedding", model=want, count=len(inputs),
+                       dimensions=dims, tokens=tokens,
+                       ms=int((time.time() - t0) * 1000),
+                       encoding=encoding_format,
+                       input_preview=inputs[0][:160],
+                       vector=vectors[0], vector_truncated=len(vectors) > 1)
+            rows = []
+            for i, vec in enumerate(vectors):
+                if encoding_format == "base64":
+                    raw = struct.pack("<%df" % len(vec), *vec)
+                    embedding = base64.b64encode(raw).decode("ascii")
+                else:
+                    embedding = vec
+                rows.append({"object": "embedding", "index": i,
+                             "embedding": embedding})
+            self._send(200, {
+                "object": "list",
+                "data": rows,
+                "model": want,
+                "usage": {"prompt_tokens": tokens, "total_tokens": tokens},
+            })
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        except ValueError as e:
+            self._err(502, f"解析 Ollama embedding 响应失败：{e}", "upstream_error")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def handle_ollama(self, req):
         """把 OpenAI 兼容请求原样转给 Ollama。"""
@@ -508,6 +613,10 @@ class Handler(BaseHTTPRequestHandler):
 
         want = str(req.get("model") or "")
         tag = ollama.model_tag(want)
+        if not ollama.is_chat_model(tag):
+            self._err(400, f"这个模型不支持对话：{want}",
+                      "unsupported_model", "model")
+            return
         payload = dict(req)
         payload["model"] = tag
         # WebUI 的“深度思考”开关：同时兼容原生 think 与 OpenAI 的 reasoning_effort。

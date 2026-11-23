@@ -2,10 +2,11 @@
 r"""Ollama HTTP 适配层
 ====================
 
-只使用标准库，负责三件事：
+只使用标准库，负责四件事：
   1. 发现 Ollama 上已安装的模型（/api/tags）；
-  2. 把 OpenAI 兼容对话请求转发到 /v1/chat/completions；
-  3. 逐行读取 Ollama 返回的 SSE。
+  2. 查询模型能力（/api/show），区分对话和 embedding；
+  3. 把 OpenAI 兼容对话请求转发到 /v1/chat/completions；
+  4. 把 embedding 请求转发到 /api/embed，并逐行读取对话 SSE。
 
 Ollama 只作为外部推理后端，不加载 GGUF，也不引入 LangChain。
 模型 id 统一加 `ollama/` 前缀，和本地 HF 模型区分。
@@ -21,6 +22,60 @@ PREFIX = "ollama/"
 DEFAULT_BASE = "http://127.0.0.1:11434"
 
 _cache = {"base": "", "at": 0.0, "models": []}
+_caps = {"base": "", "data": {}}
+CAP_TTL = 60.0
+
+
+def _looks_like_embedding(name):
+    """仅在 /api/show 不可用时兜底；能力字段优先。"""
+    s = str(name or "").lower()
+    return any(x in s for x in ("embedding", "embed", "bge", "e5", "gte",
+                                "nomic", "jina"))
+
+
+def model_capabilities(name, base=None, timeout=2.5, use_cache=True):
+    """查询 Ollama 模型能力，如 completion / embedding / tools / vision。
+
+    旧版 Ollama 或只开放 OpenAI 兼容接口的代理可能没有 /api/show，返回 []。
+    """
+    base = base_url(base)
+    tag = model_tag(name)
+    now = time.time()
+    if _caps["base"] != base:
+        _caps.update(base=base, data={})
+    hit = _caps["data"].get(tag)
+    if use_cache and hit and now - hit[0] < CAP_TTL:
+        return list(hit[1])
+
+    caps = []
+    try:
+        body = json.dumps({"model": tag}, ensure_ascii=False).encode("utf-8")
+        req = Request(base + "/api/show", data=body, method="POST",
+                      headers={"Content-Type": "application/json; charset=utf-8",
+                               "Accept": "application/json"})
+        with urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+        if isinstance(data, dict) and isinstance(data.get("capabilities"), list):
+            caps = [str(x) for x in data.get("capabilities") if x]
+    except Exception:
+        caps = []
+
+    _caps["data"][tag] = (now, caps)
+    return list(caps)
+
+
+def is_chat_model(name, base=None):
+    caps = set(model_capabilities(name, base))
+    if caps:
+        return bool(caps & {"completion", "chat"})
+    return not _looks_like_embedding(name)
+
+
+def is_embedding_model(name, base=None):
+    caps = set(model_capabilities(name, base))
+    if caps:
+        return "embedding" in caps
+    return _looks_like_embedding(name)
 
 
 def base_url(value=None):
@@ -91,6 +146,27 @@ def open_chat(payload, base=None, timeout=300):
     conn.request("POST", path, body=body, headers={
         "Content-Type": "application/json; charset=utf-8",
         "Accept": "text/event-stream, application/json",
+        "Content-Length": str(len(body)),
+    })
+    return conn, conn.getresponse()
+
+
+def open_embed(payload, base=None, timeout=300):
+    """向 Ollama 发一个原生 /api/embed 请求。
+
+    返回 (connection, response)，调用方负责 close。
+    """
+    base = base_url(base)
+    parts = urlsplit(base)
+    if parts.scheme == "https":
+        conn = HTTPSConnection(parts.hostname, parts.port or 443, timeout=timeout)
+    else:
+        conn = HTTPConnection(parts.hostname, parts.port or 80, timeout=timeout)
+    path = (parts.path.rstrip("/") if parts.path else "") + "/api/embed"
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    conn.request("POST", path, body=body, headers={
+        "Content-Type": "application/json; charset=utf-8",
+        "Accept": "application/json",
         "Content-Length": str(len(body)),
     })
     return conn, conn.getresponse()

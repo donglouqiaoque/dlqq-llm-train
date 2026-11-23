@@ -174,11 +174,12 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | GET | `/api/env/latest` | query PyPI / PyTorch for the latest torch, numpy and transformers versions plus the actually available PyTorch build list; falls back to installed/recommended versions when the network is down |
 | GET | `/api/configs` | config list with parsed key/values |
 | GET | `/api/models` | standard model directories under `model\` (with signed flag) |
-| GET | `/api/chat/configs` | chat dropdown: local configs + Ollama models (with backend tag) |
+| GET | `/api/chat/configs` | chat dropdown: local configs + chat-only Ollama models (with backend tag) |
+| GET | `/api/service/configs` | service-page dropdown: local configs + all Ollama models (chat / embedding / other) |
 | GET | `/api/corpora` | corpus directories under `res\` (file count, size) |
 | GET | `/api/train/status` `train/log` | training state and incremental log |
 | GET | `/api/server/status` | bridge state and port |
-| GET | `/api/events` | SSE: `train-raw` / `server-log` / `server-chat` / `env-log`; `train-raw` keeps `\r` for xterm |
+| GET | `/api/events` | SSE: `train-raw` / `server-log` / `server-chat` / `server-embedding` / `env-log`; `train-raw` keeps `\r` for xterm |
 | POST | `/api/config/save` | line-level value update (keeps comments/order), backs up first |
 | POST | `/api/env/install` | install torch / numpy / transformers into the project Python; `torch_type=cpu|gpu|xpu|auto`; `torch_version` / `numpy_version` / `transformers_version` may be empty; legacy `torch_index=cpu|cu126|cu128|xpu|auto` remains supported; output via `env-log` |
 | POST | `/api/train/start` `train/stop` | start / stop the training child |
@@ -188,6 +189,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 
 - The bridge prints one `@@EV@@ {json}` line per completed chat (`--events`); the webui reader
   turns it into an SSE `server-chat` event, which the "server" tab renders as a Q&A list.
+  Successful embeddings become `server-embedding` and are summarized in the Vectors tab.
 - SSE frames are `data: <json>\n\n`; one thread per connection, so new long-lived endpoints
   must consider the thread budget.
 - **LAN port** (`LANHandler`) only allows `GET /`, `/chat.html`, `/logo.ico`, `/vendor/*`,
@@ -252,7 +254,9 @@ twice in `chat.py` and `http_server.py` — keep them in sync).
 only forward requests to `/v1/chat/completions`; GGUF is never loaded and training is unaffected.
 Reasoning is extracted from `message.thinking` / `delta.reasoning_content` and used for display only,
 never added to history. Local HTTP `stream=true` now generates and sends character by character; the
-Ollama proxy passes the upstream SSE stream through.
+Ollama proxy passes the upstream SSE stream through. The Ollama chat list filters embedding and other
+non-chat models using `/api/show` capabilities; `/v1/embeddings` calls Ollama's native `/api/embed`
+and converts the result to the OpenAI response shape.
 
 **Stopping**: prompts use `用户：` / `助手：`; generation stops at the next `用户：`. If the vocabulary
 lacks those markers, the session falls back to plain continuation mode.

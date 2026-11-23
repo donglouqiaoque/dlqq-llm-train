@@ -820,11 +820,16 @@ into the DSH provider settings. Every request then appears in the session list b
 `@@EV@@` lines the service prints to stdout), so you debug from the page instead of the console.
 Press Stop to shut it down — closing the `start.bat` window also stops it.
 
-The service is OpenAI-compatible: `/v1/models` and `/v1/chat/completions` (with `stream`).
-Local models now generate and send token by token when `stream=true`; the Ollama proxy passes the
-upstream SSE stream through. Models come from the `properties\` configs whose `model=` points at an
-existing standard model directory (no more directory scanning), and chat parameters are read from
-the same config. Models load only on first use.
+The service is OpenAI-compatible: `/v1/models`, `/v1/chat/completions` (with `stream`) and
+`/v1/embeddings` (Ollama embedding models). Local models now generate and send token by token when
+`stream=true`; the Ollama proxy passes the upstream SSE stream through. The chat list filters out
+embedding and other non-chat models using Ollama `/api/show` capabilities; embedding requests go to
+Ollama's native `/api/embed` and are converted to the OpenAI response shape. The service page's
+Vectors tab shows the model, count, dimensions and latency for each embedding request, with the
+complete vector inside a collapsible detail (batch requests show only the first complete vector);
+full high-dimensional vectors are not placed in chat bubbles. Models come from the
+`properties\` configs whose `model=` points at an existing standard model directory (no more
+directory scanning), and chat parameters are read from the same config. Models load only on first use.
 
 ### Optional Ollama backend
 

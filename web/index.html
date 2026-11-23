@@ -146,6 +146,22 @@
   .subtabs button { padding:4px 12px; font-size:12px; border-radius:8px; }
   .subtabs button.on { background:#1b2740; border-color:#2b3d5e; color:#cfdcff; }
   .srvpane { flex:1; min-height:0; }
+  .embedlist { overflow:auto; display:flex; flex-direction:column; gap:8px;
+               padding:2px 2px 10px; scrollbar-width:thin; scrollbar-color:#43546d transparent; }
+  .embedlist::-webkit-scrollbar { width:8px; }
+  .embedlist::-webkit-scrollbar-track { background:#0a0f16; border-radius:999px; }
+  .embedlist::-webkit-scrollbar-thumb { background:linear-gradient(180deg, #40536e, #5a708e);
+                                         border:2px solid #0a0f16; border-radius:999px; }
+  .embedcard { border:1px solid var(--line); border-radius:10px; background:#121820;
+               padding:10px 12px; }
+  .embedcard .etop { display:flex; align-items:center; gap:10px; margin-bottom:5px; }
+  .embedcard .emodel { color:#cfdcff; font:12px Consolas, monospace; }
+  .embedcard .etime { margin-left:auto; color:var(--muted); font-size:11px; }
+  .embedcard .emeta { color:var(--muted); font-size:12px; margin-bottom:6px; }
+  .embedcard .einput { color:#d7deea; font-size:13px; line-height:1.55;
+                       white-space:pre-wrap; word-break:break-word; margin-bottom:6px; }
+  .embedcard .einput::before { content:"输入："; color:var(--muted); }
+  .embedcard .thinking { margin:6px 0 0; }
   .siglist { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:8px; }
   .sigrow { display:flex; align-items:center; gap:12px; padding:10px 12px;
             border:1px solid var(--line); border-radius:10px; background:#12161d; }
@@ -274,11 +290,17 @@
     </div>
     <div class="subtabs">
       <button data-srv="chat" class="on">会话</button>
+      <button data-srv="embed">向量</button>
       <button data-srv="log">日志</button>
       <div class="spacer"></div>
       <button id="btnClearSrv">清空</button>
     </div>
-    <div class="srvpane msgs" id="srvChat"></div>
+    <div class="srvpane msgs" id="srvChat">
+      <div class="empty">这里显示模型对话内容</div>
+    </div>
+    <div class="srvpane embedlist" id="srvEmbed" style="display:none">
+      <div class="empty">这里显示 Ollama embedding 请求摘要</div>
+    </div>
     <div class="srvpane log" id="srvLog" style="display:none"></div>
   </section>
 
@@ -517,7 +539,8 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
 });
 
 let CONFIGS = [];
-let CHAT_CONFIGS = [];               // 本地 + Ollama，独立于训练配置
+let CHAT_CONFIGS = [];               // 本地 + 仅对话 Ollama 模型
+let SERVICE_CONFIGS = [];            // 本地 + 全部 Ollama 模型（含 embedding）
 // 配置文件第一行常是 "# ====" 这种装饰线，不能拿来当说明
 function cleanDesc(desc) {
   const d = (desc || '').trim();
@@ -546,13 +569,21 @@ async function loadConfigs() {
 }
 
 async function loadChatConfigs() {
-  const r = await api('chat/configs');
-  CHAT_CONFIGS = r.configs || [];
-  const label = c => c.backend === 'ollama' ? `${c.name}（Ollama）` : `${c.name}（本地）`;
+  const [chatRes, serviceRes] = await Promise.all([
+    api('chat/configs'), api('service/configs')]);
+  CHAT_CONFIGS = chatRes.configs || [];
+  SERVICE_CONFIGS = serviceRes.configs || [];
+  const chatLabel = c => c.backend === 'ollama' ? `${c.name}（Ollama）` : `${c.name}（本地）`;
+  const serviceLabel = c => {
+    if (c.backend !== 'ollama') return `${c.name}（本地）`;
+    if (c.kind === 'embedding') return `${c.name}（嵌入）`;
+    if (c.kind === 'chat') return `${c.name}（对话）`;
+    return `${c.name}（Ollama）`;
+  };
   $('#chatConfig').innerHTML = CHAT_CONFIGS.map(c =>
-    `<option value="${c.name}">${label(c)}</option>`).join('');
-  $('#srvConfig').innerHTML = '<option value="">全部配置</option>' + CHAT_CONFIGS.map(c =>
-    `<option value="${c.name}">${label(c)}</option>`).join('');
+    `<option value="${c.name}">${chatLabel(c)}</option>`).join('');
+  $('#srvConfig').innerHTML = '<option value="">全部配置</option>' + SERVICE_CONFIGS.map(c =>
+    `<option value="${c.name}">${serviceLabel(c)}</option>`).join('');
   updateChatBackend();
   fitSrvConfigWidth();
 }
@@ -575,6 +606,9 @@ function fitSrvConfigWidth() {
 
 function selectedChatConfig(name) {
   return CHAT_CONFIGS.find(c => c.name === name) || null;
+}
+function selectedServiceConfig(name) {
+  return SERVICE_CONFIGS.find(c => c.name === name) || null;
 }
 
 function updateChatBackend() {
@@ -754,8 +788,22 @@ function renderEnv(r) {
       $('#envTransformersVersion').value = info.transformers_version;
     }
   }
-  setInstallStatus('envTorchInstalled', info && info.torch,
-    info && info.torch ? `${info.cuda ? 'GPU' : 'CPU'} ${info.torch_version || ''}` : '');
+  const torchInstalledText = (() => {
+    if (!info || !info.torch) return '';
+    const raw = info.torch_version || '';
+    const base = raw.split('+', 1)[0] || '版本未知';
+    let chip = info.cuda ? 'GPU (NVIDIA)' : 'CPU';
+    let driver = '';
+    const m = /\+(cu\d+)/.exec(raw);
+    if (m) {
+      chip = 'GPU (NVIDIA)';
+      driver = m[1].slice(2, -1) + '.' + m[1].slice(-1);
+    } else if (/\+(xpu)/.test(raw)) {
+      chip = 'XPU';
+    }
+    return [base, chip, driver].filter(Boolean).join(' ');
+  })();
+  setInstallStatus('envTorchInstalled', info && info.torch, torchInstalledText);
   setInstallStatus('envNumpyInstalled', info && info.numpy, info && info.numpy_version);
   setInstallStatus('envTransformersInstalled', info && info.transformers,
     info && info.transformers_version);
@@ -1004,6 +1052,9 @@ function bindEvents() {
       srvMsg('user', d.user, d.model, d.ms);
       srvMsg('assistant', d.assistant, d.model, d.ms, d.reasoning);
     }
+  });
+  es.addEventListener('server-embedding', e => {
+    srvEmbed(JSON.parse(e.data));
   });
   es.addEventListener('env-log', e => {
     const d = JSON.parse(e.data);
@@ -1299,21 +1350,56 @@ function srvError(d) {
     SRV_STREAMS.delete(d.id);
   }
 }
+
+function srvEmbed(d) {
+  const box = $('#srvEmbed');
+  const empty = box.querySelector('.empty');
+  if (empty) empty.remove();
+  const card = el('div', 'embedcard');
+  const top = el('div', 'etop');
+  top.appendChild(el('span', 'emodel', d.model || 'Ollama'));
+  top.appendChild(el('span', 'etime',
+    new Date().toLocaleTimeString('zh-CN', { hour12: false })));
+  card.appendChild(top);
+  const count = d.count || 1;
+  const dims = d.dimensions || 0;
+  const ms = d.ms || 0;
+  const tokens = d.tokens || 0;
+  card.appendChild(el('div', 'emeta',
+    `${count} 条 · ${dims} 维 · ${ms}ms` +
+    (tokens ? ` · ${tokens} tokens` : '') +
+    (d.encoding ? ` · ${d.encoding}` : '')));
+  card.appendChild(el('div', 'einput', d.input_preview || '（空）'));
+  if (Array.isArray(d.vector) && d.vector.length) {
+    const details = el('details', 'thinking');
+    details.appendChild(el('summary', '',
+      `向量数据（${dims} 维）` + (d.vector_truncated ? ' · 第 1 条' : '')));
+    details.appendChild(el('pre', '', JSON.stringify(d.vector)));
+    card.appendChild(details);
+  }
+  box.appendChild(card);
+  box.scrollTop = box.scrollHeight;
+}
 document.querySelectorAll('.subtabs button[data-srv]').forEach(b => b.onclick = () => {
   document.querySelectorAll('.subtabs button[data-srv]').forEach(x => x.classList.remove('on'));
   b.classList.add('on');
-  const isChat = b.dataset.srv === 'chat';
-  $('#srvChat').style.display = isChat ? 'block' : 'none';
-  $('#srvLog').style.display = isChat ? 'none' : 'block';
+  const which = b.dataset.srv;
+  $('#srvChat').style.display = which === 'chat' ? 'block' : 'none';
+  $('#srvEmbed').style.display = which === 'embed' ? 'flex' : 'none';
+  $('#srvLog').style.display = which === 'log' ? 'block' : 'none';
 });
-$('#btnClearSrv').onclick = () => { $('#srvChat').innerHTML = ''; $('#srvLog').textContent = ''; };
+$('#btnClearSrv').onclick = () => {
+  $('#srvChat').innerHTML = '<div class="empty">这里显示模型对话内容</div>';
+  $('#srvLog').textContent = '';
+  $('#srvEmbed').innerHTML = '<div class="empty">这里显示 Ollama embedding 请求摘要</div>';
+};
 
 $('#btnSrvStart').onclick = async () => {
   const btn = $('#btnSrvStart');
   const cfg = $('#srvConfig').value;
-  const cfgObj = cfg ? selectedChatConfig(cfg) : null;
+  const cfgObj = cfg ? selectedServiceConfig(cfg) : null;
   const needPy = cfgObj ? cfgObj.backend !== 'ollama'
-                        : CHAT_CONFIGS.some(c => c.backend !== 'ollama');
+                        : SERVICE_CONFIGS.some(c => c.backend !== 'ollama');
   btn.disabled = true;
   btn.textContent = '启动中…';
   SRV_STARTING = true;

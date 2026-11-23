@@ -424,13 +424,35 @@ def list_models():
 
 
 def list_chat_configs():
-    """对话下拉用：本地配置 + Ollama 模型，统一带 backend 标记。"""
+    """对话下拉用：本地配置 + 仅支持对话的 Ollama 模型。"""
     out = []
     for c in common.chat_configs(ROOT):
         out.append({"name": c["name"], "model": c["model"], "backend": "local"})
     for name in ollama.list_models():
+        if ollama.is_chat_model(name):
+            out.append({"name": ollama.model_id(name), "model": name,
+                        "backend": "ollama", "kind": "chat"})
+    return out
+
+
+def list_service_configs():
+    """服务页下拉用：本地配置 + 全部 Ollama 模型（含 embedding）。"""
+    out = []
+    for c in common.chat_configs(ROOT):
+        out.append({"name": c["name"], "model": c["model"],
+                    "backend": "local", "kind": "chat"})
+    for name in ollama.list_models():
+        caps = set(ollama.model_capabilities(name))
+        if "embedding" in caps:
+            kind = "embedding"
+        elif caps & {"completion", "chat"}:
+            kind = "chat"
+        elif caps:
+            kind = "other"
+        else:
+            kind = "embedding" if ollama.is_embedding_model(name) else "chat"
         out.append({"name": ollama.model_id(name), "model": name,
-                    "backend": "ollama"})
+                    "backend": "ollama", "kind": kind})
     return out
 
 
@@ -552,6 +574,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "models": list_models()})
         elif path == "/api/chat/configs":
             self._json({"ok": True, "configs": list_chat_configs()})
+        elif path == "/api/service/configs":
+            self._json({"ok": True, "configs": list_service_configs()})
         elif path == "/api/corpora":
             self._json({"ok": True, "corpora": list_corpora()})
         elif path == "/api/train/status":
@@ -817,6 +841,8 @@ class Handler(BaseHTTPRequestHandler):
 
         # Ollama 模型：直接把原始 messages 转给 Ollama，不进入本地 ChatSession
         if ollama.is_remote(cfg):
+            if not ollama.is_chat_model(ollama.model_tag(cfg)):
+                return self._err(400, "这个 Ollama 模型不支持对话")
             return self._chat_ollama(cfg, body, text, lan)
 
         # 按配置加载：模型路径和对话参数都来自 properties\<配置>.properties
@@ -999,7 +1025,11 @@ class Handler(BaseHTTPRequestHandler):
         def on_line(line):
             if line.startswith("@@EV@@ "):
                 try:
-                    HUB.push("server-chat", json.loads(line[7:]))
+                    ev = json.loads(line[7:])
+                    if isinstance(ev, dict) and ev.get("t") == "embedding":
+                        HUB.push("server-embedding", ev)
+                    else:
+                        HUB.push("server-chat", ev)
                 except ValueError:
                     pass
             HUB.push("server-log", {"line": line})
