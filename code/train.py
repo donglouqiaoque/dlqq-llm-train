@@ -530,6 +530,7 @@ def prepare_data():
     total_size = sum(x["size"] for x in spec)       # 语料总字节数，只用于打印
     is_dir = bool(CONFIG["data_path"]) and os.path.isdir(CONFIG["data_path"])
     os.makedirs(CONFIG["cache_dir"], exist_ok=True) # 缓存目录不存在就建
+    common.hide_dir(CONFIG["cache_dir"])            # Windows 下默认隐藏缓存目录
 
     # 缓存指纹要把「目录里每个文件的名字/大小/修改时间 + 格式/字段」都算进去：
     # 往目录里新丢一个 jsonl，指纹就变，自动重新切词。

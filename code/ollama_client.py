@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 
 PREFIX = "ollama/"
 DEFAULT_BASE = "http://127.0.0.1:11434"
+_base_override = None
 
 _cache = {"base": "", "at": 0.0, "models": []}
 _caps = {"base": "", "data": {}}
@@ -80,10 +81,29 @@ def is_embedding_model(name, base=None):
 
 def base_url(value=None):
     """Ollama 根地址；兼容传入带 /v1 的 OpenAI base_url。"""
-    v = (value or os.environ.get("OLLAMA_URL") or DEFAULT_BASE).strip().rstrip("/")
+    raw = value
+    if not raw:
+        raw = _base_override or os.environ.get("OLLAMA_URL") or DEFAULT_BASE
+    v = str(raw).strip().rstrip("/")
     if v.endswith("/v1"):
         v = v[:-3].rstrip("/")
     return v or DEFAULT_BASE
+
+
+def set_base_url(value):
+    """设置本次运行的 Ollama 根地址；空值恢复环境变量/默认值。"""
+    global _base_override
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        _base_override = None
+        return None
+    if raw.endswith("/v1"):
+        raw = raw[:-3].rstrip("/")
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("Ollama URL 必须是 http:// 或 https:// 地址")
+    _base_override = raw
+    return _base_override
 
 
 def model_id(name):
@@ -127,6 +147,31 @@ def list_models(base=None, timeout=2.5, use_cache=True):
     names = sorted({n for n in names if n})
     _cache.update(base=base, at=now, models=names)
     return list(names)
+
+
+def detect_environment(base=None, timeout=2.5):
+    """检测 Ollama 服务、版本和模型数量；不加载模型。"""
+    base = base_url(base)
+    out = {"ok": False, "url": base, "version": "", "models": [],
+           "chat_models": [], "embedding_models": [], "error": ""}
+    error = ""
+    try:
+        req = Request(base + "/api/version", headers={"Accept": "application/json"})
+        with urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+        if isinstance(data, dict):
+            out["version"] = str(data.get("version") or "")
+    except Exception as e:
+        error = f"{type(e).__name__}: 无法连接 Ollama"
+
+    names = list_models(base, timeout=timeout, use_cache=False)
+    out["models"] = names
+    out["chat_models"] = [n for n in names if is_chat_model(n, base)]
+    out["embedding_models"] = [n for n in names if is_embedding_model(n, base)]
+    out["ok"] = bool(out["version"] or names)
+    if not out["ok"]:
+        out["error"] = error or "无法连接 Ollama"
+    return out
 
 
 def open_chat(payload, base=None, timeout=300):

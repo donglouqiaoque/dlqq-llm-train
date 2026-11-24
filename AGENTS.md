@@ -100,7 +100,7 @@ web/                    前端（被 webui.py 托管，不需要单独服务器�
 properties/             四个训练配置（要开源，注释写给外人看）
 model/                  本地权重（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\）
 res/                    语料目录（不进版本库）
-.cache/                 训练缓存/日志/配置备份（目录进版本库，内容忽略）
+.cache/                 训练缓存/日志/配置备份（目录进版本库，内容忽略；Windows 下自动隐藏）
 THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
 
@@ -131,8 +131,10 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
   安装表单按 PyTorch / Numpy / transformers 三行填写；PyTorch 的芯片类型下拉框来自实际可用的
   硬件后端（CPU / GPU NVIDIA / AMD / Apple / XPU 等），驱动版本输入框填数字版本
   （CUDA 12.6 / ROCm 6.2），Torch 库版本单独填写。`cu126` 等只做内部映射。
-  自动检测只负责芯片类型/驱动版本；同时读取当前已安装版本填入版本框，
+  检测环境只负责芯片类型/驱动版本；同时读取当前已安装版本填入版本框，
   安装时跳过已安装且版本相同的库。版本输入框留空即安装最新版。
+  WebUI 启动时检测一次 Python 和 Ollama；之后训练、对话、服务启动前不重复自动检测，
+  只有环境页手动【检测环境】才重新检测。Ollama URL 可在环境页修改并持久化。
 - **生命周期**：关掉 `start.bat` 的 cmd 窗口 = 退出（先 `terminate()` 子进程，5 秒不退再
   `taskkill /F /T`）；**关浏览器标签不算退出**，训练照常跑，重新访问控制台地址即可。
 - **看门狗**：子进程按 `--parent-pid` 每 3 秒用 `ctypes` `WaitForSingleObject` 检查父进程句柄，
@@ -151,6 +153,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 |---|---|---|
 | GET | `/api/env` | 查询/检测项目 Python（`check=1` 才 probe；返回 torch/numpy/transformers/pip/CUDA，以及 `system.torch_recommend` 显卡/驱动推荐） |
 | GET | `/api/env/latest` | 查询 PyPI / PyTorch 源的最新 torch、numpy、transformers 版本，并返回实际可用的 PyTorch 构建列表；网络失败时回退到已安装/推荐版本 |
+| GET | `/api/env/ollama` | 检测 Ollama 服务地址、版本和模型数量（区分对话 / embedding） |
 | GET | `/api/configs` | 配置列表 + 解析后的键值 |
 | GET | `/api/models` | `model\` 下的标准模型目录清单（含是否已签名） |
 | GET | `/api/chat/configs` | 对话下拉用：本地配置 + 仅支持对话的 Ollama 模型（带 backend 标记） |

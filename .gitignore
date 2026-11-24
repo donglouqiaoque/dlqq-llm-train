@@ -6,7 +6,7 @@ __pycache__
 # 忽略AI临时目录（整个目录，不参与训练、不进版本库）
 .ai_res
 # 训练缓存目录：保留目录本身（.gitkeep），只忽略内容
-.cache/*
+.cache
 # 忽略除chat_demo以外的模型（模型文件太大Gitee不让上传）
 model/*
 model/**/checkpoint*

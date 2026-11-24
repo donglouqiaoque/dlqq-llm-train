@@ -115,7 +115,7 @@ web/                    frontend, served by webui.py (no separate web server)
 properties/             four training configs (open-sourced, comments written for outsiders)
 model/                  local weights (`model\<name>\` standard HF directory + `checkpoint-<step>\`)
 res/                    corpora (not in git)
-.cache/                 training cache/logs/config backups (directory tracked, contents ignored)
+.cache/                 training cache/logs/config backups (directory tracked, contents ignored; hidden on Windows)
 THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
 
@@ -148,9 +148,11 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
   The form has three rows: PyTorch / Numpy / transformers. The PyTorch chip-type dropdown lists the
   actually supported hardware backends (CPU / GPU NVIDIA / AMD / Apple / XPU); the driver-version
   input takes a numeric version (CUDA 12.6 / ROCm 6.2), and the Torch library version is separate.
-  `cu126` and similar tags are internal mappings only. Auto-detect handles the chip type/driver
+  `cu126` and similar tags are internal mappings only. Detect environment handles the chip type/driver
   version and reads installed versions into the form; installation skips already-installed
-  libraries with the same version.
+  libraries with the same version. The WebUI checks Python and Ollama once at startup. Training,
+  chat, and server start do not auto-detect again; only the manual Detect environment button in the
+  Environment tab refreshes them. The Ollama URL is editable and persisted.
 - **Lifecycle**: closing the cmd window of `start.bat` means exit — children are `terminate()`d,
   and `taskkill /F /T` is the fallback after 5 seconds. **Closing the browser tab is not an exit**;
   training keeps running and you can simply reopen the URL.
@@ -172,6 +174,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 |---|---|---|
 | GET | `/api/env` | inspect/check the project Python (`check=1` probes; returns torch/numpy/transformers/pip/CUDA plus `system.torch_recommend` GPU/driver recommendation) |
 | GET | `/api/env/latest` | query PyPI / PyTorch for the latest torch, numpy and transformers versions plus the actually available PyTorch build list; falls back to installed/recommended versions when the network is down |
+| GET | `/api/env/ollama` | detect the Ollama URL, version and model counts (chat / embedding) |
 | GET | `/api/configs` | config list with parsed key/values |
 | GET | `/api/models` | standard model directories under `model\` (with signed flag) |
 | GET | `/api/chat/configs` | chat dropdown: local configs + chat-only Ollama models (with backend tag) |

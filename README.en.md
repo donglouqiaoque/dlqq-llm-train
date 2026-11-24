@@ -86,7 +86,7 @@ Every Python entry point — WebUI, training, chat, bridge and signature — use
 
 1. Double-click `.runtime\start.bat`;
 2. Open the **Environment** tab;
-3. Press **Auto detect**: it detects the chip type/driver version and fills the
+3. Press **Detect environment** next to Project Python: it detects the chip type/driver version and fills the
    currently installed Torch / Numpy / transformers versions into the form;
 4. Fill the install form row by row:
    - **PyTorch**: choose the chip type; enter the numeric driver version
@@ -95,10 +95,16 @@ Every Python entry point — WebUI, training, chat, bridge and signature — use
    - **transformers**: empty means latest, or enter `5.22.2`;
 5. Press **Install / update training dependencies** and wait for pip to finish;
    already-installed libraries with the same version are skipped;
-6. Press **Auto detect** again to confirm the chip type/driver version and installed versions.
+6. Press **Detect environment** again to confirm the chip type/driver version and installed versions.
 
-Auto detect handles the chip type/driver version and reads installed versions; empty version
+Detect environment handles the chip type/driver version and reads installed versions; empty version
 fields mean latest, or pin them manually. `2.14.1` is only an example.
+
+The **Ollama** row in the Environment tab checks the Ollama service separately: it shows
+`OLLAMA_URL`, the service version, and the number of chat / embedding models. An unavailable Ollama
+does not affect local training or chat. The URL is editable in the Environment tab; detection applies
+and saves it. The WebUI checks Python and Ollama once at startup, then does not auto-detect again
+before training, chat, or server start; use **Detect environment** in the Environment tab to refresh.
 
 Dependencies are installed into `.runtime\python\Lib\site-packages`, the same project Python that
 runs the WebUI. The WebUI itself imports only the standard library and never imports torch, so the

@@ -19,13 +19,6 @@
            background:var(--panel); border-bottom:1px solid var(--line); }
   header h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.5px; }
   header .brand { width:26px; height:26px; border-radius:6px; object-fit:contain; }
-  .env-bar { display:flex; align-items:center; gap:8px; min-width:0;
-             padding:7px 18px; border-top:1px solid var(--line);
-             border-bottom:1px solid var(--line); background:rgba(23,26,33,.55); }
-  .env-bar button { flex:0 0 auto; white-space:nowrap; }
-  .env-bar .env-check { flex:0 0 auto; white-space:nowrap; display:flex; align-items:center; gap:4px; }
-  .env-bar .pypath { flex:0 1 320px; max-width:min(320px, 24vw); }
-  .env-bar .status-scroll { flex:1 1 auto; min-width:180px; }
   .select-scroll { width:150px; max-width:230px; min-width:140px; overflow-x:auto; overflow-y:hidden;
                     border-radius:8px; scrollbar-width:thin; scrollbar-color:#43546d transparent;
                     transition:width .16s ease; }
@@ -193,21 +186,25 @@
   .scroll-text { overflow-x:auto; white-space:nowrap; max-width:100%; min-width:0; display:block; }
   .scroll-text::-webkit-scrollbar { height:5px; }
   .scroll-text::-webkit-scrollbar-thumb { background:#3a4353; border-radius:4px; }
-  .status-scroll { flex:1 1 0; min-width:120px; overflow-x:auto; overflow-y:hidden;
-                   white-space:nowrap; align-self:center; }
-  .status-scroll > span { display:inline-block; min-width:max-content; }
-  .status-scroll::-webkit-scrollbar { height:5px; }
-  .status-scroll::-webkit-scrollbar-thumb { background:#3a4353; border-radius:4px; }
   .thinking { margin:0 0 8px; border:1px solid #2b3444; border-radius:8px; background:#0e1219; }
   .thinking summary { cursor:pointer; color:var(--muted); font-size:12px; padding:6px 9px; user-select:none; }
   .thinking pre { margin:0; padding:0 10px 9px; white-space:pre-wrap; word-break:break-word;
                   max-height:220px; overflow:auto; color:#aab4c4; font:12px/1.55 Consolas, monospace; }
+  .boot-mask { position:fixed; inset:0; z-index:9999; background:#0a0d12;
+               display:flex; flex-direction:column; align-items:center; justify-content:center;
+               gap:14px; color:var(--muted); font-size:13px; transition:opacity .22s ease; }
+  .boot-mask.hide { opacity:0; pointer-events:none; }
+  .boot-spinner { width:30px; height:30px; border:3px solid #263244; border-top-color:#5b8dff;
+                  border-radius:50%; animation:boot-spin .8s linear infinite; }
+  @keyframes boot-spin { to { transform:rotate(360deg); } }
   .envfields { display:flex; flex-direction:column; gap:8px; margin:2px 0 10px; }
   .envhelp { margin:0 0 12px; line-height:1.6; }
   .envfield { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
   .envfield .k { flex:0 0 110px; color:var(--muted); }
   .envfield input[type="text"] { min-width:200px; }
   .envfield select { min-width:170px; }
+  .ollama-url { width:min(360px,32vw); min-width:200px; font-family:Consolas, monospace;
+                font-size:12px; }
   .torch-driver { display:inline-flex; align-items:center; gap:5px; }
   .torch-prefix { color:#8fa3bf; font:12px Consolas, monospace; padding:0 1px; }
   .envfield .installed { flex:1 1 220px; min-width:0; color:var(--muted);
@@ -219,19 +216,14 @@
 </style>
 </head>
 <body>
+<div class="boot-mask" id="bootMask">
+  <div class="boot-spinner"></div>
+  <div>正在检测环境…</div>
+</div>
 <header>
   <img src="/logo.ico" class="brand" alt="logo">
   <h1>鸫楼桥鹊AI大语言模型</h1>
 </header>
-
-<div class="env-bar">
-  <div class="pypath" id="globalPyPath">—</div>
-  <button id="btnGlobalProbe">测试环境</button>
-  <label class="muted env-check">
-    <input type="checkbox" id="globalProbeOnStart" checked> 训练/对话/服务启动时检测
-  </label>
-  <div class="status-scroll"><span class="muted" id="globalProbeState">未检测</span></div>
-</div>
 
 <nav>
   <button data-tab="train" class="on">训练</button>
@@ -313,6 +305,7 @@
       <label>项目 Python</label>
       <div class="pypath" id="envPyPath">—</div>
       <span class="muted" id="envPythonVersion"></span>
+      <button id="btnEnvDetect">检测环境</button>
     </div>
     <div class="envfields">
       <div class="envfield">
@@ -333,7 +326,6 @@
           <span class="torch-prefix" id="envTorchPrefix">cu</span>
           <input type="text" id="envTorchSub" placeholder="例如 12.6">
         </span>
-        <button id="btnEnvDetect">自动检测</button>
         <span class="installed pending" id="envTorchInstalled">未检测</span>
       </div>
       <div class="envfield">
@@ -345,6 +337,13 @@
         <label class="k">transformers</label>
         <input type="text" id="envTransformersVersion" placeholder="例如 5.22.2；留空 = 最新版">
         <span class="installed pending" id="envTransformersInstalled">未检测</span>
+      </div>
+      <div class="envfield">
+        <label class="k">Ollama</label>
+        <input type="text" id="ollamaUrl" class="ollama-url"
+               value="http://127.0.0.1:11434" placeholder="http://127.0.0.1:11434">
+        <button id="btnOllamaDetect">检测 Ollama</button>
+        <span class="installed pending" id="ollamaState">未检测</span>
       </div>
       <div class="envfield actions">
         <button class="primary" id="btnEnvInstall">安装 / 更新训练依赖</button>
@@ -624,64 +623,23 @@ const PY = {
   srv:   { path: '', verified: false, info: null },
 };
 const PY_BTNS = { chat: ['btnSend'], train: ['btnTrainStart', 'btnTrainResume'], srv: ['btnSrvStart'] };
-let ENV_INSTALLING = false;
 let ENV_DETECTED = false;
 let ENV_POLL = null;
 
 function pyPass(info, needNumpy) {
   return !!(info && info.ok && info.torch && info.transformers && (!needNumpy || info.numpy));
 }
-function pyResultText(info, needNumpy) {
-  if (!info) return '未检测';
-  const parts = [];
-  parts.push([info.version, info.arch].filter(Boolean).join(' ') || 'Python 版本未知');
-  const libs = [];
-  libs.push(info.torch ? ('torch ' + (info.torch_version || '已安装')) : 'torch 未安装');
-  libs.push(info.numpy ? ('numpy ' + (info.numpy_version || '已安装')) : 'numpy 未安装');
-  libs.push(info.transformers
-    ? ('transformers ' + (info.transformers_version || '已安装')) : 'transformers 未安装');
-  parts.push(libs.join(' · '));
-  let chip = 'CPU';
-  let driver = '';
-  const tv = info.torch_version || '';
-  const m = /\+(cu\d+)/.exec(tv);
-  if (m) {
-    chip = 'GPU (NVIDIA)';
-    driver = m[1].slice(2, -1) + '.' + m[1].slice(-1);
-  } else if (/\+(xpu)/.test(tv)) {
-    chip = 'XPU';
-  } else if (info.cuda) {
-    chip = 'GPU (NVIDIA)';
-  }
-  parts.push(chip + (driver ? ' / ' + driver : ''));
-  return parts.join(' · ');
-}
 function renderPy(page) {
   const st = PY[page];
   const info = st.info;
   const ok = pyPass(info, page === 'train');
-  const pathEl = $('#globalPyPath');
-  if (pathEl) {
-    pathEl.textContent = st.path || '—';
-    pathEl.title = st.path || '';
-  }
-  const stateEl = $('#globalProbeState');
-  const globalOk = pyPass(info, true);
-  if (stateEl) {
-    stateEl.textContent = pyResultText(info, true);
-    stateEl.style.color = globalOk ? 'var(--ok)' : (info ? 'var(--warn)' : 'var(--muted)');
-  }
-  const onStart = $('#globalProbeOnStart');
-  const checked = !!(onStart && onStart.checked);
-  const canStart = ok || (checked && !info);
+  const canStart = ok || !info;
   const running = {
     chat: !!chatAbort,
     train: !$('#btnTrainStop').disabled,
     srv: !$('#btnSrvStop').disabled,
   }[page];
   PY_BTNS[page].forEach(id => { $('#' + id).disabled = !canStart || running; });
-  const probeBtn = $('#btnGlobalProbe');
-  if (probeBtn) probeBtn.disabled = ENV_INSTALLING;
   if (page === 'srv' && $('#btnSrvStart').textContent === '启动中…') {
     $('#btnSrvStart').disabled = true;
   }
@@ -827,7 +785,6 @@ function applyEnv(r) {
     PY[page].info = info;
     renderPy(page);
   });
-  ENV_INSTALLING = !!r.installing;
   renderEnv(r);
 }
 
@@ -852,28 +809,15 @@ function startEnvPoll() {
     if (!r.installing) {
       clearInterval(ENV_POLL);
       ENV_POLL = null;
-      await refreshEnv(true);
     }
   }, 2000);
 }
 
-async function probePage(page) {
-  const r = await refreshEnv(true);
-  return pyPass(r.info, page === 'train');
-}
 async function ensurePy(page) {
   const needNumpy = page === 'train';
   if (pyPass(PY[page].info, needNumpy)) return true;
-  const cb = $('#globalProbeOnStart');
-  if (!cb || !cb.checked) {
-    toast('请先在「环境」页检测项目 Python');
-    return false;
-  }
-  if (!(await probePage(page))) {
-    toast('项目 Python 缺少训练依赖，请在「环境」页安装');
-    return false;
-  }
-  return true;
+  toast('请先在「环境」页检测环境并安装训练依赖');
+  return false;
 }
 async function installEnv() {
   const cat = TORCH_CATEGORIES.find(c => c.id === $('#envTorchCategory').value);
@@ -906,7 +850,6 @@ async function installEnv() {
     toast(r.message || '已安装，无需重复安装');
     return;
   }
-  ENV_INSTALLING = true;
   $('#envInstallState').textContent = '安装中…';
   renderEnv({ python: PY.train.path, info: PY.train.info, installing: true });
   startEnvPoll();
@@ -944,11 +887,45 @@ async function autoDetectEnv() {
   updateTorchCategory(sub, false);
   const label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : catId;
   toast('已检测芯片类型：' + label + (sub ? ' / 驱动 ' + sub : ''));
+  detectOllama(true);
 }
 
-$('#globalProbeOnStart').onchange = () => Object.keys(PY).forEach(renderPy);
-$('#btnGlobalProbe').onclick = () => probePage('train');
+async function detectOllama(useInput) {
+  const btn = $('#btnOllamaDetect');
+  const state = $('#ollamaState');
+  const input = $('#ollamaUrl');
+  btn.disabled = true;
+  state.className = 'installed pending';
+  state.textContent = '检测中…';
+  try {
+    const custom = useInput ? input.value.trim() : '';
+    const query = useInput ? '?url=' + encodeURIComponent(custom) : '';
+    const r = await api('env/ollama' + query);
+    if (r.url) input.value = r.url;
+    if (r.ok) {
+      const models = r.models || [];
+      const chat = (r.chat_models || []).length;
+      const embedding = (r.embedding_models || []).length;
+      state.className = 'installed ok';
+      state.textContent = '已连接' + (r.version ? ' v' + r.version : '') +
+        ` · ${models.length} 个模型（${chat} 对话 / ${embedding} 嵌入）`;
+      state.title = models.join('\n');
+    } else {
+      state.className = 'installed missing';
+      state.textContent = '未连接：' + (r.error || '无法连接 Ollama');
+      state.title = '';
+    }
+  } catch (e) {
+    state.className = 'installed missing';
+    state.textContent = '检测失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 $('#btnEnvDetect').onclick = autoDetectEnv;
+$('#btnOllamaDetect').onclick = () => detectOllama(true);
+$('#ollamaUrl').addEventListener('change', () => detectOllama(true));
 $('#btnEnvInstall').onclick = installEnv;
 $('#envTorchCategory').onchange = () => updateTorchCategory('', false);
 $('#chatConfig').addEventListener('change', () => { updateChatBackend(); loadPy('chat'); });
@@ -1520,9 +1497,24 @@ async function syncState() {
   }
 }
 
+async function startupDetect() {
+  const mask = $('#bootMask');
+  try {
+    ENV_DETECTED = true;
+    await refreshEnv(true);
+    await detectOllama(false);
+  } finally {
+    if (mask) {
+      mask.classList.add('hide');
+      setTimeout(() => mask.remove(), 260);
+    }
+  }
+}
+
 (async () => {
   updateTorchCategory('', false);   // 默认 CPU：不显示驱动版本输入
   initTrainTerm();            // xterm 必须在回填日志前初始化
+  await startupDetect();      // 启动时只检测一次，之后靠用户主动检测
   await loadConfigs();
   await loadModels();
   renderSignList();           // 签名页：列出所有标准模型目录及其签名状态

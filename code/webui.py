@@ -46,8 +46,37 @@ common.setup_stdio()
 ROOT = common.find_root()
 WEB_DIR = os.path.join(ROOT, "web")
 LOGO_PATH = os.path.join(ROOT, ".runtime", "logo.ico")
-LOG_DIR = os.path.join(ROOT, ".cache", "train-logs")
+CACHE_DIR = os.path.join(ROOT, ".cache")
+LOG_DIR = os.path.join(CACHE_DIR, "train-logs")
+OLLAMA_URL_FILE = os.path.join(CACHE_DIR, "ollama_url.txt")
 STATE = {"token": "", "started": time.time(), "train": None, "server": None}
+
+
+def ensure_cache_dir():
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    common.hide_dir(CACHE_DIR)
+
+
+def load_ollama_url():
+    try:
+        with open(OLLAMA_URL_FILE, "r", encoding="utf-8") as f:
+            value = f.read().strip()
+        if value:
+            ollama.set_base_url(value)
+    except (OSError, ValueError):
+        pass
+
+
+def save_ollama_url(value):
+    try:
+        ensure_cache_dir()
+        with open(OLLAMA_URL_FILE, "w", encoding="utf-8") as f:
+            f.write(value or "")
+    except OSError:
+        pass
+
+
+load_ollama_url()
 
 
 def tail_train_log(n=400):
@@ -184,6 +213,7 @@ class Child:
         self.log = None
         if log_path:
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            common.hide_dir(CACHE_DIR)
             # raw 模式必须原样保留 \r，不能做 Windows 的 \n -> \r\n 转换
             self.log = open(log_path, "a", encoding="utf-8", buffering=1,
                             newline="" if raw else None)
@@ -560,7 +590,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
-        qs = parse_qs(u.query)
+        qs = parse_qs(u.query, keep_blank_values=True)
         path = u.path
         if not path.startswith("/api/"):
             self._static(path)
@@ -635,6 +665,17 @@ class Handler(BaseHTTPRequestHandler):
             gpu = detect_nvidia()
             latest = latest_versions(info, gpu)
             self._json(latest)
+        elif path == "/api/env/ollama":
+            urls = qs.get("url")
+            custom = ""
+            if urls is not None:
+                custom = (urls[0] or "").strip()
+                try:
+                    custom = ollama.set_base_url(custom)
+                    save_ollama_url(custom or "")
+                except ValueError as e:
+                    return self._err(400, str(e))
+            self._json(ollama.detect_environment(custom))
         elif path == "/api/events":
             self._events()
         else:
@@ -680,7 +721,8 @@ class Handler(BaseHTTPRequestHandler):
         p = os.path.join(ROOT, "properties", name)
         if not os.path.isfile(p):
             return self._err(404, f"没有这个配置：{name}")
-        backup = os.path.join(ROOT, ".cache", "cfg-backup")
+        backup = os.path.join(CACHE_DIR, "cfg-backup")
+        ensure_cache_dir()
         os.makedirs(backup, exist_ok=True)
         import shutil
         shutil.copy2(p, os.path.join(backup, f"{name}.{int(time.time())}.bak"))
@@ -1016,7 +1058,8 @@ class Handler(BaseHTTPRequestHandler):
         if not known["info"].get("torch") or not known["info"].get("transformers"):
             return self._err(400, "项目 Python 缺少 torch / transformers；请先在「环境」页安装训练依赖")
         args = [py, os.path.join(ROOT, "code", "http_server.py"),
-                "--port", str(port), "--events", "--parent-pid", str(os.getpid())]
+                "--port", str(port), "--events", "--parent-pid", str(os.getpid()),
+                "--ollama-url", ollama.base_url()]
         for name in targets:
             # Ollama 模型由 http_server 自动发现，不作为本地 --config 传进去
             if not ollama.is_remote(name):
@@ -1620,6 +1663,7 @@ def main():
     STATE["token"] = secrets.token_urlsafe(12)
     want = a.port or 49134
     common.hide_dir(os.path.join(ROOT, ".ai_res"))
+    ensure_cache_dir()
     os.makedirs(LOG_DIR, exist_ok=True)
 
     httpd, port = bind_port(a.host, want)
