@@ -40,16 +40,18 @@
 ## 快速开始
 双击 `.runtime\start.bat`，浏览器会自动打开本地控制台（地址形如
 `http://127.0.0.1:49134/?t=...`）。端口被占用时不会自动换端口，会提示输入新端口，
-直接回车则退出。页面有七个标签：
+直接回车则退出。页面有九个标签：
 
 | 标签 | 用途 |
 |---|---|
 | 训练 | 选配置和语料，点【开始训练】；日志实时滚动，同时落盘到 `.cache\train-logs\` |
 | 对话 | 选配置，直接打字；回复逐字出现，可随时【停止】 |
+| Agent | 选择支持工具调用的 Ollama 模型和 MCP 服务器，执行带工具的流式对话 |
 | 服务 | 起一个 OpenAI 兼容的本地桥接服务，页面上能实时看到每次问答 |
-| 环境 | 检测项目 Python、安装 / 更新 torch / numpy / transformers |
+| 环境 | 检测项目 Python、安装 / 更新 torch / numpy / transformers，检测 Ollama 服务 |
 | 配置 | 在表单里改 `properties\*.properties`，保存时保留注释与键顺序 |
 | 签名 | 给 `model\<名字>\` 下的标准权重文件计算或校验 SHA-256 |
+| MCP | 配置 STDIO / HTTP 两种 MCP 服务器，并测试工具列表 |
 | 版权鸣谢 | 列出前端第三方组件、版本、许可证和本地许可证文件 |
 
 > **关掉 `start.bat` 的 cmd 窗口 = 退出**：训练、桥接服务、签名任务都会一起结束。
@@ -643,11 +645,12 @@ code\                   所有 Python
   chat_worker.py        对话子进程：常驻 ChatSession，stdin/stdout 走 JSON 行
   http_server.py        OpenAI 兼容桥接服务（多模型懒加载）
   ollama_client.py      Ollama HTTP 适配（模型发现 / 请求转发 / SSE 解析）
+  mcp_client.py         MCP 客户端（STDIO / Streamable HTTP / 工具 schema）
   common.py             find_root / properties 保序读写 / 父进程看门狗 / 隐藏目录
   model.py              GPT-2 封装（transformers）
   model_signature.py    权重 SHA-256 签名（只依赖标准库）
 web\                    前端页面（由 webui.py 托管）
-  index.html            七个标签：训练 / 对话 / 服务 / 环境 / 配置 / 签名 / 版权鸣谢
+  index.html            九个标签：训练 / 对话 / Agent / 服务 / 环境 / 配置 / 签名 / MCP / 版权鸣谢
   chat.html             局域网只读对话页
   vendor\               本地第三方前端资源：xterm.js / marked / DOMPurify / KaTeX
 properties\             四个训练配置
@@ -783,6 +786,49 @@ ollama/qwen3:8b
 
 对话时选择带 `（Ollama）` 的模型即可；远程请求会把原始 `messages` 转发给 Ollama，
 不经过本地 256 字截断。不可用时本地模型仍可正常使用。
+
+### 接入 MCP / Agent（可选）
+
+「MCP」页可以保存多个 MCP 服务器配置，支持两种传输：
+
+```text
+STDIO：command + args + cwd
+HTTP ：http://127.0.0.1:<端口>/mcp
+```
+
+STDIO 示例：
+
+```text
+java -Dfile.encoding=UTF-8 -jar <MCP-SERVER-JAR>
+```
+
+HTTP 示例：
+
+```text
+http://127.0.0.1:<端口>/mcp
+```
+
+配置保存在 `.cache\mcp_servers.json`。保存后点【连接并获取工具】可以验证连接并查看工具名称。
+WebUI 启动时也会自动检测已保存的 MCP 服务器，结果保存到 `.cache\mcp_status.json`；
+MCP 页的【检测全部】可手动重新检测。已配置的 STDIO MCP 进程会随 WebUI 启动并常驻，
+不会在每次对话结束时退出；修改对应配置时重启该进程，WebUI 退出时统一销毁。
+
+「Agent」页只列出带 `tools` 能力的 Ollama 模型和已保存的 MCP 服务器。模型、MCP 服务器、
+【工具】多选和【开启深度思考】都放在聊天框上方；发送任务后：
+
+```text
+用户消息 → Ollama tool_calls → MCP tools/call → 工具结果回填 → Ollama 继续生成
+```
+
+工具调用会以可折叠卡片显示在“思考过程”中调用发生的位置，最终回答使用流式输出；工具名一出现
+就先显示“准备调用 / 正在调用”，执行完成后更新为“完成”或“失败”。开启深度思考时，思考内容
+和工具调用按实际顺序排列在回答上方。embedding 模型和本地字符级模型不会出现在 Agent 模型
+列表中；本地字符级模型也不支持深度思考开关。桥接服务仍按原逻辑转发客户端传来的 `tools`，
+不在桥接进程内自行执行 MCP 工具。
+
+创建大文件时建议只勾选相关的文件工具（如 `dlqq_create_file` / `dlqq_append_file` /
+`dlqq_overwrite_file`），不要让模型一次生成过长的内容；工具选得过多会占用上下文，模型也
+更容易编造不存在的工具名或生成被截断的 tool_call。
 
 ---
 

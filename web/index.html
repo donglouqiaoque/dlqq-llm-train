@@ -155,6 +155,34 @@
                        white-space:pre-wrap; word-break:break-word; margin-bottom:6px; }
   .embedcard .einput::before { content:"输入："; color:var(--muted); }
   .embedcard .thinking { margin:6px 0 0; }
+  .agent-tool { margin:8px 0; border:1px solid #2b3444; border-radius:8px;
+                background:#0e1219; padding:7px 10px; font-size:12px; color:#aab4c4; }
+  .agent-tool summary { cursor:pointer; color:#9fb8d8; user-select:none; }
+  .agent-tool pre { margin:6px 0 0; white-space:pre-wrap; word-break:break-word;
+                    max-height:220px; overflow:auto; font:12px/1.5 Consolas, monospace; }
+  .agent-tool.err { border-color:#63343a; }
+  .agent-tool.err summary { color:#e38b93; }
+  .think-flow { padding:0 10px 9px; max-height:420px; overflow:auto; }
+  .think-text { white-space:pre-wrap; word-break:break-word; color:#aab4c4;
+                font:12px/1.55 Consolas, monospace; margin:0 0 6px; }
+  .agent-flow { display:flex; flex-direction:column; gap:8px; }
+  .agent-flow .thinking { margin:0; }
+  .agent-flow .body { margin:0; }
+  .agent-bar { flex-wrap:wrap; row-gap:5px; }
+  .agent-bar select { max-width:190px; }
+  .agent-tool-panel { flex:0 0 auto; border:1px solid var(--line); border-radius:9px;
+                      background:#10151d; padding:7px 10px; margin-bottom:8px; }
+  .agent-tool-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+  .agent-tool-head button { padding:3px 8px; font-size:12px; }
+  .agent-tool-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr));
+                     gap:4px 12px; max-height:180px; overflow:auto; }
+  .agent-tool-item { display:flex; align-items:center; gap:5px; min-width:0;
+                     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:12px; }
+  .agent-tool-item input { flex:0 0 auto; }
+  .mcp-tools .sigrow { align-items:flex-start; }
+  .mcp-tools .sigrow .name { flex:0 0 auto; max-width:55%; white-space:nowrap;
+                             word-break:normal; overflow-x:auto; }
+  .mcp-tools .sigrow .muted { flex:1 1 0; min-width:0; overflow-wrap:anywhere; }
   .siglist { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:8px; }
   .sigrow { display:flex; align-items:center; gap:12px; padding:10px 12px;
             border:1px solid var(--line); border-radius:10px; background:#12161d; }
@@ -203,6 +231,7 @@
   .envfield .k { flex:0 0 110px; color:var(--muted); }
   .envfield input[type="text"] { min-width:200px; }
   .envfield select { min-width:170px; }
+  .mcp-http { display:none; }
   .ollama-url { width:min(360px,32vw); min-width:200px; font-family:Consolas, monospace;
                 font-size:12px; }
   .torch-driver { display:inline-flex; align-items:center; gap:5px; }
@@ -228,10 +257,12 @@
 <nav>
   <button data-tab="train" class="on">训练</button>
   <button data-tab="chat">对话</button>
+  <button data-tab="agent">Agent</button>
   <button data-tab="server">服务</button>
   <button data-tab="env">环境</button>
   <button data-tab="config">配置</button>
   <button data-tab="tool">签名</button>
+  <button data-tab="mcp">MCP</button>
   <button data-tab="credits">版权鸣谢</button>
 </nav>
 
@@ -371,6 +402,91 @@
     </div>
     <div class="siglist" id="sigList"></div>
     <div class="log" id="signOut" style="flex:0 0 200px; margin-top:10px"></div>
+  </section>
+
+  <section id="agent">
+    <div class="chatmain">
+      <div class="msgs" id="agentBox">
+        <div class="empty">选择支持工具调用的 Ollama 模型和 MCP 服务器</div>
+      </div>
+      <div class="agent-tool-panel" id="agentToolPanel" style="display:none">
+        <div class="agent-tool-head">
+          <strong>可用工具</strong>
+          <button id="btnAgentToolsAll">全选</button>
+          <button id="btnAgentToolsNone">清空</button>
+          <span class="muted" id="agentToolsCount"></span>
+        </div>
+        <div class="agent-tool-list" id="agentToolList"></div>
+      </div>
+      <div class="composer">
+        <textarea id="agentInput" rows="1"
+                  placeholder="输入任务，Enter 发送，Shift+Enter 换行"></textarea>
+        <div class="composerbar agent-bar">
+          <label>模型</label>
+          <select id="agentModel"></select>
+          <label>MCP</label>
+          <select id="agentMcp"></select>
+          <label class="muted" id="agentThinkingWrap" style="display:none">
+            <input type="checkbox" id="agentThinking" checked> 开启深度思考
+          </label>
+          <button id="btnAgentTools">工具 0</button>
+          <button id="btnAgentNew">新对话</button>
+          <span class="muted" id="agentState"></span>
+          <div class="spacer"></div>
+          <button id="btnAgentStop" disabled>停止</button>
+          <button class="primary" id="btnAgentSend">发送</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="mcp">
+    <div class="row">
+      <label>服务器</label>
+      <select id="mcpSelect" style="min-width:220px"></select>
+      <button id="btnMcpNew">新建</button>
+      <button id="btnMcpDetect">检测全部</button>
+      <button class="primary" id="btnMcpSave">保存</button>
+      <button class="danger" id="btnMcpDelete">删除</button>
+      <span class="muted" id="mcpState"></span>
+    </div>
+    <div class="envfields">
+      <div class="envfield">
+        <label class="k">名称</label>
+        <input type="text" id="mcpName" placeholder="例如 dlqq-mcp">
+      </div>
+      <div class="envfield">
+        <label class="k">传输</label>
+        <select id="mcpTransport">
+          <option value="stdio">STDIO</option>
+          <option value="http">HTTP</option>
+        </select>
+      </div>
+      <div class="envfield mcp-stdio">
+        <label class="k">命令</label>
+        <input type="text" id="mcpCommand" placeholder="java.exe 的完整路径">
+      </div>
+      <div class="envfield mcp-stdio">
+        <label class="k">参数</label>
+        <input type="text" id="mcpArgs"
+               placeholder="-Dfile.encoding=UTF-8 -jar &quot;...\dlqq_mcp_server.jar&quot;">
+      </div>
+      <div class="envfield mcp-stdio">
+        <label class="k">工作目录</label>
+        <input type="text" id="mcpCwd" placeholder="可选，例如项目目录">
+      </div>
+      <div class="envfield mcp-http">
+        <label class="k">URL</label>
+        <input type="text" id="mcpUrl" placeholder="http://127.0.0.1:49129/mcp">
+      </div>
+      <div class="envfield">
+        <button id="btnMcpTest">连接并获取工具</button>
+        <span class="muted" id="mcpTestState">未检测</span>
+      </div>
+    </div>
+    <div class="siglist mcp-tools" id="mcpTools">
+      <div class="empty">保存服务器后，点击「连接并获取工具」查看工具列表</div>
+    </div>
   </section>
 
   <section id="credits">
@@ -540,6 +656,15 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
 let CONFIGS = [];
 let CHAT_CONFIGS = [];               // 本地 + 仅对话 Ollama 模型
 let SERVICE_CONFIGS = [];            // 本地 + 全部 Ollama 模型（含 embedding）
+let MCP_SERVERS = [];                // MCP 服务器配置
+let MCP_STATUS = {};                 // 启动时/手动检测结果
+let MCP_EDIT_ID = '';
+let MCP_TOOLS = [];
+let AGENT_MODELS = [];
+let AGENT_TOOLS = [];
+let AGENT_SELECTED_TOOLS = new Set();
+let AGENT_HISTORY = [];
+let AGENT_ABORT = null;
 // 配置文件第一行常是 "# ====" 这种装饰线，不能拿来当说明
 function cleanDesc(desc) {
   const d = (desc || '').trim();
@@ -568,6 +693,8 @@ async function loadConfigs() {
 }
 
 async function loadChatConfigs() {
+  const oldChat = $('#chatConfig').value;
+  const oldSrv = $('#srvConfig').value;
   const [chatRes, serviceRes] = await Promise.all([
     api('chat/configs'), api('service/configs')]);
   CHAT_CONFIGS = chatRes.configs || [];
@@ -583,6 +710,12 @@ async function loadChatConfigs() {
     `<option value="${c.name}">${chatLabel(c)}</option>`).join('');
   $('#srvConfig').innerHTML = '<option value="">全部配置</option>' + SERVICE_CONFIGS.map(c =>
     `<option value="${c.name}">${serviceLabel(c)}</option>`).join('');
+  if (oldChat && [...$('#chatConfig').options].some(o => o.value === oldChat)) {
+    $('#chatConfig').value = oldChat;
+  }
+  if ([...$('#srvConfig').options].some(o => o.value === oldSrv)) {
+    $('#srvConfig').value = oldSrv;
+  }
   updateChatBackend();
   fitSrvConfigWidth();
 }
@@ -603,6 +736,511 @@ function fitSrvConfigWidth() {
   wrap.style.width = Math.min(max, Math.max(min, content)) + 'px';
 }
 
+/* ---------------- MCP 配置 ---------------- */
+function mcpTransportChanged() {
+  const http = $('#mcpTransport').value === 'http';
+  document.querySelectorAll('.mcp-stdio').forEach(x => x.style.display = http ? 'none' : 'flex');
+  document.querySelectorAll('.mcp-http').forEach(x => x.style.display = http ? 'flex' : 'none');
+}
+
+function mcpReadForm() {
+  const transport = $('#mcpTransport').value;
+  return {
+    id: MCP_EDIT_ID,
+    name: $('#mcpName').value.trim(),
+    transport,
+    command: $('#mcpCommand').value.trim(),
+    args: $('#mcpArgs').value.trim(),
+    cwd: $('#mcpCwd').value.trim(),
+    url: $('#mcpUrl').value.trim(),
+  };
+}
+
+function mcpApplyStatus(id) {
+  const st = MCP_STATUS[id] || {};
+  if (st.ok) {
+    MCP_TOOLS = st.tools || [];
+    mcpRenderTools(MCP_TOOLS);
+    $('#mcpTestState').textContent = `已连接 · ${MCP_TOOLS.length} 个工具`;
+  } else if (st.error) {
+    MCP_TOOLS = [];
+    mcpRenderTools([]);
+    $('#mcpTestState').textContent = '失败：' + st.error;
+  } else {
+    MCP_TOOLS = [];
+    mcpRenderTools([]);
+    $('#mcpTestState').textContent = '未检测';
+  }
+}
+
+function mcpFillForm(item) {
+  MCP_EDIT_ID = item ? (item.id || '') : '';
+  $('#mcpName').value = item ? (item.name || '') : '';
+  $('#mcpTransport').value = item && item.transport === 'http' ? 'http' : 'stdio';
+  $('#mcpCommand').value = item ? (item.command || '') : '';
+  $('#mcpArgs').value = item ? (item.args || '') : '';
+  $('#mcpCwd').value = item ? (item.cwd || '') : '';
+  $('#mcpUrl').value = item ? (item.url || '') : '';
+  mcpTransportChanged();
+  mcpApplyStatus(MCP_EDIT_ID);
+}
+
+function mcpRenderTools(tools) {
+  const box = $('#mcpTools');
+  box.innerHTML = '';
+  if (!tools.length) {
+    box.appendChild(el('div', 'empty', '还没有获取到工具'));
+    return;
+  }
+  tools.forEach(t => {
+    const row = el('div', 'sigrow');
+    row.appendChild(el('div', 'name', t.name || ''));
+    row.appendChild(el('div', 'muted', t.description || ''));
+    box.appendChild(row);
+  });
+}
+
+async function loadMcpConfigs(preferredId) {
+  const r = await api('mcp/configs');
+  MCP_SERVERS = r.servers || [];
+  MCP_STATUS = r.status || {};
+  const sel = $('#mcpSelect');
+  const old = preferredId !== undefined ? preferredId : sel.value;
+  sel.innerHTML = '<option value="">（新配置）</option>' + MCP_SERVERS.map(s =>
+    `<option value="${s.id}">${s.name}</option>`).join('');
+  const pick = MCP_SERVERS.some(s => s.id === old) ? old
+    : (MCP_SERVERS[0] ? MCP_SERVERS[0].id : '');
+  sel.value = pick;
+  mcpFillForm(MCP_SERVERS.find(s => s.id === pick) || null);
+  await loadAgentConfigs();
+}
+
+async function detectMcpServers() {
+  const r = await api('mcp/detect', { method: 'POST' });
+  if (!r.ok) return toast('MCP 检测失败：' + (r.error || '未知错误'));
+  MCP_STATUS = r.status || {};
+  const cur = MCP_SERVERS.find(s => s.id === MCP_EDIT_ID) || null;
+  mcpFillForm(cur);
+  await loadAgentConfigs();
+}
+
+async function saveMcpConfig() {
+  const item = mcpReadForm();
+  if (!item.name) return toast('请填写 MCP 名称');
+  if (item.transport === 'stdio' && !item.command) return toast('请填写 STDIO 命令');
+  if (item.transport === 'http' && !item.url) return toast('请填写 HTTP URL');
+  const list = MCP_SERVERS.slice();
+  const idx = MCP_EDIT_ID ? list.findIndex(x => x.id === MCP_EDIT_ID) : -1;
+  if (idx >= 0) list[idx] = item;
+  else list.push(item);
+  const r = await api('mcp/configs', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ servers: list }),
+  });
+  if (!r.ok) return toast('保存失败：' + (r.error || '未知错误'));
+  const saved = (r.servers || []).find(s => s.name === item.name &&
+    s.transport === item.transport) || (r.servers || [])[0];
+  await loadMcpConfigs(saved ? saved.id : '');
+  toast('MCP 配置已保存');
+}
+
+async function deleteMcpConfig() {
+  if (!MCP_EDIT_ID) return toast('当前不是已保存的服务器');
+  if (!confirm('删除这个 MCP 服务器配置？')) return;
+  const list = MCP_SERVERS.filter(s => s.id !== MCP_EDIT_ID);
+  const r = await api('mcp/configs', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ servers: list }),
+  });
+  if (!r.ok) return toast('删除失败：' + (r.error || '未知错误'));
+  await loadMcpConfigs('');
+  toast('已删除');
+}
+
+async function testMcpConfig() {
+  const item = mcpReadForm();
+  if (!item.name) return toast('请填写 MCP 名称');
+  if (item.transport === 'stdio' && !item.command) return toast('请填写 STDIO 命令');
+  if (item.transport === 'http' && !item.url) return toast('请填写 HTTP URL');
+  const btn = $('#btnMcpTest');
+  btn.disabled = true;
+  $('#mcpTestState').textContent = '连接中…';
+  try {
+    const r = await api('mcp/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server: item }),
+    });
+    if (!r.ok) {
+      $('#mcpTestState').textContent = '失败：' + (r.error || '未知错误');
+      return;
+    }
+    MCP_TOOLS = r.tools || [];
+    mcpRenderTools(MCP_TOOLS);
+    $('#mcpTestState').textContent = `已连接 · ${MCP_TOOLS.length} 个工具`;
+    if (MCP_EDIT_ID) {
+      MCP_STATUS[MCP_EDIT_ID] = { ok: true, tools: MCP_TOOLS, error: '' };
+    }
+  } catch (e) {
+    $('#mcpTestState').textContent = '失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function agentMsg(role, text) {
+  const box = $('#agentBox');
+  const empty = box.querySelector('.empty');
+  if (empty) empty.remove();
+  const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot'));
+  wrap.appendChild(el('div', 'avatar', role === 'user' ? '你' : 'AI'));
+  const bubble = el('div', 'bubble');
+  let body = null;
+  let flow = null;
+  if (role === 'user') {
+    body = el('div', 'body', text || '');
+    bubble.appendChild(body);
+  } else {
+    flow = el('div', 'agent-flow');
+    bubble.appendChild(flow);
+  }
+  wrap.appendChild(bubble);
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+  return { body, bubble, flow, answers: [] };
+}
+
+function agentEnsureThink(out) {
+  let last = out.flow.lastElementChild;
+  if (!last || !last.classList.contains('thinking')) {
+    const details = el('details', 'thinking');
+    details.style.display = 'none';
+    details.appendChild(el('summary', '', '思考过程'));
+    const flow = el('div', 'think-flow');
+    details.appendChild(flow);
+    details._think = { box: details, flow };
+    out.flow.appendChild(details);
+    last = details;
+  }
+  return last._think;
+}
+
+function agentEnsureAnswer(out) {
+  let last = out.flow.lastElementChild;
+  if (!last || !last.classList.contains('agent-answer')) {
+    last = el('div', 'body agent-answer');
+    last.dataset.raw = '';
+    out.flow.appendChild(last);
+    out.answers.push({ body: last, raw: '' });
+  }
+  return out.answers[out.answers.length - 1];
+}
+
+function agentThinkText(think) {
+  let last = think.flow.lastElementChild;
+  if (!last || !last.classList.contains('think-text')) {
+    last = el('div', 'think-text');
+    think.flow.appendChild(last);
+  }
+  return last;
+}
+
+function agentShowThink(think) {
+  if (think.box.style.display === 'none') {
+    think.box.style.display = '';
+    think.box.open = true;
+  }
+}
+
+function agentToolCard(name, args, think, status, index) {
+  agentShowThink(think);
+  const details = el('details', 'agent-tool');
+  details.open = true;
+  const summary = el('summary', '', '调用工具：' + (name || '') +
+                                  (status ? `（${status}）` : ''));
+  details.appendChild(summary);
+  const pre = el('pre', '', JSON.stringify(args || {}, null, 2));
+  details.appendChild(pre);
+  think.flow.appendChild(details);
+  return { details, summary, pre, name, index };
+}
+
+function agentToolStatus(card, status) {
+  card.summary.textContent = '调用工具：' + (card.name || '') +
+                             (status ? `（${status}）` : '');
+}
+
+function agentFindToolCard(cards, data) {
+  if (data.index !== undefined && data.index !== null) {
+    const byIndex = cards.find(c => c.index === data.index && !c.done);
+    if (byIndex) return byIndex;
+  }
+  return [...cards].reverse().find(c => c.name === data.name && !c.done);
+}
+
+function agentAtBottom() {
+  const box = $('#agentBox');
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+}
+
+function agentScrollIf(stick) {
+  if (!stick) return;
+  const box = $('#agentBox');
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderAgentTools() {
+  const box = $('#agentToolList');
+  box.innerHTML = '';
+  if (!AGENT_TOOLS.length) {
+    box.innerHTML = '<div class="muted">没有可用工具</div>';
+  } else {
+    AGENT_TOOLS.forEach(t => {
+      const row = el('label', 'agent-tool-item');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = AGENT_SELECTED_TOOLS.has(t.name);
+      cb.onchange = () => {
+        if (cb.checked) AGENT_SELECTED_TOOLS.add(t.name);
+        else AGENT_SELECTED_TOOLS.delete(t.name);
+        updateAgentToolCount();
+      };
+      row.appendChild(cb);
+      row.appendChild(el('span', '', t.name || ''));
+      row.title = t.description || t.name || '';
+      box.appendChild(row);
+    });
+  }
+  updateAgentToolCount();
+}
+
+function updateAgentToolCount() {
+  const total = AGENT_TOOLS.length;
+  const picked = AGENT_SELECTED_TOOLS.size;
+  $('#btnAgentTools').textContent = `工具 ${picked}/${total}`;
+  $('#agentToolsCount').textContent = total ? `已选 ${picked} / ${total}` : '';
+  $('#btnAgentSend').disabled = !$('#agentModel').value || !$('#agentMcp').value || !picked;
+}
+
+async function loadAgentTools(serverId) {
+  AGENT_TOOLS = [];
+  AGENT_SELECTED_TOOLS = new Set();
+  if (serverId) {
+    let status = MCP_STATUS[serverId];
+    if (!status || !status.tools) {
+      try {
+        const r = await api('agent/tools?server=' + encodeURIComponent(serverId));
+        status = { ok: !!r.ok, tools: r.tools || [], error: r.error || '' };
+        MCP_STATUS[serverId] = status;
+      } catch (e) {
+        status = { ok: false, tools: [], error: e.message };
+      }
+    }
+    AGENT_TOOLS = status.tools || [];
+    AGENT_TOOLS.forEach(t => AGENT_SELECTED_TOOLS.add(t.name));
+  }
+  renderAgentTools();
+}
+
+function updateAgentThinking() {
+  const wrap = $('#agentThinkingWrap');
+  if (!wrap) return;
+  wrap.style.display = '';
+  const m = AGENT_MODELS.find(x => x.name === $('#agentModel').value);
+  const supported = !!(m && (m.capabilities || []).includes('thinking'));
+  const cb = $('#agentThinking');
+  if (cb) cb.title = supported ? '当前模型支持深度思考' : '当前模型未声明 thinking 能力';
+}
+
+async function loadAgentConfigs() {
+  const r = await api('agent/configs');
+  const models = r.models || [];
+  const servers = r.servers || [];
+  AGENT_MODELS = models;
+  MCP_STATUS = r.status || MCP_STATUS;
+  const oldModel = $('#agentModel').value;
+  const oldServer = $('#agentMcp').value;
+  $('#agentModel').innerHTML = models.length
+    ? models.map(m => `<option value="${m.name}">${m.name}</option>`).join('')
+    : '<option value="">（没有支持工具调用的 Ollama 模型）</option>';
+  $('#agentMcp').innerHTML = servers.length
+    ? servers.map(s => `<option value="${s.id}">${s.name}</option>`).join('')
+    : '<option value="">（请先在 MCP 页配置服务器）</option>';
+  if (models.some(m => m.name === oldModel)) $('#agentModel').value = oldModel;
+  if (servers.some(s => s.id === oldServer)) $('#agentMcp').value = oldServer;
+  updateAgentThinking();
+  await loadAgentTools($('#agentMcp').value);
+}
+
+function agentNewChat() {
+  if (AGENT_ABORT) AGENT_ABORT.abort();
+  AGENT_ABORT = null;
+  AGENT_HISTORY = [];
+  $('#agentBox').innerHTML = '<div class="empty">选择支持工具调用的 Ollama 模型和 MCP 服务器</div>';
+  $('#agentState').textContent = '';
+}
+
+async function agentSend() {
+  if (AGENT_ABORT) return;
+  const text = $('#agentInput').value.trim();
+  const model = $('#agentModel').value;
+  const server = $('#agentMcp').value;
+  if (!text) return;
+  if (!model || !server) return toast('请先选择工具模型和 MCP 服务器');
+  if (!AGENT_SELECTED_TOOLS.size) return toast('请至少选择一个 MCP 工具');
+  $('#agentInput').value = '';
+  $('#agentInput').style.height = 'auto';
+  AGENT_HISTORY.push({ role: 'user', content: text });
+  agentMsg('user', text);
+  const out = agentMsg('assistant', '');
+  out.bubble.classList.add('typing');
+  $('#btnAgentSend').disabled = true;
+  $('#btnAgentStop').disabled = false;
+  $('#agentState').textContent = '运行中…';
+  AGENT_ABORT = new AbortController();
+  let acc = '';
+  const cards = [];
+  let activeTool = '';
+  let lastEventAt = Date.now();
+  const idleTimer = setInterval(() => {
+    if (!AGENT_ABORT) return;
+    if (activeTool) {
+      $('#agentState').textContent = `正在调用 ${activeTool}…`;
+    } else if (Date.now() - lastEventAt > 1200) {
+      $('#agentState').textContent = '模型正在生成工具调用参数…';
+    }
+  }, 400);
+  try {
+    const resp = await fetch(`/api/agent/chat?t=${TOKEN}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, server, messages: AGENT_HISTORY,
+                             thinking: !!($('#agentThinking') && $('#agentThinking').checked),
+                             tools: [...AGENT_SELECTED_TOOLS] }),
+      signal: AGENT_ABORT.signal,
+    });
+    if (!resp.ok) {
+      const a = agentEnsureAnswer(out);
+      a.raw = '请求失败：' + (await resp.text());
+      a.body.textContent = a.raw;
+      return;
+    }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const ev = /event: (\w+)\ndata: ([\s\S]*)/.exec(chunk);
+        if (!ev) continue;
+        const data = JSON.parse(ev[2]);
+        lastEventAt = Date.now();
+        if (ev[1] === 'tool_pending' || ev[1] === 'tool') {
+          activeTool = data.name || activeTool;
+        } else if (ev[1] === 'tool_result') {
+          activeTool = '';
+        }
+        const stick = agentAtBottom();
+        if (ev[1] === 'meta') {
+          $('#agentState').textContent = `${data.server} · ${data.tools} 个工具`;
+        } else if (ev[1] === 'reasoning') {
+          const think = agentEnsureThink(out);
+          agentShowThink(think);
+          agentThinkText(think).textContent += data.text || '';
+          agentScrollIf(stick);
+        } else if (ev[1] === 'tool_pending') {
+          $('#agentState').textContent = `准备调用 ${data.name}…`;
+          const think = agentEnsureThink(out);
+          let card = agentFindToolCard(cards, data);
+          if (!card) {
+            card = agentToolCard(data.name, {}, think, '准备中…', data.index);
+            cards.push(card);
+          } else {
+            agentToolStatus(card, '准备中…');
+          }
+          agentScrollIf(stick);
+        } else if (ev[1] === 'tool') {
+          $('#agentState').textContent = `正在调用 ${data.name}…`;
+          const think = agentEnsureThink(out);
+          let card = agentFindToolCard(cards, data);
+          if (!card) {
+            card = agentToolCard(data.name, data.arguments, think, '执行中…', data.index);
+            cards.push(card);
+          } else {
+            card.name = data.name || card.name;
+            card.pre.textContent = JSON.stringify(data.arguments || {}, null, 2);
+            agentToolStatus(card, '执行中…');
+          }
+          agentScrollIf(stick);
+        } else if (ev[1] === 'tool_result') {
+          const card = agentFindToolCard(cards, data);
+          if (card) {
+            card.done = true;
+            card.pre.textContent += '\n\n' + (data.text || '');
+            if (data.is_error) {
+              card.details.classList.add('err');
+              agentToolStatus(card, '失败');
+            } else {
+              agentToolStatus(card, '完成');
+            }
+          }
+          $('#agentState').textContent = data.is_error
+            ? `${data.name} 调用失败，继续生成…`
+            : `${data.name} 已完成，继续生成…`;
+          agentScrollIf(stick);
+        } else if (ev[1] === 'token') {
+          acc += data.text || '';
+          const a = agentEnsureAnswer(out);
+          a.raw += data.text || '';
+          a.body.textContent = a.raw;
+          agentScrollIf(stick);
+        } else if (ev[1] === 'done') {
+          acc = data.text || acc;
+          const a = agentEnsureAnswer(out);
+          if (data.text) a.raw = data.text;
+          for (const seg of out.answers) {
+            seg.body.dataset.raw = seg.raw;
+            if (typeof renderMarkdown === 'function') renderMarkdown(seg.body, seg.raw);
+            else seg.body.textContent = seg.raw;
+          }
+          agentScrollIf(stick);
+        } else if (ev[1] === 'error') {
+          const a = agentEnsureAnswer(out);
+          a.raw = '错误：' + (data.error || '未知错误');
+          a.body.textContent = a.raw;
+          agentScrollIf(stick);
+        }
+      }
+    }
+    if (acc) AGENT_HISTORY.push({ role: 'assistant', content: acc });
+  } catch (e) {
+    const last = out.answers[out.answers.length - 1];
+    if (e.name === 'AbortError') {
+      if (last) {
+        last.raw += '（已停止）';
+        last.body.textContent = last.raw;
+      }
+    } else if (last) {
+      last.raw += '\n\n出错：' + e.message;
+      last.body.textContent = last.raw;
+    } else {
+      const a = agentEnsureAnswer(out);
+      a.raw = '出错：' + e.message;
+      a.body.textContent = a.raw;
+    }
+  } finally {
+    clearInterval(idleTimer);
+    out.bubble.classList.remove('typing');
+    updateAgentToolCount();
+    $('#btnAgentStop').disabled = true;
+    $('#agentState').textContent = acc ? '完成' : '未完成';
+    AGENT_ABORT = null;
+  }
+}
+
 function selectedChatConfig(name) {
   return CHAT_CONFIGS.find(c => c.name === name) || null;
 }
@@ -614,7 +1252,14 @@ function updateChatBackend() {
   const c = selectedChatConfig($('#chatConfig').value);
   const remote = !!(c && c.backend === 'ollama');
   const think = $('#chatThinkingWrap');
-  if (think) think.style.display = remote ? '' : 'none';
+  if (think) {
+    think.style.display = '';
+    const cb = $('#chatThinking');
+    if (cb) {
+      cb.disabled = !remote;
+      cb.title = remote ? '当前 Ollama 模型支持深度思考' : '本地字符级模型不支持深度思考';
+    }
+  }
 }
 
 const PY = {
@@ -890,7 +1535,7 @@ async function autoDetectEnv() {
   detectOllama(true);
 }
 
-async function detectOllama(useInput) {
+async function detectOllama(useInput, reloadModels = useInput) {
   const btn = $('#btnOllamaDetect');
   const state = $('#ollamaState');
   const input = $('#ollamaUrl');
@@ -910,6 +1555,14 @@ async function detectOllama(useInput) {
       state.textContent = '已连接' + (r.version ? ' v' + r.version : '') +
         ` · ${models.length} 个模型（${chat} 对话 / ${embedding} 嵌入）`;
       state.title = models.join('\n');
+      if (reloadModels) {
+        try {
+          await loadChatConfigs();
+          await loadAgentConfigs();
+        } catch (e) {
+          console.error('刷新模型列表失败', e);
+        }
+      }
     } else {
       state.className = 'installed missing';
       state.textContent = '未连接：' + (r.error || '无法连接 Ollama');
@@ -926,6 +1579,43 @@ async function detectOllama(useInput) {
 $('#btnEnvDetect').onclick = autoDetectEnv;
 $('#btnOllamaDetect').onclick = () => detectOllama(true);
 $('#ollamaUrl').addEventListener('change', () => detectOllama(true));
+$('#mcpSelect').addEventListener('change', () => {
+  mcpFillForm(MCP_SERVERS.find(s => s.id === $('#mcpSelect').value) || null);
+});
+$('#btnMcpNew').onclick = () => {
+  $('#mcpSelect').value = '';
+  mcpFillForm(null);
+  $('#mcpState').textContent = '新配置未保存';
+};
+$('#btnMcpDetect').onclick = detectMcpServers;
+$('#btnMcpSave').onclick = saveMcpConfig;
+$('#btnMcpDelete').onclick = deleteMcpConfig;
+$('#btnMcpTest').onclick = testMcpConfig;
+$('#mcpTransport').addEventListener('change', mcpTransportChanged);
+$('#btnAgentNew').onclick = agentNewChat;
+$('#btnAgentSend').onclick = agentSend;
+$('#btnAgentStop').onclick = () => { if (AGENT_ABORT) AGENT_ABORT.abort(); };
+$('#btnAgentTools').onclick = () => {
+  const panel = $('#agentToolPanel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+};
+$('#btnAgentToolsAll').onclick = () => {
+  AGENT_SELECTED_TOOLS = new Set(AGENT_TOOLS.map(t => t.name));
+  renderAgentTools();
+};
+$('#btnAgentToolsNone').onclick = () => {
+  AGENT_SELECTED_TOOLS = new Set();
+  renderAgentTools();
+};
+$('#agentMcp').addEventListener('change', () => loadAgentTools($('#agentMcp').value));
+$('#agentModel').addEventListener('change', () => { updateAgentThinking(); updateAgentToolCount(); });
+$('#agentInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); agentSend(); }
+});
+$('#agentInput').addEventListener('input', e => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
+});
 $('#btnEnvInstall').onclick = installEnv;
 $('#envTorchCategory').onchange = () => updateTorchCategory('', false);
 $('#chatConfig').addEventListener('change', () => { updateChatBackend(); loadPy('chat'); });
@@ -1111,6 +1801,17 @@ function renderMsg(role, text) {
   return { body, bubble, think };
 }
 
+function chatAtBottom() {
+  const box = $('#chatBox');
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+}
+
+function chatScrollIf(stick) {
+  if (!stick) return;
+  const box = $('#chatBox');
+  box.scrollTop = box.scrollHeight;
+}
+
 // 把历史拼成一条提示词：第一条用户话直接给，后面的轮次自带「用户：」「助手：」标记，
 // 后端会在末尾补上「助手：」，正好拼成模型训练时的格式。
 function promptText() {
@@ -1171,17 +1872,18 @@ async function send() {
         const ev = /event: (\w+)\ndata: ([\s\S]*)/.exec(chunk);
         if (!ev) continue;
         const data = JSON.parse(ev[2]);
+        const stick = chatAtBottom();
         if (ev[1] === 'meta') { CHAT_INFO = data.info; }
         else if (ev[1] === 'reasoning') {
           if (think) {
             think.box.style.display = '';
             think.box.open = true;
             think.pre.textContent += data.text || '';
-            $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
+            chatScrollIf(stick);
           }
         } else if (ev[1] === 'token') {
           acc += data.text; body.textContent = acc;
-          $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
+          chatScrollIf(stick);
         } else if (ev[1] === 'done') {
           acc = data.text || acc;
           body.dataset.raw = acc;
@@ -1191,8 +1893,10 @@ async function send() {
           }
           if (typeof renderMarkdown === 'function') renderMarkdown(body, acc);
           else body.textContent = acc;
+          chatScrollIf(stick);
         } else if (ev[1] === 'error') {
           body.textContent = '错误：' + data.error;
+          chatScrollIf(stick);
         }
       }
     }
@@ -1206,7 +1910,6 @@ async function send() {
     $('#btnChatStop').disabled = true;
     chatAbort = null;
     $('#chatState').textContent = '';
-    $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
   }
 }
 
@@ -1503,6 +2206,7 @@ async function startupDetect() {
     ENV_DETECTED = true;
     await refreshEnv(true);
     await detectOllama(false);
+    await detectMcpServers();
   } finally {
     if (mask) {
       mask.classList.add('hide');
@@ -1516,6 +2220,7 @@ async function startupDetect() {
   initTrainTerm();            // xterm 必须在回填日志前初始化
   await startupDetect();      // 启动时只检测一次，之后靠用户主动检测
   await loadConfigs();
+  await loadMcpConfigs();
   await loadModels();
   renderSignList();           // 签名页：列出所有标准模型目录及其签名状态
   await syncState();          // 先进来同步一次：训练/服务还在跑就把按钮和状态点亮

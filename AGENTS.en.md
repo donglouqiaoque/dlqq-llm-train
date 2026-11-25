@@ -38,10 +38,10 @@
    `reset` / `checkout`, etc.) are **absolutely forbidden even if the user authorizes them**; the
    `.git` directory must **never be read or written, even if the user authorizes it** — no
    standard editing tool (read/write/edit) and no script or command may touch any file under
-   `.git` (reading is forbidden too — a read command can be mistyped into a write/delete); only
-   read-only commands (`status` / `diff` / `log`, etc.) may be allowed once when the user
-   explicitly asks, and must stop immediately afterwards — no further use unless the user asks
-   again. There is no "the user allowed it implicitly" or "the user said it before" excuse.
+   `.git` (reading is forbidden too — a read command can be mistyped into a write/delete).
+   **Single exception**: when the user asks for a commit message, run one read-only git command to
+   read the diff first (see rule 20); otherwise run no git commands at all, including
+   `status` / `diff` / `log`.
 4. **No scripted bulk rewrites of source files**: edit file by file, confirm each change;
    for large refactors, list the plan first.
 5. **AI must not run side-effecting actions**: training, corpus download/cleaning, installing,
@@ -86,6 +86,14 @@
 19. **Check after code changes**: after editing code, at least run syntax checks
     (`py_compile` / `ast.parse`) and config checks (`--check-config`); use build/test scripts when
     present, but never run side effects such as training or starting the WebUI.
+20. **Read the git diff before writing a commit message**: when the user asks for a commit message,
+    never write it from memory, an earlier conclusion, or an old message. First run one read-only
+    git command (recommended combination: `git status --short --untracked-files=all`,
+    `git diff --stat`, `git diff --name-status`; read-only `git diff -- <file>` when needed) to
+    confirm the actual changes, then write the message from that diff. Write the message to
+    `.ai_res/git_log/<date>_<time>.txt`; the user performs the commit and AI never runs
+    `git add`, `commit`, or `push`; describe only this repository's changes, and do not put
+    content unrelated to this repository or ignored by git into the commit message.
 
 ## 2. Layout (current architecture)
 
@@ -105,17 +113,18 @@ code/                   all Python
   chat_worker.py        chat child: keeps ChatSession alive, JSON lines over stdin/stdout
   http_server.py        OpenAI-compatible bridge (ThreadingHTTPServer, lazy multi-model)
   ollama_client.py      Ollama HTTP adapter (/api/tags, /v1/chat/completions, SSE)
+  mcp_client.py         MCP client (STDIO / Streamable HTTP, tool schemas, tools/call)
   common.py             find_root / order-preserving properties I/O / paths / watchdog / hide dir
   model.py              GPT-2 wrapper (transformers)
   model_signature.py    weight SHA-256 signatures (compute / verify, stdlib only)
 web/                    frontend, served by webui.py (no separate web server)
-  index.html            seven tabs: train / chat / server / environment / config / signature / credits
+  index.html            nine tabs: train / chat / Agent / server / environment / config / signature / MCP / credits
   chat.html             LAN read-only chat page (served by LANHandler)
   vendor/               local third-party assets: xterm.js / marked / DOMPurify / KaTeX
 properties/             four training configs (open-sourced, comments written for outsiders)
 model/                  local weights (`model\<name>\` standard HF directory + `checkpoint-<step>\`)
 res/                    corpora (not in git)
-.cache/                 training cache/logs/config backups (directory tracked, contents ignored; hidden on Windows)
+.cache/                 training cache/logs/config backups/MCP configs and status (contents ignored; hidden on Windows)
 THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
 
@@ -179,6 +188,13 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | GET | `/api/models` | standard model directories under `model\` (with signed flag) |
 | GET | `/api/chat/configs` | chat dropdown: local configs + chat-only Ollama models (with backend tag) |
 | GET | `/api/service/configs` | service-page dropdown: local configs + all Ollama models (chat / embedding / other) |
+| GET | `/api/mcp/configs` | MCP server definitions (STDIO / HTTP) + last detection result |
+| POST | `/api/mcp/configs` | save MCP server definitions to `.cache/mcp_servers.json` |
+| POST | `/api/mcp/test` | connect to an MCP server and return `tools/list` |
+| POST | `/api/mcp/detect` | detect all MCP servers at startup/manually; result saved to `.cache/mcp_status.json` |
+| GET | `/api/agent/configs` | tool-capable models, MCP servers and detection results for Agent |
+| GET | `/api/agent/tools?server=<id>` | list a server's tools for Agent multi-select |
+| POST | `/api/agent/chat` | Agent tool loop; SSE: `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
 | GET | `/api/corpora` | corpus directories under `res\` (file count, size) |
 | GET | `/api/train/status` `train/log` | training state and incremental log |
 | GET | `/api/server/status` | bridge state and port |
@@ -261,6 +277,20 @@ Ollama proxy passes the upstream SSE stream through. The Ollama chat list filter
 non-chat models using `/api/show` capabilities; `/v1/embeddings` calls Ollama's native `/api/embed`
 and converts the result to the OpenAI response shape.
 
+**MCP / Agent**: `mcp_client.py` uses only the standard library and supports STDIO (one JSON per
+line) and Streamable HTTP (JSON-RPC POST + Mcp-Session-Id). Configured MCP clients are created at
+WebUI startup and stay resident; a STDIO process lives as long as the WebUI, is restarted only when
+its config changes, and is closed when the WebUI exits. Agent accepts only Ollama models with the
+`tools` capability and loops over `tool_calls → tools/call → tool result` for at most 8 rounds;
+each round uses Ollama SSE, the final answer streams token by token; reasoning, answers and tool
+calls alternate in the model's actual output order, with tool cards inside the reasoning segment
+where the call occurred. Agent requests may include a `tools` name list for multi-select filtering;
+`thinking=true` forwards `think` / `reasoning_effort` and shows the reasoning, while local
+character-level models do not support that toggle. After tool results, an internal continuation user
+turn is added so Ollama/Qwen does not reject a pure tool turn with
+"no user query found in messages". Server definitions live in `.cache/mcp_servers.json`; all
+servers are detected at startup and the result is written to `.cache/mcp_status.json`.
+
 **Stopping**: prompts use `用户：` / `助手：`; generation stops at the next `用户：`. If the vocabulary
 lacks those markers, the session falls back to plain continuation mode.
 
@@ -293,6 +323,9 @@ training config is rejected (it would slow training and may read a half-written 
 - **Character level + short context**: with `block_size` 256 only the tail of a long message is seen.
 - **Small models memorise**: they replay training answers; do not benchmark on the training set.
 - **The bridge is not an agent**: no tool calling, no planning; it only validates the pipeline.
+- **Too many Agent tools**: selecting 100+ MCP tools consumes a lot of context and makes the model
+  more likely to invent a tool name or emit a truncated tool_call; for large files, select only the
+  relevant file tools and let the model write in chunks.
 - **The WebUI console is local-only**: it binds `127.0.0.1` with a one-shot token; the LAN side
   exposes only the read-only chat page (`0.0.0.0:49135`, no auth — anyone on the LAN can chat).
 - **CPU training** is very slow and has no bf16; use it only to smoke-test tiny models.

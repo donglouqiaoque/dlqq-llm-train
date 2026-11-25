@@ -15,6 +15,7 @@ r"""本地 WebUI 服务
 安全：只绑 127.0.0.1；API 需要启动时生成的一次性 token（地址里带 ?t=）。
 """
 import argparse
+import atexit
 import codecs
 import concurrent.futures
 import ctypes
@@ -41,6 +42,7 @@ if HERE not in sys.path:
 
 import common                                                     # noqa: E402
 import ollama_client as ollama                                    # noqa: E402
+import mcp_client                                                 # noqa: E402
 
 common.setup_stdio()
 ROOT = common.find_root()
@@ -49,6 +51,11 @@ LOGO_PATH = os.path.join(ROOT, ".runtime", "logo.ico")
 CACHE_DIR = os.path.join(ROOT, ".cache")
 LOG_DIR = os.path.join(CACHE_DIR, "train-logs")
 OLLAMA_URL_FILE = os.path.join(CACHE_DIR, "ollama_url.txt")
+MCP_CONFIG_FILE = os.path.join(CACHE_DIR, "mcp_servers.json")
+MCP_STATUS_FILE = os.path.join(CACHE_DIR, "mcp_status.json")
+MCP_LOCK = threading.Lock()
+MCP_CLIENTS = {}
+MCP_CLIENTS_LOCK = threading.RLock()
 STATE = {"token": "", "started": time.time(), "train": None, "server": None}
 
 
@@ -74,6 +81,198 @@ def save_ollama_url(value):
             f.write(value or "")
     except OSError:
         pass
+
+
+def _normalize_mcp_server(item, fallback_id=""):
+    if not isinstance(item, dict):
+        raise ValueError("MCP 配置必须是对象")
+    name = str(item.get("name") or "").strip()
+    if not name:
+        raise ValueError("MCP 配置缺少名称")
+    transport = str(item.get("transport") or "stdio").lower()
+    if transport not in ("stdio", "http"):
+        raise ValueError("MCP 传输只能是 stdio 或 http")
+    server_id = str(item.get("id") or fallback_id or "").strip()
+    if not server_id:
+        server_id = "mcp-" + str(int(time.time() * 1000))
+    out = {"id": server_id, "name": name, "transport": transport}
+    if transport == "stdio":
+        command = str(item.get("command") or "").strip()
+        if not command:
+            raise ValueError("STDIO 配置缺少 command")
+        out.update(command=command,
+                   args=str(item.get("args") or "").strip(),
+                   cwd=str(item.get("cwd") or "").strip())
+    else:
+        url = str(item.get("url") or "").strip()
+        if not url:
+            raise ValueError("HTTP 配置缺少 url")
+        out["url"] = url
+    return out
+
+
+def load_mcp_servers():
+    try:
+        with open(MCP_CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    servers = data.get("servers") if isinstance(data, dict) else data
+    out = []
+    for i, item in enumerate(servers if isinstance(servers, list) else []):
+        try:
+            out.append(_normalize_mcp_server(item, f"mcp-{i + 1}"))
+        except ValueError:
+            continue
+    return out
+
+
+def save_mcp_servers(servers):
+    clean = []
+    for i, item in enumerate(servers if isinstance(servers, list) else []):
+        clean.append(_normalize_mcp_server(item, f"mcp-{i + 1}"))
+    with MCP_LOCK:
+        ensure_cache_dir()
+        with open(MCP_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump({"servers": clean}, f, ensure_ascii=False, indent=2)
+    mcp_reconcile()
+    return clean
+
+
+def _mcp_signature(server):
+    return json.dumps(server, ensure_ascii=False, sort_keys=True)
+
+
+def stop_mcp_client(server_id):
+    with MCP_CLIENTS_LOCK:
+        entry = MCP_CLIENTS.pop(server_id, None)
+    if entry:
+        try:
+            entry["client"].close()
+        except Exception:
+            pass
+
+
+def start_mcp_client(server):
+    """返回常驻 MCP 客户端；配置变化或进程退出时重启。"""
+    sid = server["id"]
+    sig = _mcp_signature(server)
+    with MCP_CLIENTS_LOCK:
+        entry = MCP_CLIENTS.get(sid)
+        if entry and entry["signature"] == sig and entry["client"].alive():
+            return entry["client"]
+        if entry:
+            try:
+                entry["client"].close()
+            except Exception:
+                pass
+            MCP_CLIENTS.pop(sid, None)
+        client = mcp_client.client_for(server, timeout=30)
+        MCP_CLIENTS[sid] = {"client": client, "signature": sig,
+                            "config": server}
+        return client
+
+
+def mcp_start_all():
+    for server in load_mcp_servers():
+        try:
+            start_mcp_client(server)
+        except Exception:
+            pass
+
+
+def mcp_reconcile():
+    servers = load_mcp_servers()
+    keep = {s["id"]: s for s in servers}
+    with MCP_CLIENTS_LOCK:
+        stale = [sid for sid, entry in MCP_CLIENTS.items()
+                 if sid not in keep or
+                 entry["signature"] != _mcp_signature(keep[sid])]
+    for sid in stale:
+        stop_mcp_client(sid)
+    for server in servers:
+        try:
+            start_mcp_client(server)
+        except Exception:
+            pass
+
+
+def mcp_stop_all():
+    with MCP_CLIENTS_LOCK:
+        entries = list(MCP_CLIENTS.values())
+        MCP_CLIENTS.clear()
+    for entry in entries:
+        try:
+            entry["client"].close()
+        except Exception:
+            pass
+
+
+atexit.register(mcp_stop_all)
+
+
+def find_mcp_server(server_id):
+    for item in load_mcp_servers():
+        if item.get("id") == server_id:
+            return item
+    return None
+
+
+def load_mcp_status():
+    try:
+        with open(MCP_STATUS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_mcp_status(status):
+    try:
+        ensure_cache_dir()
+        with MCP_LOCK:
+            with open(MCP_STATUS_FILE, "w", encoding="utf-8") as f:
+                json.dump(status, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def _mcp_status_one(server, timeout=20):
+    try:
+        client = start_mcp_client(server)
+        tools = client.list_tools()
+        return {"ok": True, "tools": [
+            {"name": t.get("name"), "description": t.get("description") or ""}
+            for t in tools if isinstance(t, dict) and t.get("name")
+        ], "error": ""}
+    except Exception as e:
+        return {"ok": False, "tools": [], "error": f"{type(e).__name__}: {e}"}
+
+
+def detect_mcp_servers():
+    servers = load_mcp_servers()
+    status = load_mcp_status()
+    for server in servers:
+        status[server["id"]] = _mcp_status_one(server)
+    save_mcp_status(status)
+    return status
+
+
+def find_mcp_status(server_id):
+    return load_mcp_status().get(server_id) or {}
+
+
+def agent_models():
+    out = []
+    for name in ollama.list_models():
+        caps = set(ollama.model_capabilities(name))
+        if "tools" not in caps:
+            continue
+        if not (caps & {"completion", "chat"}):
+            continue
+        out.append({"name": ollama.model_id(name), "model": name,
+                    "backend": "ollama", "capabilities": sorted(caps)})
+    return out
 
 
 load_ollama_url()
@@ -197,6 +396,9 @@ def _join_job(proc):
         ctypes.windll.kernel32.AssignProcessToJobObject(JOB_HANDLE, int(proc._handle))
     except (AttributeError, OSError):
         pass
+
+
+mcp_client.set_process_hook(_join_job)
 
 
 # ==================================================================
@@ -676,6 +878,26 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError as e:
                     return self._err(400, str(e))
             self._json(ollama.detect_environment(custom))
+        elif path == "/api/mcp/configs":
+            self._json({"ok": True, "servers": load_mcp_servers(),
+                        "status": load_mcp_status()})
+        elif path == "/api/agent/configs":
+            self._json({"ok": True, "models": agent_models(),
+                        "servers": load_mcp_servers(),
+                        "status": load_mcp_status()})
+        elif path == "/api/agent/tools":
+            sid = (qs.get("server") or [""])[0]
+            server = find_mcp_server(sid)
+            if not server:
+                return self._err(404, "MCP 服务器不存在")
+            status = find_mcp_status(sid)
+            if not status.get("tools"):
+                status = _mcp_status_one(server)
+                st = load_mcp_status()
+                st[sid] = status
+                save_mcp_status(st)
+            self._json({"ok": bool(status.get("ok")), "tools": status.get("tools") or [],
+                        "error": status.get("error") or ""})
         elif path == "/api/events":
             self._events()
         else:
@@ -704,6 +926,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._server_start(body)
             elif path == "/api/server/stop":
                 self._stop("server")
+            elif path == "/api/mcp/configs":
+                try:
+                    servers = save_mcp_servers(body.get("servers") or [])
+                except ValueError as e:
+                    return self._err(400, str(e))
+                self._json({"ok": True, "servers": servers})
+            elif path == "/api/mcp/test":
+                self._mcp_test(body)
+            elif path == "/api/mcp/detect":
+                status = detect_mcp_servers()
+                self._json({"ok": True, "status": status})
+            elif path == "/api/agent/chat":
+                self._agent_chat(body)
             elif path == "/api/sign":
                 self._sign(body)
             else:
@@ -1080,6 +1315,200 @@ class Handler(BaseHTTPRequestHandler):
         STATE["server"] = spawn(args, f"server-{port}.log", on_line=on_line)
         STATE["server_port"] = port
         self._json({"ok": True, "port": port})
+
+    def _mcp_test(self, body):
+        try:
+            cfg = _normalize_mcp_server(body.get("server") or {})
+            saved = find_mcp_server(cfg["id"])
+            persistent = bool(saved and _mcp_signature(saved) == _mcp_signature(cfg))
+            if persistent:
+                tools = start_mcp_client(saved).list_tools()
+            else:
+                client = mcp_client.client_for(cfg)
+                try:
+                    tools = client.list_tools()
+                finally:
+                    client.close()
+        except Exception as e:
+            return self._err(502, f"MCP 连接失败：{type(e).__name__}: {e}")
+        status = load_mcp_status()
+        status[cfg["id"]] = {
+            "ok": True,
+            "tools": [{"name": t.get("name"), "description": t.get("description") or ""}
+                      for t in tools if isinstance(t, dict) and t.get("name")],
+            "error": "",
+        }
+        save_mcp_status(status)
+        self._json({"ok": True, "server": cfg["name"], "tools": [
+            {"name": t.get("name"), "description": t.get("description") or ""}
+            for t in tools if isinstance(t, dict)
+        ]})
+
+    def _agent_chat(self, body):
+        model = str(body.get("model") or "").strip()
+        server_id = str(body.get("server") or "").strip()
+        if not ollama.is_remote(model):
+            return self._err(400, "Agent 只支持 Ollama 模型")
+        tag = ollama.model_tag(model)
+        caps = set(ollama.model_capabilities(tag))
+        if "tools" not in caps or not (caps & {"completion", "chat"}):
+            return self._err(400, "这个 Ollama 模型不支持工具调用")
+        server = find_mcp_server(server_id)
+        if not server:
+            return self._err(400, "MCP 服务器不存在，请先在 MCP 页保存")
+        msgs = body.get("messages")
+        if not isinstance(msgs, list) or not msgs:
+            text = str(body.get("text") or "").strip()
+            if not text:
+                return self._err(400, "消息不能为空")
+            msgs = [{"role": "user", "content": text}]
+        thinking = bool(body.get("thinking"))
+
+        self._sse_start()
+        client = None
+        try:
+            client = start_mcp_client(server)
+            selected = body.get("tools")
+            selected_names = None
+            if isinstance(selected, list) and selected:
+                selected_names = {str(x) for x in selected}
+            elif selected is not None:
+                self._sse("error", {"error": "至少选择一个 MCP 工具"})
+                return
+            all_tools = client.list_tools()
+            if selected_names is not None:
+                all_tools = [t for t in all_tools
+                             if isinstance(t, dict) and t.get("name") in selected_names]
+            tools = mcp_client.openai_tools(all_tools)
+            if not tools:
+                self._sse("error", {"error": "没有匹配的 MCP 工具"})
+                return
+            self._sse("meta", {"model": model, "server": server["name"],
+                               "tools": len(tools), "thinking": thinking})
+            messages = list(msgs)
+            messages.insert(0, {"role": "system", "content":
+                "你是带 MCP 工具调用的 Agent。只能调用 tools 列表中真实存在的工具名，"
+                "不要编造工具名，也不要把工具调用写进普通文本。创建文件时优先使用文件"
+                "写入工具；内容过长时拆成多次创建/追加，不要在一次工具调用里塞入过长内容。"})
+            user_query = ""
+            for item in reversed(msgs):
+                if isinstance(item, dict) and item.get("role") == "user":
+                    user_query = str(item.get("content") or "")
+                    break
+            for _ in range(8):
+                payload = {"model": tag, "messages": messages,
+                           "stream": True, "tools": tools,
+                           "max_tokens": 8192,
+                           "think": thinking,
+                           "reasoning_effort": "medium" if thinking else "none"}
+                conn, resp = ollama.open_chat(payload, timeout=300)
+                if resp.status < 200 or resp.status >= 300:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                    conn.close()
+                    self._sse("error", {"error": f"Ollama {resp.status}：{raw[:500]}"})
+                    return
+                parts = []
+                calls = {}
+                finish_reason = ""
+                try:
+                    for obj in ollama.iter_sse(resp):
+                        choices = obj.get("choices") or []
+                        if not choices:
+                            continue
+                        finish_reason = (choices[0] or {}).get("finish_reason") or finish_reason
+                        delta = (choices[0] or {}).get("delta") or {}
+                        reason = ollama.delta_reasoning(obj)
+                        if reason:
+                            self._sse("reasoning", {"text": reason})
+                        piece = ollama.delta_text(obj)
+                        if piece:
+                            parts.append(piece)
+                            self._sse("token", {"text": piece})
+                        for tc in delta.get("tool_calls") or []:
+                            idx = int(tc.get("index") or 0)
+                            slot = calls.setdefault(idx, {
+                                "id": "", "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                                "_index": idx,
+                            })
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                if not slot.get("_announced"):
+                                    slot["_announced"] = True
+                                    self._sse("tool_pending",
+                                              {"name": fn["name"], "index": idx})
+                                slot["function"]["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                slot["function"]["arguments"] += fn["arguments"]
+                finally:
+                    conn.close()
+                call_list = [calls[k] for k in sorted(calls)]
+                indexes = []
+                for i, call in enumerate(call_list):
+                    indexes.append(call.pop("_index", i))
+                    call.pop("_announced", None)
+                    if not call.get("id"):
+                        call["id"] = f"call_{i}"
+                if finish_reason == "length":
+                    self._sse("error", {"error":
+                        "模型输出达到长度上限，工具参数或回答可能被截断；"
+                        "请少选一些 MCP 工具，或让模型把文件内容拆成多次创建/追加。"})
+                    return
+                if call_list:
+                    messages.append({"role": "assistant",
+                                     "content": "".join(parts),
+                                     "tool_calls": call_list})
+                    round_results = []
+                    for i, call in enumerate(call_list):
+                        fn = call.get("function") or {}
+                        name = str(fn.get("name") or "")
+                        raw_args = fn.get("arguments") or "{}"
+                        try:
+                            args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                            if not isinstance(args, dict):
+                                args = {}
+                        except ValueError:
+                            args = {}
+                        self._sse("tool", {"name": name, "arguments": args,
+                                           "index": indexes[i]})
+                        try:
+                            result = client.call_tool(name, args)
+                            text = mcp_client.tool_result_text(result)
+                            is_error = bool(result.get("isError")) if isinstance(result, dict) else False
+                        except Exception as e:
+                            text = f"MCP 工具调用失败：{type(e).__name__}: {e}"
+                            is_error = True
+                        model_text = text[:4000]
+                        self._sse("tool_result", {"name": name, "text": model_text,
+                                                   "index": indexes[i],
+                                                   "is_error": is_error})
+                        messages.append({"role": "tool",
+                                         "tool_call_id": call.get("id") or f"call_{i}",
+                                         "content": model_text})
+                        round_results.append((name, model_text))
+                    # Ollama/Qwen 在“纯 tool 结果”轮次里会丢失最新 user；
+                    # 把原始请求和工具结果再次放进最新的 user，避免上下文截断后
+                    # 模型只看到一句“请继续”而看不到工具结果。
+                    result_text = "\n\n".join(
+                        f"【{name}】\n{text}" for name, text in round_results)[:12000]
+                    messages.append({"role": "user", "content":
+                        f"用户请求：{user_query[:2000]}\n\n"
+                        f"工具执行结果：\n{result_text}\n\n"
+                        "请根据以上工具结果继续完成用户请求。"})
+                    continue
+                text = "".join(parts)
+                self._sse("done", {"text": text})
+                return
+            self._sse("error", {"error": "工具调用轮数超过上限"})
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        except Exception as e:
+            try:
+                self._sse("error", {"error": f"{type(e).__name__}: {e}"})
+            except OSError:
+                pass
 
     def _sign(self, body):
         mode = "verify" if (body.get("mode") == "verify") else "compute"
@@ -1665,6 +2094,7 @@ def main():
     common.hide_dir(os.path.join(ROOT, ".ai_res"))
     ensure_cache_dir()
     os.makedirs(LOG_DIR, exist_ok=True)
+    mcp_start_all()
 
     httpd, port = bind_port(a.host, want)
     url = f"http://{a.host}:{port}/?t={STATE['token']}"

@@ -42,16 +42,18 @@ The default tier has ~0.8 M parameters; an 8 GB laptop GPU trains it in minutes.
 ## Quick start
 Double-click `.runtime\start.bat`; the browser opens the local console at an address like
 `http://127.0.0.1:49134/?t=...`. If the port is busy it does not switch silently: it asks for a
-new port, and an empty Enter exits. Seven tabs:
+new port, and an empty Enter exits. Nine tabs:
 
 | Tab | What it does |
 |---|---|
 | Train | pick a config and corpus, press Start; logs stream live and land in `.cache\train-logs\` |
 | Chat | pick a config and type; the reply streams character by character and can be stopped |
+| Agent | pick a tool-capable Ollama model, MCP tools, then run a streaming tool chat |
 | Server | run a local OpenAI-compatible bridge; every request shows up on the page in real time |
-| Environment | inspect the project Python and install / update torch / numpy / transformers |
+| Environment | inspect the project Python, install / update torch / numpy / transformers, detect Ollama |
 | Config | edit `properties\*.properties` in a form; comments and key order are preserved |
 | Signature | compute or verify SHA-256 for the standard weight file in every `model\<name>\` |
+| MCP | configure STDIO / HTTP MCP servers and inspect their tool lists |
 | Credits | list frontend third-party components, versions, licenses and local license files |
 
 > **Closing the cmd window of `start.bat` means exit**: training, the bridge and any signature job
@@ -718,11 +720,12 @@ code\                   all Python
   chat_worker.py        chat child: keeps ChatSession alive, JSON lines over stdin/stdout
   http_server.py        OpenAI-compatible bridge (lazy multi-model loading)
   ollama_client.py      Ollama HTTP adapter (discovery / forwarding / SSE parsing)
+  mcp_client.py         MCP client (STDIO / Streamable HTTP / tool schemas)
   common.py             find_root / order-preserving properties I/O / watchdog / hide dir
   model.py              GPT-2 wrapper (transformers)
   model_signature.py    weight SHA-256 signatures (stdlib only)
 web\                    frontend served by webui.py
-  index.html            seven tabs: train / chat / server / environment / config / signature / credits
+  index.html            nine tabs: train / chat / Agent / server / environment / config / signature / MCP / credits
   chat.html             LAN read-only chat page
   vendor\               local third-party assets: xterm.js / marked / DOMPurify / KaTeX
 properties\             four training configs
@@ -869,6 +872,54 @@ ollama/qwen3:8b
 
 Pick a model marked `(Ollama)` in the chat page. Remote requests forward the original `messages`
 without the local 256-character truncation. Local models still work when Ollama is unavailable.
+
+### MCP / Agent (optional)
+
+The **MCP** tab stores multiple MCP server definitions and supports two transports:
+
+```text
+STDIO: command + args + cwd
+HTTP : http://127.0.0.1:<port>/mcp
+```
+
+STDIO example:
+
+```text
+java -Dfile.encoding=UTF-8 -jar <MCP-SERVER-JAR>
+```
+
+HTTP example:
+
+```text
+http://127.0.0.1:<port>/mcp
+```
+
+Definitions are stored in `.cache\mcp_servers.json`. After saving, press **Connect and list tools**
+to verify the connection and inspect tool names. The WebUI also detects saved MCP servers at
+startup and stores the result in `.cache\mcp_status.json`; **Detect all** in the MCP tab re-runs it.
+Configured STDIO MCP processes start with the WebUI and stay resident instead of exiting after each
+conversation; a config change restarts that process, and WebUI exit closes them all.
+
+The **Agent** tab only lists Ollama models with the `tools` capability and saved MCP servers.
+Model, MCP server, the **Tools** multi-select and **Enable deep thinking** live above the composer.
+For each message:
+
+```text
+user message → Ollama tool_calls → MCP tools/call → tool result → Ollama continues
+```
+
+Tool cards are shown inside the **thinking process** at the point where each call occurred, and
+the final answer streams token by token. As soon as the tool name is known, the card shows
+"preparing / calling"; it changes to "done" or "failed" after execution. With deep thinking enabled,
+reasoning and tool calls are interleaved above the answer in their actual order. Embedding models
+and local character-level models are not listed in Agent; local character-level models do not
+support the thinking toggle. The bridge continues to forward client-provided `tools` to Ollama as
+before; it does not execute MCP tools inside the bridge.
+
+For large files, select only the relevant file tools (for example `dlqq_create_file` /
+`dlqq_append_file` / `dlqq_overwrite_file`) and do not ask the model to emit the whole file in one
+go. A very large tool list consumes context and makes the model more likely to invent a tool name
+or produce a truncated `tool_call`.
 
 ---
 

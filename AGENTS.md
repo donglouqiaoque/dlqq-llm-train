@@ -35,9 +35,8 @@
 3. **git 权限分三层，禁止放宽**：写操作（`commit` / `push` / `add` / `reset` / `checkout` 等）
    **无论用户是否授权都绝对禁止**；`.git` 目录**无论用户是否授权都绝对禁止读写**，无论是标准
    编辑工具（读/写/编辑）还是执行脚本或命令，一律禁止读写 `.git` 目录下的任何文件（读也不行，
-   防止把只读命令写成写/删命令）；只有 `status` / `diff` / `log` 等只读命令允许在用户**主动说明**
-   时授权一次，用完立即停止，后续禁止继续使用，除非用户再次主动说明，不存在“用户默许”“用户之前
-   说过”之类的理由。
+   防止把只读命令写成写/删命令）。**唯一例外**：用户要求写提交信息时，先执行一次只读 git
+   命令读取差异（见第 20 条）；除此之外不执行任何 git 命令，包括 `status` / `diff` / `log`。
 4. **禁止用脚本批量改写源码**：逐文件、逐处确认后再改；大范围调整先出清单。
 5. **禁止 AI 执行有副作用的操作**：训练、下载/清洗语料、安装、删除、解包、批量清理、
    启动 WebUI 或桥接服务、构建运行环境，一律交给用户。AI 只做只读检查、语法与静态检查、
@@ -71,6 +70,12 @@
     不能直接运行它内部的 `.py` 绕过入口；自动化调用加 `nopause`。
 19. **改完代码必须检查**：修改代码后至少做语法检查（`py_compile` / `ast.parse`）和配置检查
     （`--check-config`）；有构建/测试脚本的按脚本走，但不执行训练、启动 WebUI 等有副作用的操作。
+20. **写 git 提交信息前必须先读取 git 差异**：用户要求写提交信息时，禁止凭记忆、上一轮结论
+    或旧提交信息直接编写；必须先执行一次只读 git 命令（建议组合
+    `git status --short --untracked-files=all`、`git diff --stat`、`git diff --name-status`，
+    必要时只读 `git diff -- <文件>`）确认本次实际改动，再按真实差异撰写。提交信息写入
+    `.ai_res/git_log/<日期>_<时间>.txt`，由用户提交；AI 不执行 `git add` / `commit` / `push`；
+    只写本仓库的改动，和本仓库无关或 git 忽略的内容不要写进 git 提交信息。
 
 ## 二、目录结构（当前架构）
 
@@ -90,17 +95,18 @@ code/                   所有 Python
   chat_worker.py        对话子进程：常驻 ChatSession，stdin/stdout 走 JSON 行
   http_server.py        OpenAI 兼容桥接服务（ThreadingHTTPServer，多模型懒加载）
   ollama_client.py      Ollama HTTP 适配（/api/tags、/v1/chat/completions、SSE）
+  mcp_client.py         MCP 客户端（STDIO / Streamable HTTP、工具 schema、tools/call）
   common.py             find_root / properties 保序读写 / 路径解析 / 父进程看门狗 / 隐藏目录
   model.py              GPT-2 封装（transformers）
   model_signature.py    权重 SHA-256 签名（compute / verify，纯标准库）
 web/                    前端（被 webui.py 托管，不需要单独服务器）
-  index.html            七个页签：训练 / 对话 / 服务 / 环境 / 配置 / 签名 / 版权鸣谢
+  index.html            九个页签：训练 / 对话 / Agent / 服务 / 环境 / 配置 / 签名 / MCP / 版权鸣谢
   chat.html             局域网只读对话页（LANHandler 托管）
   vendor/               本地第三方前端资源：xterm.js / marked / DOMPurify / KaTeX
 properties/             四个训练配置（要开源，注释写给外人看）
 model/                  本地权重（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\）
 res/                    语料目录（不进版本库）
-.cache/                 训练缓存/日志/配置备份（目录进版本库，内容忽略；Windows 下自动隐藏）
+.cache/                 训练缓存/日志/配置备份/MCP 配置与检测结果（内容忽略；Windows 下自动隐藏）
 THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
 
@@ -158,6 +164,13 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | GET | `/api/models` | `model\` 下的标准模型目录清单（含是否已签名） |
 | GET | `/api/chat/configs` | 对话下拉用：本地配置 + 仅支持对话的 Ollama 模型（带 backend 标记） |
 | GET | `/api/service/configs` | 服务页下拉用：本地配置 + 全部 Ollama 模型（chat / embedding / other） |
+| GET | `/api/mcp/configs` | MCP 服务器配置列表（STDIO / HTTP）+ 上次检测结果 |
+| POST | `/api/mcp/configs` | 保存 MCP 服务器配置到 `.cache/mcp_servers.json` |
+| POST | `/api/mcp/test` | 连接 MCP 服务器并返回 tools/list |
+| POST | `/api/mcp/detect` | 启动时/手动检测全部 MCP 服务器，结果写入 `.cache/mcp_status.json` |
+| GET | `/api/agent/configs` | Agent 可用的工具模型 + MCP 服务器 + 检测结果 |
+| GET | `/api/agent/tools?server=<id>` | 获取某个 MCP 服务器的工具（供 Agent 多选） |
+| POST | `/api/agent/chat` | Agent 工具循环，SSE：`meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
 | GET | `/api/corpora` | `res\` 下的语料目录（文件数、体积） |
 | GET | `/api/train/status` `train/log` | 训练状态与增量日志 |
 | GET | `/api/server/status` | 桥接服务状态与端口 |
@@ -232,6 +245,17 @@ root 目录始终只有 `config.json` / `model.safetensors` / `chars.json` / `me
 Ollama 对话列表通过 `/api/show` 的 `capabilities` 过滤 embedding 等非对话模型；
 `/v1/embeddings` 转发到 Ollama 原生 `/api/embed`，再转换成 OpenAI 响应格式。
 
+**MCP / Agent**：`mcp_client.py` 只用标准库实现 STDIO（一行一个 JSON）和 Streamable HTTP
+（JSON-RPC POST + Mcp-Session-Id）。已配置的 MCP 客户端在 WebUI 启动时创建并常驻，STDIO 进程
+生命周期跟随 WebUI；修改配置时只重启对应服务器，WebUI 退出时统一关闭。`Agent` 只允许带
+`tools` 能力的 Ollama 模型，按 `tool_calls → tools/call → tool result` 循环，最多 8 轮；
+每轮使用 Ollama SSE，最终回答逐 token 推给前端；思考、回答和工具调用按模型实际输出顺序
+交替显示，工具卡片插在对应思考段里调用发生的位置。Agent 请求可带 `tools` 名称列表做多选
+过滤；`thinking=true` 时透传 `think` / `reasoning_effort` 并显示思考过程，本地字符级模型
+不支持该开关。工具结果之后会补一条内部续跑 user 提示，避免 Ollama/Qwen 把纯 tool 轮次判成
+“no user query found in messages”。服务器定义保存在 `.cache/mcp_servers.json`；启动时检测
+全部服务器并写入 `.cache/mcp_status.json`。
+
 **生成停止**：提示词用 `用户：` / `助手：`；生成到下一个 `用户：` 直接截断；词表缺这两个标记时
 自动切「续写模式」。
 
@@ -260,6 +284,8 @@ Ollama 对话列表通过 `/api/show` 的 `capabilities` 过滤 embedding 等非
 - **字符级 + 短上下文**：`block_size` 256 时一条长消息只能看到最后一段。
 - **小模型会背语料**：同题复现能力强，换问法就露馅；不要拿训练题报分数。
 - **桥接服务不是 agent**：不调用工具、不规划，只适合验证链路。
+- **Agent 工具过多**：一次勾选 100+ 个 MCP 工具会占用大量上下文，并增加模型编造工具名或
+  生成被截断 tool_call 的概率；创建大文件时应只选相关文件工具，并让模型分块写入。
 - **WebUI 控制台只对本机**：控制台绑 `127.0.0.1` + 一次性 token；局域网只暴露只读对话页
   （`0.0.0.0:49135`，无鉴权，同一内网的人都能聊）。
 - **CPU 训练**很慢且不启用 bf16，只建议小模型跑通流程。
