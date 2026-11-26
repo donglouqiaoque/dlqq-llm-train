@@ -24,6 +24,7 @@ _base_override = None
 
 _cache = {"base": "", "at": 0.0, "models": []}
 _caps = {"base": "", "data": {}}
+_think = {"base": "", "data": {}}
 CAP_TTL = 60.0
 
 
@@ -72,11 +73,95 @@ def is_chat_model(name, base=None):
     return not _looks_like_embedding(name)
 
 
+def _thinking_value(value):
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    return str(value).strip().lower()
+
+
+def model_thinking(name, base=None, timeout=2.5, use_cache=True):
+    """返回模型的思考控制元数据。
+
+    Ollama 的 /api/show 可能返回 thinking.values/default；部分模型只有
+    capabilities=thinking 而没有等级元数据。后者优先按 Ollama 支持的低/中/高
+    回退，避免把“没有元数据”误判成只能开关。
+    """
+    base = base_url(base)
+    tag = model_tag(name)
+    now = time.time()
+    if _think["base"] != base:
+        _think.update(base=base, data={})
+    hit = _think["data"].get(tag)
+    if use_cache and hit and now - hit[0] < CAP_TTL:
+        return dict(hit[1]) if hit[1] else None
+
+    meta = None
+    caps = []
+    try:
+        body = json.dumps({"model": tag}, ensure_ascii=False).encode("utf-8")
+        req = Request(base + "/api/show", data=body, method="POST",
+                      headers={"Content-Type": "application/json; charset=utf-8",
+                               "Accept": "application/json"})
+        with urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+        raw = data.get("thinking") if isinstance(data, dict) else None
+        caps = [str(x) for x in (data.get("capabilities") or [])]
+        if isinstance(raw, dict) and isinstance(raw.get("values"), list):
+            values = []
+            for value in raw["values"]:
+                v = _thinking_value(value)
+                if v and v not in values:
+                    values.append(v)
+            default = _thinking_value(raw.get("default"))
+            if values:
+                if all(isinstance(x, bool) for x in raw["values"]):
+                    values = ["off", "on"]
+                if default not in values:
+                    default = values[0]
+                meta = {"supported": True, "values": values, "default": default,
+                        "mode": "boolean" if values == ["off", "on"] else "levels"}
+    except Exception:
+        caps = []
+    if meta is None and "thinking" in caps:
+        meta = {"supported": True, "values": None, "default": "medium",
+                "mode": "default"}
+    _think["data"][tag] = (now, meta)
+    return dict(meta) if meta else None
+
+
 def is_embedding_model(name, base=None):
     caps = set(model_capabilities(name, base))
     if caps:
         return "embedding" in caps
     return _looks_like_embedding(name)
+
+
+def model_context(name, base=None, timeout=2.5):
+    """读取 Ollama 模型声明的上下文长度；没有返回 None。"""
+    base = base_url(base)
+    tag = model_tag(name)
+    try:
+        body = json.dumps({"model": tag}, ensure_ascii=False).encode("utf-8")
+        req = Request(base + "/api/show", data=body, method="POST",
+                      headers={"Content-Type": "application/json; charset=utf-8",
+                               "Accept": "application/json"})
+        with urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+    info = data.get("model_info") if isinstance(data, dict) else None
+    if not isinstance(info, dict):
+        return None
+    values = []
+    for key, value in info.items():
+        if str(key).lower().endswith(".context_length"):
+            try:
+                n = int(value)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                values.append(n)
+    return max(values) if values else None
 
 
 def base_url(value=None):

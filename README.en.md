@@ -42,15 +42,16 @@ The default tier has ~0.8 M parameters; an 8 GB laptop GPU trains it in minutes.
 ## Quick start
 Double-click `.runtime\start.bat`; the browser opens the local console at an address like
 `http://127.0.0.1:49134/?t=...`. If the port is busy it does not switch silently: it asks for a
-new port, and an empty Enter exits. Nine tabs:
+new port, and an empty Enter exits. Ten tabs:
 
 | Tab | What it does |
 |---|---|
 | Train | pick a config and corpus, press Start; logs stream live and land in `.cache\train-logs\` |
 | Chat | pick a config and type; the reply streams character by character and can be stopped |
-| Agent | pick a tool-capable Ollama model, MCP tools, then run a streaming tool chat |
+| Agent | pick a tool-capable API model; run with MCP tools or chat without tools |
+| API | connect any OpenAI-compatible service; only the API Key environment variable name is stored |
 | Server | run a local OpenAI-compatible bridge; every request shows up on the page in real time |
-| Environment | inspect the project Python, install / update torch / numpy / transformers, detect Ollama |
+| Environment | inspect the project Python, install / update torch / numpy / transformers |
 | Config | edit `properties\*.properties` in a form; comments and key order are preserved |
 | Signature | compute or verify SHA-256 for the standard weight file in every `model\<name>\` |
 | MCP | configure STDIO / HTTP MCP servers and inspect their tool lists |
@@ -102,11 +103,9 @@ Every Python entry point — WebUI, training, chat, bridge and signature — use
 Detect environment handles the chip type/driver version and reads installed versions; empty version
 fields mean latest, or pin them manually. `2.14.1` is only an example.
 
-The **Ollama** row in the Environment tab checks the Ollama service separately: it shows
-`OLLAMA_URL`, the service version, and the number of chat / embedding models. An unavailable Ollama
-does not affect local training or chat. The URL is editable in the Environment tab; detection applies
-and saves it. The WebUI checks Python and Ollama once at startup, then does not auto-detect again
-before training, chat, or server start; use **Detect environment** in the Environment tab to refresh.
+Ollama is no longer detected on the Environment tab; it is an OpenAI-compatible API config on the
+**API** tab. The WebUI detects it at startup together with Python / MCP / other APIs, then does not
+auto-detect again before training, chat, or server start.
 
 Dependencies are installed into `.runtime\python\Lib\site-packages`, the same project Python that
 runs the WebUI. The WebUI itself imports only the standard library and never imports torch, so the
@@ -245,7 +244,8 @@ Use the **Chat** tab:
 - the conversation is truncated to the model's `block_size`;
 - assistant replies are rendered as Markdown, including `$...$` and `$$...$$` math via local KaTeX;
   user messages stay plain text;
-- Ollama models show a collapsible thinking block and a “deep thinking” switch; local models do not.
+- API models (including Ollama) show a collapsible thinking block and a thinking-level selector
+  based on detected metadata; local models do not show the thinking area.
 
 ### Two modes
 
@@ -718,21 +718,22 @@ code\                   all Python
   train.py              training (data pipeline + model + loop + sampling)
   chat.py               chat core: ChatSession (load / streaming reply / set params)
   chat_worker.py        chat child: keeps ChatSession alive, JSON lines over stdin/stdout
-  http_server.py        OpenAI-compatible bridge (lazy multi-model loading)
-  ollama_client.py      Ollama HTTP adapter (discovery / forwarding / SSE parsing)
+  http_server.py        OpenAI-compatible bridge (local models + API proxy)
+  ollama_client.py      Ollama native metadata helper (for API-config capability enrichment)
+  openai_client.py      OpenAI-compatible API client (Base URL / env-var Key / SSE / embeddings)
   mcp_client.py         MCP client (STDIO / Streamable HTTP / tool schemas)
   common.py             find_root / order-preserving properties I/O / watchdog / hide dir
   model.py              GPT-2 wrapper (transformers)
   model_signature.py    weight SHA-256 signatures (stdlib only)
 web\                    frontend served by webui.py
-  index.html            nine tabs: train / chat / Agent / server / environment / config / signature / MCP / credits
+  index.html            ten tabs: train / chat / Agent / API / server / environment / config / signature / MCP / credits
   chat.html             LAN read-only chat page
   vendor\               local third-party assets: xterm.js / marked / DOMPurify / KaTeX
 properties\             four training configs
 res\                    corpora (not in git)
 model\                  training output (model\<name>\ standard HF directory + checkpoint-<step>\ + .sha256)
                         config.json / model.safetensors / chars.json / meta.json
-.cache\                 training cache/logs/config backups (directory tracked, contents ignored)
+.cache\                 training cache/logs/config backups/MCP and API configs (directory tracked, contents ignored)
 .ai_res\                AI scratch area (not in git, never used for training)
 THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
@@ -830,48 +831,33 @@ into the DSH provider settings. Every request then appears in the session list b
 Press Stop to shut it down — closing the `start.bat` window also stops it.
 
 The service is OpenAI-compatible: `/v1/models`, `/v1/chat/completions` (with `stream`) and
-`/v1/embeddings` (Ollama embedding models). Local models now generate and send token by token when
-`stream=true`; the Ollama proxy passes the upstream SSE stream through. The chat list filters out
-embedding and other non-chat models using Ollama `/api/show` capabilities; embedding requests go to
-Ollama's native `/api/embed` and are converted to the OpenAI response shape. The service page's
-Vectors tab shows the model, count, dimensions and latency for each embedding request, with the
-complete vector inside a collapsible detail (batch requests show only the first complete vector);
-full high-dimensional vectors are not placed in chat bubbles. Models come from the
-`properties\` configs whose `model=` points at an existing standard model directory (no more
-directory scanning), and chat parameters are read from the same config. Models load only on first use.
+`/v1/embeddings` (API embedding models). Local models generate and send token by token when
+`stream=true`; API models proxy the upstream SSE and embeddings. The service page distinguishes
+chat / embedding from detection results, and embedding requests write the **Vectors** log with
+model, count, dimensions, latency and the complete first vector in a collapsible detail; full
+high-dimensional vectors are not placed in chat bubbles. Models come from the `properties\`
+configs whose `model=` points at an existing standard model directory (no more directory
+scanning), and chat parameters are read from the same config. Models load only on first use.
 
-### Optional Ollama backend
+### Ollama as an API config
 
-The bridge and chat page can also forward requests to Ollama. Ollama is an external inference
-backend and is not used for training:
+Ollama is merged into the OpenAI-compatible API and no longer uses separate `ollama/` model ids:
 
 ```text
-local model       → existing HF model directory
-ollama/xxx        → http://127.0.0.1:11434/v1/chat/completions
+name             Ollama
+Base URL         http://127.0.0.1:11434/v1
+Key env var      (leave empty)
 ```
 
-It reads this environment variable by default:
+At startup the WebUI requests `http://127.0.0.1:11434/v1/models`, then uses Ollama's `/api/show`
+to enrich type, tool and thinking metadata. Models appear as:
 
 ```text
-OLLAMA_URL=http://127.0.0.1:11434
+Ollama/qwen3.5:4b (API)
+Ollama/bge-m3:latest (API · embedding)
 ```
 
-Or pass it when starting the bridge:
-
-```text
-python code\http_server.py --port 49128 --ollama-url http://127.0.0.1:11434
-```
-
-Pass `--no-ollama` to disable the proxy and serve local models only.
-
-Ollama models are listed as:
-
-```text
-ollama/qwen3:8b
-```
-
-Pick a model marked `(Ollama)` in the chat page. Remote requests forward the original `messages`
-without the local 256-character truncation. Local models still work when Ollama is unavailable.
+Embedding models only appear on the Service page, never in Chat / Agent.
 
 ### MCP / Agent (optional)
 
@@ -900,29 +886,68 @@ startup and stores the result in `.cache\mcp_status.json`; **Detect all** in the
 Configured STDIO MCP processes start with the WebUI and stay resident instead of exiting after each
 conversation; a config change restarts that process, and WebUI exit closes them all.
 
-The **Agent** tab only lists Ollama models with the `tools` capability and saved MCP servers.
-Model, MCP server, the **Tools** multi-select and **Enable deep thinking** live above the composer.
-The tool panel can search by tool name or description; Select all / Clear apply to the current
-filter results. For each message:
+The **Agent** tab only lists API models detected as tool-capable and saved MCP servers. Model,
+MCP server, the **Tools** multi-select and
+**Thinking** level live above the composer. The tool panel can search by tool name or
+description; Select all / Clear apply to the current filter results. With no tools selected,
+Agent behaves as plain chat: no tool list is sent and no tool call is executed; running MCP
+servers stay resident. For each message:
 
 ```text
-user message → Ollama tool_calls → MCP tools/call → tool result → Ollama continues
+user message → model tool_calls → MCP tools/call → tool result → model continues
 ```
 
 Execution is shown as a flat Agent timeline rather than nested bubbles: the turn header shows
 status and elapsed time, and clicking it collapses all reasoning / tool-call rows while answers
 remain visible. Reasoning / tool call / answer rows follow in the model's actual output order. As
 soon as the tool name is known, the row shows "preparing / calling"; it changes to "done" or
-"failed" after execution, and arguments/results can be expanded. With deep thinking enabled,
+"failed" after execution, and arguments/results can be expanded. With a thinking level selected,
 reasoning and tool calls are interleaved above the answer in their actual order. Embedding models
 and local character-level models are not listed in Agent; local character-level models do not
-support the thinking toggle. The bridge continues to forward client-provided `tools` to Ollama as
-before; it does not execute MCP tools inside the bridge.
+support the thinking level. The bridge continues to forward client-provided `tools` to the model
+as before; it does not execute MCP tools inside the bridge.
 
 For large files, select only the relevant file tools (for example `dlqq_create_file` /
 `dlqq_append_file` / `dlqq_overwrite_file`) and do not ask the model to emit the whole file in one
 go. A very large tool list consumes context and makes the model more likely to invent a tool name
 or produce a truncated `tool_call`.
+
+### Connect an OpenAI-compatible API (optional)
+
+The **API** tab stores multiple OpenAI-compatible service definitions:
+
+```text
+name
+Base URL (for example https://api.openai.com/v1)
+API Key environment variable name
+```
+
+Model names are no longer entered manually, and tool support is no longer a manual checkbox. At
+startup the WebUI probes each service's `/models` just like Python / MCP detection, then
+stores the model list, type, tool and thinking capability. `GET /models` does not consume
+completion tokens, but it is still an HTTP request and may count toward rate limits.
+
+Definitions live in `.cache\openai_apis.json`; detection results live in
+`.cache\openai_status.json`. **Only the environment variable name is stored, not the Key.** Set the
+actual Key in the process environment before starting the WebUI, for example. Local services such
+as Ollama may leave the env-var name empty, in which case no `Authorization` header is sent.
+
+```bat
+set OPENAI_API_KEY=sk-...
+start.bat
+```
+
+Configured services appear in Chat as `DeepSeek/deepseek-flash (API)`; models detected as
+tool-capable also appear in Agent. The Service page lists every API model (chat / embedding), and
+the bridge proxies `/v1/chat/completions` and `/v1/embeddings`; embedding requests are written to
+the Service page's Vectors log. **Detect models** in the API tab only re-requests the selected
+API's `/models`; startup still detects every saved API. The model list shows type, tool support,
+thinking support, levels and the context limit. Context is read from `/models` fields such as
+`context_length`, `context_window`, `max_model_len` and `top_provider.context_length`, falling
+back to 1M; request history is trimmed against the detected context after reserving output space.
+Note that Agent's "max_tokens output limit" error is the per-response output cap, not the context
+window. Chat and Agent show an estimated context occupancy and percentage below the composer
+(character-based approximation), together with the output cap.
 
 ---
 

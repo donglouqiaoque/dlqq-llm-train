@@ -112,20 +112,21 @@ code/                   all Python
   train.py              training (data pipeline + model + loop + sampling)
   chat.py               chat core: ChatSession (load / reply_stream / set_params)
   chat_worker.py        chat child: keeps ChatSession alive, JSON lines over stdin/stdout
-  http_server.py        OpenAI-compatible bridge (ThreadingHTTPServer, lazy multi-model)
-  ollama_client.py      Ollama HTTP adapter (/api/tags, /v1/chat/completions, SSE)
+  http_server.py        OpenAI-compatible bridge (local models + API proxy)
+  ollama_client.py      Ollama native metadata helper (API-config capability enrichment)
+  openai_client.py      OpenAI-compatible client (Base URL, Key, SSE, tools, embeddings)
   mcp_client.py         MCP client (STDIO / Streamable HTTP, tool schemas, tools/call)
   common.py             find_root / order-preserving properties I/O / paths / watchdog / hide dir
   model.py              GPT-2 wrapper (transformers)
   model_signature.py    weight SHA-256 signatures (compute / verify, stdlib only)
 web/                    frontend, served by webui.py (no separate web server)
-  index.html            nine tabs: train / chat / Agent / server / environment / config / signature / MCP / credits
+  index.html            ten tabs: train / chat / Agent / API / server / environment / config / signature / MCP / credits
   chat.html             LAN read-only chat page (served by LANHandler)
   vendor/               local third-party assets: xterm.js / marked / DOMPurify / KaTeX
 properties/             four training configs (open-sourced, comments written for outsiders)
 model/                  local weights (`model\<name>\` standard HF directory + `checkpoint-<step>\`)
 res/                    corpora (not in git)
-.cache/                 training cache/logs/config backups/MCP configs and status (contents ignored; hidden on Windows)
+.cache/                 training cache/logs/config backups/MCP and API configs and status (contents ignored; hidden on Windows)
 THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
 
@@ -160,9 +161,9 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
   input takes a numeric version (CUDA 12.6 / ROCm 6.2), and the Torch library version is separate.
   `cu126` and similar tags are internal mappings only. Detect environment handles the chip type/driver
   version and reads installed versions into the form; installation skips already-installed
-  libraries with the same version. The WebUI checks Python and Ollama once at startup. Training,
-  chat, and server start do not auto-detect again; only the manual Detect environment button in the
-  Environment tab refreshes them. The Ollama URL is editable and persisted.
+  libraries with the same version. The WebUI detects Python and API models once at startup.
+  Training, chat, and server start do not auto-detect again; only the manual Detect models /
+  Detect environment buttons refresh them. Ollama is an API config on the API tab.
 - **Lifecycle**: closing the cmd window of `start.bat` means exit — children are `terminate()`d,
   and `taskkill /F /T` is the fallback after 5 seconds. **Closing the browser tab is not an exit**;
   training keeps running and you can simply reopen the URL.
@@ -184,15 +185,19 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 |---|---|---|
 | GET | `/api/env` | inspect/check the project Python (`check=1` probes; returns torch/numpy/transformers/pip/CUDA plus `system.torch_recommend` GPU/driver recommendation) |
 | GET | `/api/env/latest` | query PyPI / PyTorch for the latest torch, numpy and transformers versions plus the actually available PyTorch build list; falls back to installed/recommended versions when the network is down |
-| GET | `/api/env/ollama` | detect the Ollama URL, version and model counts (chat / embedding) |
+| GET | `/api/env/ollama` | legacy: detect Ollama URL, version and model counts (main flow uses API configs) |
 | GET | `/api/configs` | config list with parsed key/values |
 | GET | `/api/models` | standard model directories under `model\` (with signed flag) |
-| GET | `/api/chat/configs` | chat dropdown: local configs + chat-only Ollama models (with backend tag) |
-| GET | `/api/service/configs` | service-page dropdown: local configs + all Ollama models (chat / embedding / other) |
+| GET | `/api/chat/configs` | chat dropdown: local configs + chat models from OpenAI-compatible APIs (with backend tag) |
+| GET | `/api/service/configs` | service-page dropdown: local configs + chat / embedding models from OpenAI-compatible APIs |
 | GET | `/api/mcp/configs` | MCP server definitions (STDIO / HTTP) + last detection result |
 | POST | `/api/mcp/configs` | save MCP server definitions to `.cache/mcp_servers.json` |
 | POST | `/api/mcp/test` | connect to an MCP server and return `tools/list` |
 | POST | `/api/mcp/detect` | detect all MCP servers at startup/manually; result saved to `.cache/mcp_status.json` |
+| GET | `/api/openai/configs` | OpenAI-compatible API configs + model/tool/thinking detection results (never returns Keys) |
+| POST | `/api/openai/configs` | save API configs to `.cache/openai_apis.json` and detect models immediately |
+| POST | `/api/openai/detect` | detect `/models` for every saved API at startup; result saved to `.cache/openai_status.json` |
+| POST | `/api/openai/test` | detect only the selected API (draft allowed); saved configs also update status and return model/thinking capability |
 | GET | `/api/agent/configs` | tool-capable models, MCP servers and detection results for Agent |
 | GET | `/api/agent/tools?server=<id>` | list a server's tools for Agent multi-select |
 | POST | `/api/agent/chat` | Agent tool loop; SSE: `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
@@ -269,26 +274,37 @@ optimizer, so it can be published directly.
 the model directory (`meta.json`) > defaults (used by both the web chat and the bridge; implemented
 twice in `chat.py` and `http_server.py` — keep them in sync).
 
-**Ollama proxy**: `ollama_client.py` discovers models from `OLLAMA_URL` (default
-`http://127.0.0.1:11434`) and prefixes their ids with `ollama/`. The bridge and the WebUI chat page
-only forward requests to `/v1/chat/completions`; GGUF is never loaded and training is unaffected.
-Reasoning is extracted from `message.thinking` / `delta.reasoning_content` and used for display only,
-never added to history. Local HTTP `stream=true` now generates and sends character by character; the
-Ollama proxy passes the upstream SSE stream through. The Ollama chat list filters embedding and other
-non-chat models using `/api/show` capabilities; `/v1/embeddings` calls Ollama's native `/api/embed`
-and converts the result to the OpenAI response shape.
+**API (OpenAI-compatible, including Ollama)**: `openai_client.py` uses only the standard library
+for chat completions, models and embeddings requests. Configs live in
+`.cache/openai_apis.json` and store only `name`, `base_url`, `api_key_env`; an empty env var means
+no Authorization header, which is what local Ollama uses. Models are discovered from `/models`; an
+Ollama config is enriched through `/api/show` with type, tool, thinking and context metadata. Each
+model uses `api:<config-id>/<model>` as its id with kind `chat` / `embedding`; Chat/Agent use chat
+only and Service lists both. The bridge proxies `/v1/chat/completions` and `/v1/embeddings`.
+Thinking capability follows the optional `/models` fields: explicit levels are used as-is; old
+true/false interfaces get off/on; supported without levels gets four defaults; explicitly
+unsupported hides the control; completely unknown also gets four defaults with off selected. The
+context limit is read from `/models` fields such as `context_length` / `context_window` /
+`max_model_len`, falling back to 1M; API requests trim history against that context after
+reserving output space. Agent's `max_tokens` defaults to 256K (a model output field wins, bounded by
+context); it is a per-response output cap, not the context limit. Chat and Agent show an estimated
+context occupancy below the composer.
 
 **MCP / Agent**: `mcp_client.py` uses only the standard library and supports STDIO (one JSON per
 line) and Streamable HTTP (JSON-RPC POST + Mcp-Session-Id). Configured MCP clients are created at
 WebUI startup and stay resident; a STDIO process lives as long as the WebUI, is restarted only when
-its config changes, and is closed when the WebUI exits. Agent accepts only Ollama models with the
-`tools` capability and loops over `tool_calls → tools/call → tool result` for at most 8 rounds;
-each round uses Ollama SSE, the final answer streams token by token; a turn header shows status and
+its config changes, and is closed when the WebUI exits. Agent accepts API models detected as
+tool-capable; with no tools selected it behaves as plain chat, sends no
+`tools` and executes no tool calls while MCP processes stay resident. With tools it loops over
+`tool_calls → tools/call → tool result` until the model stops requesting tools; the fixed
+8-round cap is removed and the user can stop at any time;
+each round uses SSE, the final answer streams token by token; a turn header shows status and
 elapsed time, and clicking it collapses only reasoning/tool-call rows while answers stay visible;
 reasoning, tool calls and answers appear as flat timeline rows in the model's actual output order.
 Agent requests may include a `tools` name list for multi-select filtering;
-`thinking=true` forwards `think` / `reasoning_effort` and shows the reasoning, while local
-character-level models do not support that toggle. After tool results, an internal continuation user
+`thinking=off/low/medium/high` forwards `think` / `reasoning_effort` and shows the reasoning;
+API levels come from detection metadata, with four defaults when absent. Local character-level
+models do not support that control. After tool results, an internal continuation user
 turn is added so Ollama/Qwen does not reject a pure tool turn with
 "no user query found in messages". Server definitions live in `.cache/mcp_servers.json`; all
 servers are detected at startup and the result is written to `.cache/mcp_status.json`.

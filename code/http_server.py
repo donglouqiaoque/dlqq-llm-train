@@ -56,6 +56,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import ollama_client as ollama                                  # noqa: E402
+import openai_client                                            # noqa: E402
 
 
 # ==================================================================
@@ -91,6 +92,24 @@ def find_root(start):
 
 ROOT = find_root(HERE)
 DEFAULT_MODEL = os.path.join(ROOT, "model", "chat_demo")
+OPENAI_CONFIG_FILE = os.path.join(ROOT, ".cache", "openai_apis.json")
+OPENAI_APIS = []
+OPENAI_MODELS = []
+
+
+def openai_model_id(api, model):
+    return f"api:{api.get('id')}/{model}"
+
+
+def openai_entry(model):
+    raw = str(model or "")
+    if not raw.startswith("api:") or "/" not in raw[4:]:
+        return None
+    api_id, upstream = raw[4:].split("/", 1)
+    for entry in OPENAI_MODELS:
+        if entry["api"].get("id") == api_id and entry["model"] == upstream:
+            return entry
+    return None
 
 USER_TAG, ASSIST_TAG = "用户：", "助手："
 
@@ -456,13 +475,18 @@ class Handler(BaseHTTPRequestHandler):
                     created = int(time.time())
                 data.append({"id": mid, "object": "model", "created": created,
                              "owned_by": "local"})
-            if not getattr(ARGS, "no_ollama", False):
-                for name in ollama.list_models(getattr(ARGS, "ollama_url", None)):
-                    data.append({"id": ollama.model_id(name), "object": "model",
-                                 "created": int(time.time()), "owned_by": "ollama"})
+            for entry in OPENAI_MODELS:
+                data.append({"id": openai_model_id(entry["api"], entry["model"]),
+                             "object": "model", "created": int(time.time()),
+                             "owned_by": "openai"})
             self._send(200, {"object": "list", "data": data})
         elif path.startswith("/v1/models/"):
             mid = urllib.parse.unquote(path[len("/v1/models/"):])
+            entry = openai_entry(mid)
+            if entry:
+                self._send(200, {"id": mid, "object": "model",
+                                 "created": int(time.time()), "owned_by": "openai"})
+                return
             if ollama.is_remote(mid):
                 if getattr(ARGS, "no_ollama", False):
                     self._err(404, f"没有这个模型：{mid}", "model_not_found", "model")
@@ -501,6 +525,10 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_embeddings(req)
             return
 
+        if openai_entry(req.get("model")):
+            self.handle_openai(req)
+            return
+
         if ollama.is_remote(req.get("model")):
             self.handle_ollama(req)
             return
@@ -508,12 +536,16 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_chat(req)
 
     def handle_embeddings(self, req):
-        """把 OpenAI 兼容 embeddings 请求转给 Ollama 原生 /api/embed。"""
+        """OpenAI 兼容 embeddings：API 代理或 Ollama 原生 /api/embed。"""
+        want = str(req.get("model") or "")
+        entry = openai_entry(want)
+        if entry:
+            self.handle_openai_embeddings(req, entry)
+            return
         if getattr(ARGS, "no_ollama", False):
             self._err(400, "Ollama 后端已关闭（--no-ollama）",
                       "unsupported_feature", "model")
             return
-        want = str(req.get("model") or "")
         if not ollama.is_remote(want):
             self._err(400, "本地模型不支持标准 embedding 接口；请使用 ollama/ 模型",
                       "unsupported_model", "model")
@@ -599,6 +631,190 @@ class Handler(BaseHTTPRequestHandler):
             pass
         except ValueError as e:
             self._err(502, f"解析 Ollama embedding 响应失败：{e}", "upstream_error")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def handle_openai_embeddings(self, req, entry):
+        """代理 OpenAI 兼容 embeddings，并发出与服务页一致的向量事件。"""
+        if entry.get("kind") != "embedding":
+            self._err(400, f"这个模型不是 embedding 模型：{req.get('model')}",
+                      "unsupported_model", "model")
+            return
+        api = entry["api"]
+        want = str(req.get("model") or "")
+        payload = dict(req)
+        payload["model"] = entry["model"]
+        raw_input = req.get("input")
+        inputs = [raw_input] if isinstance(raw_input, str) else list(raw_input or [])
+        t0 = time.time()
+        try:
+            conn, resp = openai_client.open_embeddings(api, payload, timeout=300)
+        except Exception as e:
+            self._err(502, f"无法连接 API：{type(e).__name__}: {e}", "upstream_error")
+            return
+        try:
+            body = resp.read()
+            if resp.status < 200 or resp.status >= 300:
+                self._send(resp.status, {"error": {"message": body[:500].decode(
+                    "utf-8", errors="replace")}})
+                return
+            try:
+                data = json.loads(body.decode("utf-8", errors="replace"))
+            except ValueError:
+                self._err(502, "API 返回的 embedding 不是合法 JSON", "upstream_error")
+                return
+            rows = data.get("data") if isinstance(data, dict) else None
+            if not isinstance(rows, list) or not rows:
+                self._err(502, "API 没有返回 embedding", "upstream_error")
+                return
+            vectors = []
+            for row in rows:
+                emb = row.get("embedding") if isinstance(row, dict) else None
+                if isinstance(emb, str):
+                    try:
+                        raw = base64.b64decode(emb)
+                        emb = list(struct.unpack("<%df" % (len(raw) // 4), raw))
+                    except Exception:
+                        emb = []
+                vectors.append(emb if isinstance(emb, list) else [])
+            first = vectors[0] if vectors else []
+            usage = data.get("usage") if isinstance(data, dict) else None
+            tokens = int(usage.get("prompt_tokens") or 0) if isinstance(usage, dict) else 0
+            emit_event(t="embedding", model=want, count=len(inputs),
+                       dimensions=len(first), tokens=tokens,
+                       ms=int((time.time() - t0) * 1000),
+                       encoding=req.get("encoding_format") or "float",
+                       input_preview=str(inputs[0] if inputs else "")[:160],
+                       vector=first, vector_truncated=len(rows) > 1)
+            self.send_response(resp.status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def handle_openai(self, req):
+        """把 OpenAI 兼容请求透明转发给配置的 OpenAI 兼容服务。"""
+        want = str(req.get("model") or "")
+        entry = openai_entry(want)
+        if not entry:
+            self._err(404, f"没有这个 API 模型：{want}", "model_not_found", "model")
+            return
+        if entry.get("kind") == "embedding":
+            self._err(400, f"这个模型是 embedding 模型，不支持对话：{want}",
+                      "unsupported_model", "model")
+            return
+        api = entry["api"]
+        payload = dict(req)
+        payload["model"] = entry["model"]
+        level = payload.pop("thinking", None)
+        if level is not None:
+            if isinstance(level, bool):
+                level = "medium" if level else "off"
+            level = str(level).strip().lower()
+            if level in ("", "off", "false", "0", "none", "no"):
+                payload["reasoning_effort"] = "none"
+            elif level in ("true", "on", "yes", "1"):
+                payload["reasoning_effort"] = "medium"
+            else:
+                payload["reasoning_effort"] = level
+        payload["stream"] = bool(payload.get("stream"))
+
+        user = _last_user_text(req)
+        t0 = time.time()
+        cid = "chat-" + uuid.uuid4().hex[:20]
+        emit_event(t="chat", phase="start", id=cid, model=want, user=user, turns=1)
+        try:
+            conn, resp = openai_client.open_chat(api, payload, timeout=300)
+        except Exception as e:
+            emit_event(t="chat", phase="error", id=cid, model=want,
+                       error=f"无法连接 API：{type(e).__name__}: {e}")
+            self._err(502, f"无法连接 API：{type(e).__name__}: {e}", "upstream_error")
+            return
+
+        ctype = (resp.getheader("Content-Type") or "application/json").lower()
+        try:
+            if resp.status < 200 or resp.status >= 300:
+                body = resp.read()
+                self.send_response(resp.status)
+                self.send_header("Content-Type", ctype or "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+                emit_event(t="chat", phase="error", id=cid, model=want,
+                           error=f"API {resp.status}: {body[:300].decode('utf-8', errors='replace')}")
+                return
+
+            if payload["stream"]:
+                self.send_response(resp.status)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                parts = []
+                reasoning_parts = []
+                for raw in resp:
+                    self.wfile.write(raw)
+                    self.wfile.flush()
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        obj = json.loads(data)
+                    except ValueError:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    piece = ollama.delta_text(obj)
+                    reason = ollama.delta_reasoning(obj)
+                    if piece:
+                        parts.append(piece)
+                        emit_event(t="chat", phase="delta", id=cid,
+                                   model=want, text=piece)
+                    if reason:
+                        reasoning_parts.append(reason)
+                        emit_event(t="chat", phase="reasoning", id=cid,
+                                   model=want, text=reason)
+                emit_event(t="chat", phase="done", id=cid, model=want, turns=1,
+                           ms=int((time.time() - t0) * 1000), user=user,
+                           reasoning="".join(reasoning_parts),
+                           assistant="".join(parts), prompt_chars=0, stream=True)
+                return
+
+            body = resp.read()
+            self.send_response(resp.status)
+            self.send_header("Content-Type", ctype or "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+            try:
+                obj = json.loads(body.decode("utf-8", errors="replace"))
+            except ValueError:
+                obj = {}
+            text = ollama.delta_text(obj) if isinstance(obj, dict) else ""
+            reasoning = ollama.delta_reasoning(obj) if isinstance(obj, dict) else ""
+            emit_event(t="chat", phase="done", id=cid, model=want, turns=1,
+                       ms=int((time.time() - t0) * 1000), user=user,
+                       reasoning=reasoning, assistant=text,
+                       prompt_chars=0, stream=False)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
         finally:
             try:
                 conn.close()
@@ -922,10 +1138,12 @@ import common                                                     # noqa: E402
 
 
 def main():
-    global ARGS, POOL, EMIT_EVENTS
+    global ARGS, POOL, EMIT_EVENTS, OPENAI_APIS, OPENAI_MODELS
     ap = argparse.ArgumentParser(description="按配置文件把模型起成 OpenAI 兼容服务")
     ap.add_argument("--config", action="append", default=[],
                     help="只服务这些配置（properties 里的名字，可写多次）；默认全部")
+    ap.add_argument("--openai-api", action="append", default=[],
+                    help="只代理这些 OpenAI 兼容 API 配置 id（可写多次）；默认全部")
     ap.add_argument("--default-model", default=None,
                     help="请求没带 model 时用哪个配置；默认清单里第一个")
     ap.add_argument("--max-loaded", type=int, default=1,
@@ -960,20 +1178,39 @@ def main():
         want = {c.strip().lower() for c in a.config if c.strip()}
         cfgs = [c for c in cfgs if c["name"].lower() in want]
     reg = {c["name"]: c["path"] for c in cfgs}
-    if not reg:
-        print("[错误] 没有任何配置能对应到现成的权重。")
+
+    OPENAI_APIS = openai_client.load_apis(OPENAI_CONFIG_FILE)
+    if a.openai_api:
+        want_api = {str(x).strip() for x in a.openai_api if str(x).strip()}
+        OPENAI_APIS = [x for x in OPENAI_APIS if x.get("id") in want_api]
+    OPENAI_MODELS = []
+    for api in OPENAI_APIS:
+        try:
+            infos = openai_client.list_model_infos(api)
+        except Exception as e:
+            print(f"[警告] API {api.get('name')} 模型检测失败：{type(e).__name__}: {e}")
+            continue
+        for info in infos:
+            OPENAI_MODELS.append({"api": api, "model": info["name"],
+                                  "kind": info.get("kind") or "chat"})
+    if not reg and not OPENAI_MODELS:
+        print("[错误] 没有任何配置能对应到现成的权重，也没有可用的 OpenAI API 模型。")
         print("       检查 properties\\<名字>.properties 里的 model=，")
         print("       它应指向 model\\<名字>\\（HF 标准目录）；也可以先训练一个。")
         sys.exit(1)
 
     ids = sorted(reg)
-    default = a.default_model or ids[0]
-    if default not in reg:
-        hit = [k for k in ids if k.lower() == default.lower()]
-        if not hit:
-            print(f"[错误] --default-model 不是可用配置：{default}（可用：{', '.join(ids)}）")
-            sys.exit(1)
-        default = hit[0]
+    if ids:
+        default = a.default_model or ids[0]
+        if default not in reg:
+            hit = [k for k in ids if k.lower() == default.lower()]
+            if not hit:
+                print(f"[错误] --default-model 不是可用配置：{default}（可用：{', '.join(ids)}）")
+                sys.exit(1)
+            default = hit[0]
+    else:
+        first = OPENAI_MODELS[0]
+        default = a.default_model or openai_model_id(first["api"], first["model"])
     a.default_model = default
 
     if a.device is None:
@@ -1019,7 +1256,7 @@ def main():
     print("=" * 68)
     print("  桥接服务：本地模型（OpenAI 兼容，多模型 + 懒加载）")
     print("=" * 68)
-    print(f"[清单] 共 {len(ids)} 个配置（模型路径与对话参数都取自 properties，懒加载）")
+    print(f"[清单] 共 {len(ids)} 个本地配置（模型路径与对话参数都取自 properties，懒加载）")
     for mid in ids:
         p = reg[mid]
         try:
@@ -1029,6 +1266,13 @@ def main():
             mb, mt = 0, "?"
         mark = "  ← 默认" if mid == default else ""
         print(f"       {mid:<24} {mb:>8.1f} MB  {mt}{mark}")
+    if OPENAI_MODELS:
+        print(f"[API] 共 {len(OPENAI_MODELS)} 个 OpenAI 兼容模型：")
+        for entry in OPENAI_MODELS:
+            api = entry["api"]
+            mid = openai_model_id(api, entry["model"])
+            mark = "  ← 默认" if mid == default else ""
+            print(f"       {mid:<40} {api.get('name', '')}{mark}")
     print(f"[设备] {a.device} | 同时最多留 {a.max_loaded} 个模型在显存里")
     if not a.no_ollama:
         names = ollama.list_models(a.ollama_url)

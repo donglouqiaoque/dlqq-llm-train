@@ -40,15 +40,16 @@
 ## 快速开始
 双击 `.runtime\start.bat`，浏览器会自动打开本地控制台（地址形如
 `http://127.0.0.1:49134/?t=...`）。端口被占用时不会自动换端口，会提示输入新端口，
-直接回车则退出。页面有九个标签：
+直接回车则退出。页面有十个标签：
 
 | 标签 | 用途 |
 |---|---|
 | 训练 | 选配置和语料，点【开始训练】；日志实时滚动，同时落盘到 `.cache\train-logs\` |
 | 对话 | 选配置，直接打字；回复逐字出现，可随时【停止】 |
-| Agent | 选择支持工具调用的 Ollama 模型和 MCP 服务器，执行带工具的流式对话 |
+| Agent | 选择支持工具调用的 API 模型；可带 MCP 工具，也可不选工具直接对话 |
+| API | 接入任意 OpenAI 兼容服务，只保存 API Key 的环境变量名 |
 | 服务 | 起一个 OpenAI 兼容的本地桥接服务，页面上能实时看到每次问答 |
-| 环境 | 检测项目 Python、安装 / 更新 torch / numpy / transformers，检测 Ollama 服务 |
+| 环境 | 检测项目 Python、安装 / 更新 torch / numpy / transformers |
 | 配置 | 在表单里改 `properties\*.properties`，保存时保留注释与键顺序 |
 | 签名 | 给 `model\<名字>\` 下的标准权重文件计算或校验 SHA-256 |
 | MCP | 配置 STDIO / HTTP 两种 MCP 服务器，并测试工具列表 |
@@ -97,10 +98,8 @@ Windows 防火墙里允许 Python 访问**专用网络**；不想开局域网页
 检测环境只负责芯片类型/驱动版本和读取当前已安装版本；版本输入框默认留空即安装最新版，
 也可以手动指定。`2.14.1` 只是示例。
 
-环境页的 **Ollama** 行可以单独检测 Ollama 服务：显示 `OLLAMA_URL`、服务版本和对话 /
-embedding 模型数量。Ollama 不可用只影响 Ollama 模型，不影响本地训练和对话。
-Ollama URL 可以直接在环境页修改，检测时会应用并保存；WebUI 启动时会先检测一次 Python 和
-Ollama，之后训练、对话、服务启动前不会重复自动检测，只有环境页手动点【检测环境】才重新检测。
+Ollama 不再在环境页单独检测，而是作为一条 OpenAI 兼容 API 配置放在「API」页；WebUI 启动时
+和 Python / MCP / 其他 API 一起检测，之后训练、对话、服务启动前不会重复自动检测。
 
 依赖会安装到 `.runtime\python\Lib\site-packages`，也就是 WebUI 自己使用的项目 Python。WebUI 进程本身只 import 标准库，不 import torch，因此安装期间界面仍可用。
 
@@ -202,7 +201,8 @@ make_python_env.bat <Python目录> autoyes nopause
   词表里没有这两个标记的模型会自动切「续写模式」；
 - 助手回复会按 Markdown 渲染，支持 `$...$` 和 `$$...$$` 数学公式（本地 KaTeX）；
   用户消息仍按纯文本显示；
-- Ollama 模型会显示可折叠的思考过程，并提供“开启深度思考”开关；本地模型不显示思考区域。
+- API 模型（包括 Ollama）会显示可折叠的思考过程和思考等级下拉框，等级来自检测结果；
+  本地模型不显示思考区域。
 
 ## 用自己的语料
 
@@ -643,21 +643,22 @@ code\                   所有 Python
   train.py              训练（数据管线 + 模型 + 训练循环 + 采样）
   chat.py               对话核心：ChatSession（加载 / 流式回复 / 改参数）
   chat_worker.py        对话子进程：常驻 ChatSession，stdin/stdout 走 JSON 行
-  http_server.py        OpenAI 兼容桥接服务（多模型懒加载）
-  ollama_client.py      Ollama HTTP 适配（模型发现 / 请求转发 / SSE 解析）
+  http_server.py        OpenAI 兼容桥接服务（本地模型 + API 代理）
+  ollama_client.py      Ollama 原生元数据辅助（仅用于 API 配置的模型能力补齐）
+  openai_client.py      OpenAI 兼容 API 客户端（Base URL / 环境变量 Key / SSE / embeddings）
   mcp_client.py         MCP 客户端（STDIO / Streamable HTTP / 工具 schema）
   common.py             find_root / properties 保序读写 / 父进程看门狗 / 隐藏目录
   model.py              GPT-2 封装（transformers）
   model_signature.py    权重 SHA-256 签名（只依赖标准库）
 web\                    前端页面（由 webui.py 托管）
-  index.html            九个标签：训练 / 对话 / Agent / 服务 / 环境 / 配置 / 签名 / MCP / 版权鸣谢
+  index.html            十个标签：训练 / 对话 / Agent / API / 服务 / 环境 / 配置 / 签名 / MCP / 版权鸣谢
   chat.html             局域网只读对话页
   vendor\               本地第三方前端资源：xterm.js / marked / DOMPurify / KaTeX
 properties\             四个训练配置
 res\                    语料目录（不进版本库）
 model\                  训练产物（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\ + .sha256）
                         每个目录含 config.json / model.safetensors / chars.json / meta.json
-.cache\                 训练缓存/日志/配置备份（目录纳入版本控制，内容忽略）
+.cache\                 训练缓存/日志/配置备份/MCP 与 API 配置（目录纳入版本控制，内容忽略）
 .ai_res\                AI 临时目录（不进版本库，不参与训练）
 THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
@@ -747,45 +748,32 @@ jsonl 会自动找问答字段（`{"text": ...}` 这种单字段的当纯文本�
 5. 点【停止】关闭服务；关掉 `start.bat` 的窗口时它也会一起退出。
 
 服务本身是 OpenAI 兼容的：`/v1/models`、`/v1/chat/completions`（支持 `stream`）
-和 `/v1/embeddings`（Ollama embedding 模型）。本地模型在 `stream=true` 时逐字生成并发送；
-Ollama 代理直接透传上游 SSE。对话列表会通过 Ollama `/api/show` 的能力字段过滤掉
-embedding 等非对话模型；embedding 请求转发到 Ollama 原生 `/api/embed` 并转换成 OpenAI 格式。
-服务页的「向量」子页显示每次 embedding 请求的模型、条数、维度、耗时，并把完整向量放在
-可折叠详情里（批量请求只展示第 1 条完整向量），不会把完整高维向量塞进会话气泡。
+和 `/v1/embeddings`（API 的 embedding 模型）。本地模型在 `stream=true` 时逐字生成并发送；
+API 模型直接代理上游 SSE 和 embeddings。服务页的模型清单按 API 检测结果区分
+对话 / 嵌入，embedding 请求会写「向量」日志，显示模型、条数、维度、耗时，并把完整向量
+放在可折叠详情里（批量请求只展示第 1 条完整向量），不会把完整高维向量塞进会话气泡。
 模型清单来自 `properties\` 里能对上标准模型目录的配置（不再扫描旧 `.pt` 文件），谁被调用才加载谁；
 对话参数也读同一份配置。
 
-### 接入 Ollama（可选）
+### Ollama 作为 API 配置
 
-桥接服务和对话页也可以把请求转发给 Ollama。Ollama 是外部推理后端，不参与训练：
-
-```text
-本地模型       → 现有 HF 模型目录
-ollama/xxx     → http://127.0.0.1:11434/v1/chat/completions
-```
-
-默认读取环境变量：
+Ollama 已合并到 OpenAI 兼容 API，不再使用单独的 `ollama/` 模型 id：
 
 ```text
-OLLAMA_URL=http://127.0.0.1:11434
+名称        Ollama
+Base URL    http://127.0.0.1:11434/v1
+Key 环境变量 （留空）
 ```
 
-也可以启动桥接服务时指定：
+WebUI 启动检测时会请求 `http://127.0.0.1:11434/v1/models`，再通过 Ollama 的 `/api/show`
+补齐模型类型、工具和思考能力。模型显示成：
 
 ```text
-python code\http_server.py --port 49128 --ollama-url http://127.0.0.1:11434
+Ollama/qwen3.5:4b（API）
+Ollama/bge-m3:latest（API · 嵌入）
 ```
 
-加 `--no-ollama` 可关闭代理，只服务本地模型。
-
-模型清单会把 Ollama 模型显示成：
-
-```text
-ollama/qwen3:8b
-```
-
-对话时选择带 `（Ollama）` 的模型即可；远程请求会把原始 `messages` 转发给 Ollama，
-不经过本地 256 字截断。不可用时本地模型仍可正常使用。
+嵌入模型只出现在服务页，不会出现在 Chat / Agent。
 
 ### 接入 MCP / Agent（可选）
 
@@ -813,24 +801,58 @@ WebUI 启动时也会自动检测已保存的 MCP 服务器，结果保存到 `.
 MCP 页的【检测全部】可手动重新检测。已配置的 STDIO MCP 进程会随 WebUI 启动并常驻，
 不会在每次对话结束时退出；修改对应配置时重启该进程，WebUI 退出时统一销毁。
 
-「Agent」页只列出带 `tools` 能力的 Ollama 模型和已保存的 MCP 服务器。模型、MCP 服务器、
-【工具】多选和【开启深度思考】都放在聊天框上方；工具面板支持按工具名或说明搜索，
-全选/清空作用于当前筛选结果。发送任务后：
+「Agent」页只列出检测到支持工具调用的 API 模型，以及已保存的 MCP 服务器。模型、MCP 服务器、
+【工具】多选和【思考】等级都放在聊天框上方；工具面板支持
+按工具名或说明搜索，全选/清空作用于当前筛选结果。不选任何工具时，Agent 按普通对话处理：
+不向模型传工具列表，也不执行工具调用；已启动的 MCP 服务器保持常驻。发送任务后：
 
 ```text
-用户消息 → Ollama tool_calls → MCP tools/call → 工具结果回填 → Ollama 继续生成
+用户消息 → 模型 tool_calls → MCP tools/call → 工具结果回填 → 模型继续生成
 ```
 
 执行过程不使用嵌套气泡，而是平铺的 Agent 时间线：顶部显示运行状态和用时，点击顶部可折叠
 所有「思考 / 工具调用」行，回答内容始终显示。下面按模型实际输出顺序排列「思考 / 工具调用 /
 回答」行。工具名一出现就先显示“准备调用 / 正在调用”，执行完成后更新为“完成”或“失败”；
-工具参数和结果可在对应行展开。开启深度思考时，思考内容和工具调用按实际顺序排列在回答上方。
-embedding 模型和本地字符级模型不会出现在 Agent 模型列表中；本地字符级模型也不支持深度
-思考开关。桥接服务仍按原逻辑转发客户端传来的 `tools`，不在桥接进程内自行执行 MCP 工具。
+工具参数和结果可在对应行展开。设置思考等级后，思考内容和工具调用按实际顺序排列在回答上方。
+embedding 模型和本地字符级模型不会出现在 Agent 模型列表中；本地字符级模型也不支持思考
+等级控件。桥接服务仍按原逻辑转发客户端传来的 `tools`，不在桥接进程内自行执行 MCP 工具。
 
 创建大文件时建议只勾选相关的文件工具（如 `dlqq_create_file` / `dlqq_append_file` /
 `dlqq_overwrite_file`），不要让模型一次生成过长的内容；工具选得过多会占用上下文，模型也
 更容易编造不存在的工具名或生成被截断的 tool_call。
+
+### 接入 OpenAI 兼容 API（可选）
+
+「API」页可以保存多个 OpenAI 兼容服务配置：
+
+```text
+名称
+Base URL（例如 https://api.openai.com/v1）
+API Key 环境变量名
+```
+
+不再手工填写模型名，也不手工勾选工具能力。WebUI 启动时会和 Python / MCP 一样
+自动请求各服务的 `/models`，把模型列表、类型、工具和思考能力写入检测结果。`GET /models`
+不消耗生成 Token，但会产生一次 HTTP 请求和可能的速率计数。
+
+配置保存在 `.cache\openai_apis.json`；检测结果保存在 `.cache\openai_status.json`。
+**只保存环境变量名，不保存 Key 本身**；实际 Key 请在启动 WebUI 前设置到进程环境，例如：
+Ollama 等本地服务可以把环境变量名留空，此时不发送 `Authorization`。
+
+```bat
+set OPENAI_API_KEY=sk-...
+start.bat
+```
+
+配置后，Chat 下拉会按 `DeepSeek/deepseek-flash（API）` 的形式显示每个模型；检测到支持
+工具调用的模型也会出现在 Agent。服务页会列出全部 API 模型（对话 / 嵌入），桥接服务会代理
+`/v1/chat/completions` 和 `/v1/embeddings`，embedding 请求会写入服务页的「向量」日志。
+API 页只有一个【检测模型】按钮，只重新请求当前选中 API 的 `/models`；启动时仍然自动检测
+全部已保存 API。模型列表会同时显示类型、工具能力、思考档位和上下文上限。
+上下文优先读取 `/models` 的 `context_length` / `context_window` / `max_model_len` /
+`top_provider.context_length` 等字段，读不到时按 1M 默认；请求历史会按检测到的上下文
+预留输出空间后裁剪。注意 Agent 的“输出达到 max_tokens 上限”是单轮输出上限，不是上下文上限。
+Chat 和 Agent 输入框下方会显示估算的上下文占用和百分比（按字符数近似），并同时显示输出上限。
 
 ---
 

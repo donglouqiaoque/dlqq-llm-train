@@ -94,20 +94,21 @@ code/                   所有 Python
   train.py              训练（数据管线 + 模型 + 训练循环 + 采样）
   chat.py               对话核心：ChatSession（load / reply_stream / set_params）
   chat_worker.py        对话子进程：常驻 ChatSession，stdin/stdout 走 JSON 行
-  http_server.py        OpenAI 兼容桥接服务（ThreadingHTTPServer，多模型懒加载）
-  ollama_client.py      Ollama HTTP 适配（/api/tags、/v1/chat/completions、SSE）
+  http_server.py        OpenAI 兼容桥接服务（本地模型 + API 代理）
+  ollama_client.py      Ollama 原生元数据辅助（只用于 API 配置的能力补齐）
+  openai_client.py      OpenAI 兼容客户端（Base URL、Key、SSE、tools、embeddings）
   mcp_client.py         MCP 客户端（STDIO / Streamable HTTP、工具 schema、tools/call）
   common.py             find_root / properties 保序读写 / 路径解析 / 父进程看门狗 / 隐藏目录
   model.py              GPT-2 封装（transformers）
   model_signature.py    权重 SHA-256 签名（compute / verify，纯标准库）
 web/                    前端（被 webui.py 托管，不需要单独服务器）
-  index.html            九个页签：训练 / 对话 / Agent / 服务 / 环境 / 配置 / 签名 / MCP / 版权鸣谢
+  index.html            十个页签：训练 / 对话 / Agent / API / 服务 / 环境 / 配置 / 签名 / MCP / 版权鸣谢
   chat.html             局域网只读对话页（LANHandler 托管）
   vendor/               本地第三方前端资源：xterm.js / marked / DOMPurify / KaTeX
 properties/             四个训练配置（要开源，注释写给外人看）
 model/                  本地权重（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\）
 res/                    语料目录（不进版本库）
-.cache/                 训练缓存/日志/配置备份/MCP 配置与检测结果（内容忽略；Windows 下自动隐藏）
+.cache/                 训练缓存/日志/配置备份/MCP 与 API 配置和检测结果（内容忽略；Windows 下自动隐藏）
 THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
 
@@ -140,8 +141,8 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
   （CUDA 12.6 / ROCm 6.2），Torch 库版本单独填写。`cu126` 等只做内部映射。
   检测环境只负责芯片类型/驱动版本；同时读取当前已安装版本填入版本框，
   安装时跳过已安装且版本相同的库。版本输入框留空即安装最新版。
-  WebUI 启动时检测一次 Python 和 Ollama；之后训练、对话、服务启动前不重复自动检测，
-  只有环境页手动【检测环境】才重新检测。Ollama URL 可在环境页修改并持久化。
+  WebUI 启动时检测一次 Python 和 API 模型；之后训练、对话、服务启动前不重复自动检测，
+  只有手动【检测模型】或环境页【检测环境】才重新检测。Ollama 作为 API 配置放在 API 页。
 - **生命周期**：关掉 `start.bat` 的 cmd 窗口 = 退出（先 `terminate()` 子进程，5 秒不退再
   `taskkill /F /T`）；**关浏览器标签不算退出**，训练照常跑，重新访问控制台地址即可。
 - **看门狗**：子进程按 `--parent-pid` 每 3 秒用 `ctypes` `WaitForSingleObject` 检查父进程句柄，
@@ -160,15 +161,19 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 |---|---|---|
 | GET | `/api/env` | 查询/检测项目 Python（`check=1` 才 probe；返回 torch/numpy/transformers/pip/CUDA，以及 `system.torch_recommend` 显卡/驱动推荐） |
 | GET | `/api/env/latest` | 查询 PyPI / PyTorch 源的最新 torch、numpy、transformers 版本，并返回实际可用的 PyTorch 构建列表；网络失败时回退到已安装/推荐版本 |
-| GET | `/api/env/ollama` | 检测 Ollama 服务地址、版本和模型数量（区分对话 / embedding） |
+| GET | `/api/env/ollama` | 兼容旧接口：检测 Ollama 地址、版本和模型数量（主流程已改用 API 配置） |
 | GET | `/api/configs` | 配置列表 + 解析后的键值 |
 | GET | `/api/models` | `model\` 下的标准模型目录清单（含是否已签名） |
-| GET | `/api/chat/configs` | 对话下拉用：本地配置 + 仅支持对话的 Ollama 模型（带 backend 标记） |
-| GET | `/api/service/configs` | 服务页下拉用：本地配置 + 全部 Ollama 模型（chat / embedding / other） |
+| GET | `/api/chat/configs` | 对话下拉用：本地配置 + OpenAI 兼容 API 的对话模型（带 backend 标记） |
+| GET | `/api/service/configs` | 服务页下拉用：本地配置 + OpenAI 兼容 API 的对话 / 嵌入模型 |
 | GET | `/api/mcp/configs` | MCP 服务器配置列表（STDIO / HTTP）+ 上次检测结果 |
 | POST | `/api/mcp/configs` | 保存 MCP 服务器配置到 `.cache/mcp_servers.json` |
 | POST | `/api/mcp/test` | 连接 MCP 服务器并返回 tools/list |
 | POST | `/api/mcp/detect` | 启动时/手动检测全部 MCP 服务器，结果写入 `.cache/mcp_status.json` |
+| GET | `/api/openai/configs` | OpenAI 兼容 API 配置 + 模型、工具、思考能力检测结果（不返回 Key） |
+| POST | `/api/openai/configs` | 保存 API 配置到 `.cache/openai_apis.json`，并立即检测模型 |
+| POST | `/api/openai/detect` | 启动时检测全部已保存 API 的 `/models`，结果写入 `.cache/openai_status.json` |
+| POST | `/api/openai/test` | 只检测当前选中的 API（草稿也可）；已保存配置同时更新状态并返回模型/思考能力 |
 | GET | `/api/agent/configs` | Agent 可用的工具模型 + MCP 服务器 + 检测结果 |
 | GET | `/api/agent/tools?server=<id>` | 获取某个 MCP 服务器的工具（供 Agent 多选） |
 | POST | `/api/agent/chat` | Agent 工具循环，SSE：`meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
@@ -238,23 +243,33 @@ root 目录始终只有 `config.json` / `model.safetensors` / `chars.json` / `me
 **对话参数优先级**：`显式参数` > `properties\<配置名>.properties` > `模型文件里存的` > `默认值`
 （网页对话与桥接服务都按这个顺序取，`chat.py` 与 `http_server.py` 各实现一份，改一处要同步另一处）。
 
-**Ollama 代理**：`ollama_client.py` 从 `OLLAMA_URL`（默认 `http://127.0.0.1:11434`）
-发现模型；模型 id 加 `ollama/` 前缀。桥接服务和 WebUI 对话页只把 Ollama 请求转发到
-`/v1/chat/completions`，不加载 GGUF，也不参与训练；Ollama 不可用时本地模型不受影响。
-思考内容从 `message.thinking` / `delta.reasoning_content` 等字段提取，只用于显示，不进入历史。
-本地 HTTP 的 `stream=true` 现在逐字符生成并发送；Ollama 代理直接透传上游 SSE。
-Ollama 对话列表通过 `/api/show` 的 `capabilities` 过滤 embedding 等非对话模型；
-`/v1/embeddings` 转发到 Ollama 原生 `/api/embed`，再转换成 OpenAI 响应格式。
+**API（OpenAI 兼容，含 Ollama）**：`openai_client.py` 只用标准库实现 chat completions、models 和
+embeddings 请求。配置保存在 `.cache/openai_apis.json`，只保存 `name` / `base_url` / `api_key_env`；
+`api_key_env` 可为空，空值时不发送 Authorization，供 Ollama 等本地服务使用。
+模型不由配置指定：WebUI 启动时和 API 页手动检测都会请求 `/models`（不消耗生成 Token），
+Ollama 配置还会用 `/api/show` 补齐类型、工具、思考和上下文。每个模型用
+`api:<配置id>/<模型>` 作为 id，类型分为 `chat` / `embedding`；Chat/Agent 只用 chat，
+服务页两者都列。API 模型由桥接服务代理 `/v1/chat/completions` 和 `/v1/embeddings`。
+思考能力按 `/models` 的可选字段解析：明确支持且有档位用实际档位；旧接口只有 true/false
+时只给 off/on；支持但无档位用默认四档；明确不支持则隐藏；完全未知时也按默认四档并默认
+选中 off。上下文上限也从 `/models` 的 `context_length` / `context_window` / `max_model_len`
+等字段读取，读不到按 1M 默认；API 请求会按上下文预留输出空间后裁剪历史。
+Agent 的 `max_tokens` 默认 256K（有模型输出字段时用模型值，并受上下文限制），它不是上下文上限；
+单轮输出上限和上下文窗口分开计算。Chat / Agent 输入框下方显示按字符数估算的上下文占用率。
 
 **MCP / Agent**：`mcp_client.py` 只用标准库实现 STDIO（一行一个 JSON）和 Streamable HTTP
 （JSON-RPC POST + Mcp-Session-Id）。已配置的 MCP 客户端在 WebUI 启动时创建并常驻，STDIO 进程
-生命周期跟随 WebUI；修改配置时只重启对应服务器，WebUI 退出时统一关闭。`Agent` 只允许带
-`tools` 能力的 Ollama 模型，按 `tool_calls → tools/call → tool result` 循环，最多 8 轮；
-每轮使用 Ollama SSE，最终回答逐 token 推给前端；顶部显示运行状态和用时，点击顶部只折叠
+生命周期跟随 WebUI；修改配置时只重启对应服务器，WebUI 退出时统一关闭。`Agent` 允许检测到
+支持工具调用的 API 模型；不选工具时按普通对话处理，
+不发送 `tools`、不执行工具调用，MCP 进程仍保持常驻。带工具时按
+`tool_calls → tools/call → tool result` 循环，直到模型不再返回工具调用；
+不再使用固定 8 轮上限，用户可随时停止；
+每轮使用 SSE，最终回答逐 token 推给前端；顶部显示运行状态和用时，点击顶部只折叠
 思考/工具调用行，回答始终显示；思考、工具调用、回答按模型实际输出顺序作为平级时间线行
 展示。Agent 请求可带 `tools` 名称列表做多选过滤；
-`thinking=true` 时透传 `think` / `reasoning_effort` 并显示思考过程，本地字符级模型
-不支持该开关。工具结果之后会补一条内部续跑 user 提示，避免 Ollama/Qwen 把纯 tool 轮次判成
+`thinking=off/low/medium/high` 时透传 `think` / `reasoning_effort` 并显示思考过程，
+API 的等级来自检测元数据，缺省时按默认四档回退；本地字符级模型不支持该控件。
+工具结果之后会补一条内部续跑 user 提示，避免 Ollama/Qwen 把纯 tool 轮次判成
 “no user query found in messages”。服务器定义保存在 `.cache/mcp_servers.json`；启动时检测
 全部服务器并写入 `.cache/mcp_status.json`。
 

@@ -134,6 +134,16 @@
   .composerbar { display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:nowrap; min-width:0; }
   .composerbar select { max-width:200px; }
   .composerbar button { padding:5px 12px; }
+  .ctxmeter { display:flex; align-items:center; gap:8px; min-height:16px; margin-top:3px;
+              color:var(--muted); font-size:11px; }
+  .ctxmeter .ctxbar { width:140px; height:4px; overflow:hidden; border-radius:999px;
+                      background:#0b1017; border:1px solid #222b39; }
+  .ctxmeter .ctxbar i { display:block; width:0; height:100%; border-radius:999px;
+                        background:var(--accent); transition:width .18s ease; }
+  .ctxmeter.warn { color:var(--warn); }
+  .ctxmeter.warn .ctxbar i { background:var(--warn); }
+  .ctxmeter.err { color:var(--err); }
+  .ctxmeter.err .ctxbar i { background:var(--err); }
   .spacer { flex:1; }
   .subtabs { display:flex; align-items:center; gap:6px; margin:2px 0 8px; }
   .subtabs button { padding:4px 12px; font-size:12px; border-radius:8px; }
@@ -196,6 +206,10 @@
   .agent-answer:first-child { padding-top:2px; }
   .agent-bar { flex-wrap:wrap; row-gap:5px; }
   .agent-bar select { max-width:190px; }
+  #agentThinking, #chatThinking { min-width:74px; border-color:#3b4a60;
+                                 background:#0b1017; }
+  #agentThinking:focus, #chatThinking:focus { outline:none; border-color:var(--accent);
+                                               box-shadow:0 0 0 2px rgba(79,140,255,.18); }
   .agent-tool-panel { flex:0 0 auto; border:1px solid var(--line); border-radius:9px;
                       background:#10151d; padding:7px 10px; margin-bottom:8px; }
   .agent-tool-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
@@ -209,6 +223,32 @@
   .agent-tool-item { display:flex; align-items:center; gap:5px; min-width:0;
                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:12px; }
   .agent-tool-item input { flex:0 0 auto; }
+  #api input:not([type="checkbox"]) { flex:1 1 auto; min-width:0; padding:7px 10px;
+                                     color:var(--fg); background:#0b1017;
+                                     border:1px solid var(--line); border-radius:8px;
+                                     outline:none; font:inherit; }
+  #api input:not([type="checkbox"]):focus { border-color:var(--accent); }
+  #api input:not([type="checkbox"])::placeholder { color:#6f7788; }
+  #api input[type="checkbox"] { appearance:none; -webkit-appearance:none; position:relative;
+                                width:14px; height:14px; margin:0 2px 0 0; vertical-align:-2px;
+                                background:#0b1017; border:1px solid var(--line);
+                                border-radius:3px; cursor:pointer; }
+  #api input[type="checkbox"]:checked { background:var(--accent); border-color:var(--accent); }
+  #api input[type="checkbox"]:checked::after { content:""; position:absolute; left:4px; top:1px;
+                                               width:3px; height:7px; border:solid #081018;
+                                               border-width:0 2px 2px 0; transform:rotate(45deg); }
+  #api { overflow:hidden; }
+  #api .api-models-row { flex:1 1 0; min-height:0; height:0; overflow:hidden;
+                         align-items:stretch; }
+  #api .api-models-row > label { padding-top:9px; }
+  #api #apiModels { flex:1 1 0; min-height:0; height:100%; max-height:100%;
+                    overflow-y:auto; overflow-x:hidden; }
+  #api #apiModels .sigrow { flex:0 0 auto; flex-wrap:wrap; row-gap:3px; }
+  #api #apiModels .sigrow .name { flex:1 1 220px; }
+  #api #apiModels::-webkit-scrollbar { width:8px; }
+  #api #apiModels::-webkit-scrollbar-track { background:#0b1017; border-radius:999px; }
+  #api #apiModels::-webkit-scrollbar-thumb { background:#43546d; border-radius:999px; }
+  #api #apiTestState { flex:0 0 auto; max-height:120px; }
   .mcp-tools .sigrow { align-items:flex-start; }
   .mcp-tools .sigrow .name { flex:0 0 auto; max-width:55%; white-space:nowrap;
                              word-break:normal; overflow-x:auto; }
@@ -288,6 +328,7 @@
   <button data-tab="train" class="on">训练</button>
   <button data-tab="chat">对话</button>
   <button data-tab="agent">Agent</button>
+  <button data-tab="api">API</button>
   <button data-tab="server">服务</button>
   <button data-tab="env">环境</button>
   <button data-tab="config">配置</button>
@@ -317,7 +358,7 @@
         <div class="composerbar">
           <select id="chatConfig" title="配置文件（模型、采样参数、语料都由它决定）"></select>
           <label class="muted" id="chatThinkingWrap" style="display:none">
-            <input type="checkbox" id="chatThinking" checked> 开启深度思考
+            思考 <select id="chatThinking"></select>
           </label>
           <button id="btnNewChat">新对话</button>
           <span class="muted" id="chatState"></span>
@@ -325,8 +366,46 @@
           <button class="danger" id="btnChatStop" disabled>停止</button>
           <button class="primary" id="btnSend">发送</button>
         </div>
+        <div class="ctxmeter" id="chatContextMeter"></div>
       </div>
     </div>
+  </section>
+
+  <section id="api">
+    <div class="row">
+      <label>API</label>
+      <select id="apiSelect" style="min-width:220px"></select>
+      <button id="btnApiNew">新建</button>
+      <button class="primary" id="btnApiSave">保存</button>
+      <button id="btnApiDelete">删除</button>
+      <button id="btnApiDetect">检测模型</button>
+      <span class="muted" id="apiState"></span>
+    </div>
+    <div class="row">
+      <label>名称</label>
+      <input id="apiName" placeholder="例如：OpenAI / DeepSeek / 本地代理" style="flex:1">
+    </div>
+    <div class="row">
+      <label>Base URL</label>
+      <input id="apiBaseURL" placeholder="https://api.openai.com/v1" style="flex:1">
+    </div>
+    <div class="row">
+      <label>Key 环境变量</label>
+      <input id="apiKeyEnv" placeholder="OPENAI_API_KEY" style="flex:1">
+      <span class="muted" id="apiKeyState"></span>
+    </div>
+    <div class="row api-models-row">
+      <label>模型</label>
+      <div class="siglist" id="apiModels">
+        <div class="empty">启动时自动检测，或点【检测模型】</div>
+      </div>
+    </div>
+    <div class="muted" style="padding:0 2px 8px">
+      只保存环境变量名；需要鉴权的服务在启动 WebUI 前设置进程环境，例如
+      <code>set OPENAI_API_KEY=...</code>，不会写入配置文件。本地 Ollama 等无需 Key 的服务可留空。
+      模型和工具/思考能力由 /models 自动检测，不在配置里填写。
+    </div>
+    <div class="siglist" id="apiTestState"></div>
   </section>
 
   <section id="server">
@@ -352,7 +431,7 @@
       <div class="empty">这里显示模型对话内容</div>
     </div>
     <div class="srvpane embedlist" id="srvEmbed" style="display:none">
-      <div class="empty">这里显示 Ollama embedding 请求摘要</div>
+      <div class="empty">这里显示 embedding 请求摘要</div>
     </div>
     <div class="srvpane log" id="srvLog" style="display:none"></div>
   </section>
@@ -399,13 +478,6 @@
         <input type="text" id="envTransformersVersion" placeholder="例如 5.22.2；留空 = 最新版">
         <span class="installed pending" id="envTransformersInstalled">未检测</span>
       </div>
-      <div class="envfield">
-        <label class="k">Ollama</label>
-        <input type="text" id="ollamaUrl" class="ollama-url"
-               value="http://127.0.0.1:11434" placeholder="http://127.0.0.1:11434">
-        <button id="btnOllamaDetect">检测 Ollama</button>
-        <span class="installed pending" id="ollamaState">未检测</span>
-      </div>
       <div class="envfield actions">
         <button class="primary" id="btnEnvInstall">安装 / 更新训练依赖</button>
         <label class="muted"><input type="checkbox" id="envNoCache"> 不使用 pip 缓存</label>
@@ -437,7 +509,7 @@
   <section id="agent">
     <div class="chatmain">
       <div class="msgs" id="agentBox">
-        <div class="empty">选择支持工具调用的 Ollama 模型和 MCP 服务器</div>
+        <div class="empty">选择支持工具调用的 Ollama 模型或 API 服务，以及 MCP 服务器</div>
       </div>
       <div class="agent-tool-panel" id="agentToolPanel" style="display:none">
         <div class="agent-tool-head">
@@ -459,7 +531,7 @@
           <label>MCP</label>
           <select id="agentMcp"></select>
           <label class="muted" id="agentThinkingWrap" style="display:none">
-            <input type="checkbox" id="agentThinking" checked> 开启深度思考
+            思考 <select id="agentThinking"></select>
           </label>
           <button id="btnAgentTools">工具 0</button>
           <button id="btnAgentNew">新对话</button>
@@ -468,6 +540,7 @@
           <button id="btnAgentStop" disabled>停止</button>
           <button class="primary" id="btnAgentSend">发送</button>
         </div>
+        <div class="ctxmeter" id="agentContextMeter"></div>
       </div>
     </div>
   </section>
@@ -692,6 +765,8 @@ let MCP_SERVERS = [];                // MCP 服务器配置
 let MCP_STATUS = {};                 // 启动时/手动检测结果
 let MCP_EDIT_ID = '';
 let MCP_TOOLS = [];
+let OPENAI_APIS = [];                // OpenAI 兼容 API 配置
+let API_EDIT_ID = '';
 let AGENT_MODELS = [];
 let AGENT_TOOLS = [];
 let AGENT_SELECTED_TOOLS = new Set();
@@ -731,8 +806,13 @@ async function loadChatConfigs() {
     api('chat/configs'), api('service/configs')]);
   CHAT_CONFIGS = chatRes.configs || [];
   SERVICE_CONFIGS = serviceRes.configs || [];
-  const chatLabel = c => c.backend === 'ollama' ? `${c.name}（Ollama）` : `${c.name}（本地）`;
+  const chatLabel = c => c.backend === 'openai' ? `${c.label || c.name}（API）`
+    : c.backend === 'ollama' ? `${c.name}（Ollama）`
+    : `${c.name}（本地）`;
   const serviceLabel = c => {
+    if (c.backend === 'openai') {
+      return `${c.label || c.name}（API${c.kind === 'embedding' ? ' · 嵌入' : ''}）`;
+    }
     if (c.backend !== 'ollama') return `${c.name}（本地）`;
     if (c.kind === 'embedding') return `${c.name}（嵌入）`;
     if (c.kind === 'chat') return `${c.name}（对话）`;
@@ -919,6 +999,175 @@ async function testMcpConfig() {
   }
 }
 
+function contextLabel(n, isDefault) {
+  const v = n === 0 ? 0 : (Number(n) || 1000000);
+  let text;
+  if (v >= 1000000) text = (v / 1000000).toFixed(v % 1000000 ? 1 : 0) + 'M';
+  else if (v >= 1000) text = (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'K';
+  else text = String(v);
+  return text + (isDefault ? '（默认）' : '');
+}
+
+function renderApiModels(models, ok, error) {
+  const box = $('#apiModels');
+  box.innerHTML = '';
+  if (error) {
+    box.innerHTML = '<div class="muted">检测失败：' + error + '</div>';
+    return;
+  }
+  models = models || [];
+  if (!models.length) {
+    box.innerHTML = '<div class="empty">启动时自动检测，或点【检测模型】</div>';
+    return;
+  }
+  models.forEach(m => {
+    const row = el('div', 'sigrow');
+    const name = el('span', 'name', m.name || '');
+    const tool = el('span', 'muted',
+      m.kind === 'embedding' ? '类型：嵌入' :
+      ('类型：对话 · ' + (m.supports_tools ? '工具：支持' : '工具：不支持')));
+    const think = m.thinking || {};
+    let thinkText;
+    if (m.kind === 'embedding') {
+      thinkText = '思考：不适用';
+    } else if (think.supported === false) {
+      thinkText = '思考：不支持';
+    } else if (think.values && think.values.length) {
+      thinkText = '思考：' + think.values.map(thinkingLabel).join('/');
+    } else if (think.supported === true) {
+      thinkText = '思考：支持 · 关闭/低/中/高';
+    } else {
+      thinkText = '思考：未声明 · 关闭/低/中/高';
+    }
+    const thinkEl = el('span', 'muted', thinkText);
+    const ctxEl = el('span', 'muted',
+      '上下文：' + contextLabel(m.context, m.context_default));
+    row.appendChild(name);
+    row.appendChild(tool);
+    row.appendChild(thinkEl);
+    row.appendChild(ctxEl);
+    box.appendChild(row);
+  });
+}
+
+function apiFillForm(item) {
+  API_EDIT_ID = item ? (item.id || '') : '';
+  $('#apiName').value = item ? (item.name || '') : '';
+  $('#apiBaseURL').value = item ? (item.base_url || '') : '';
+  $('#apiKeyEnv').value = item ? (item.api_key_env || '') : '';
+  $('#apiKeyState').textContent = item
+    ? (item.api_key_env
+        ? (item.key_set ? '环境变量已设置' : '环境变量未设置')
+        : '无需 Key')
+    : '';
+  renderApiModels(item ? (item.models || []) : [], item ? item.ok : false,
+                  item ? item.error : '');
+  $('#apiTestState').innerHTML = '';
+  $('#apiState').textContent = item
+    ? (item.ok ? `已检测 ${ (item.models || []).length } 个模型`
+               : (item.error ? '检测失败' : '未检测'))
+    : '新配置未保存';
+}
+
+function apiReadForm() {
+  return {
+    id: API_EDIT_ID,
+    name: $('#apiName').value.trim(),
+    base_url: $('#apiBaseURL').value.trim(),
+    api_key_env: $('#apiKeyEnv').value.trim(),
+  };
+}
+
+async function loadApiConfigs(preferredId) {
+  const r = await api('openai/configs');
+  OPENAI_APIS = r.apis || [];
+  const sel = $('#apiSelect');
+  const old = preferredId !== undefined ? preferredId : sel.value;
+  sel.innerHTML = '<option value="">（新配置）</option>' + OPENAI_APIS.map(a =>
+    `<option value="${a.id}">${a.name}</option>`).join('');
+  const pick = OPENAI_APIS.some(a => a.id === old) ? old
+    : (OPENAI_APIS[0] ? OPENAI_APIS[0].id : '');
+  sel.value = pick;
+  apiFillForm(OPENAI_APIS.find(a => a.id === pick) || null);
+}
+
+async function detectOpenAIApis() {
+  try {
+    const r = await api('openai/detect', { method: 'POST' });
+    if (!r.ok) toast('API 检测失败：' + (r.error || '未知错误'));
+  } catch (e) {
+    toast('API 检测失败：' + e.message);
+  }
+}
+
+async function saveApiConfig() {
+  const item = apiReadForm();
+  if (!item.name) return toast('请填写 API 名称');
+  if (!item.base_url) return toast('请填写 Base URL');
+  const list = OPENAI_APIS.map(a => ({
+    id: a.id, name: a.name, base_url: a.base_url, api_key_env: a.api_key_env,
+  }));
+  const idx = API_EDIT_ID ? list.findIndex(x => x.id === API_EDIT_ID) : -1;
+  if (idx >= 0) list[idx] = item;
+  else list.push(item);
+  const r = await api('openai/configs', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apis: list }),
+  });
+  if (!r.ok) return toast('保存失败：' + (r.error || '未知错误'));
+  OPENAI_APIS = r.apis || [];
+  const saved = OPENAI_APIS.find(a => a.name === item.name);
+  await loadApiConfigs(saved ? saved.id : '');
+  await loadChatConfigs();
+  await loadAgentConfigs();
+  toast('API 配置已保存并检测模型');
+}
+
+async function deleteApiConfig() {
+  if (!API_EDIT_ID) return toast('当前不是已保存的 API');
+  if (!confirm('删除这个 API 配置？')) return;
+  const list = OPENAI_APIS.filter(a => a.id !== API_EDIT_ID);
+  const r = await api('openai/configs', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apis: list.map(a => ({
+      id: a.id, name: a.name, base_url: a.base_url, api_key_env: a.api_key_env,
+    })) }),
+  });
+  if (!r.ok) return toast('删除失败：' + (r.error || '未知错误'));
+  await loadApiConfigs('');
+  await loadChatConfigs();
+  await loadAgentConfigs();
+  toast('已删除');
+}
+
+async function detectCurrentApi() {
+  const item = apiReadForm();
+  const box = $('#apiTestState');
+  box.textContent = '检测中…';
+  try {
+    const r = await api('openai/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api: item }),
+    });
+    if (!r.ok) {
+      box.textContent = '失败：' + (r.error || '未知错误');
+      return;
+    }
+    const models = r.models || [];
+    renderApiModels(models, true, '');
+    box.textContent = models.length
+      ? `检测成功，可用模型 ${models.length} 个`
+      : '检测成功，但 /models 没有返回模型';
+    if (item.id) {
+      await loadApiConfigs(item.id);
+      await loadChatConfigs();
+      await loadAgentConfigs();
+    }
+  } catch (e) {
+    box.textContent = '失败：' + e.message;
+  }
+}
+
 function agentMsg(role, text) {
   const box = $('#agentBox');
   const empty = box.querySelector('.empty');
@@ -1095,7 +1344,8 @@ function updateAgentToolCount() {
   $('#agentToolsCount').textContent = total
     ? `已选 ${picked} / ${total}` + (searching ? ` · 匹配 ${shown}` : '')
     : '';
-  $('#btnAgentSend').disabled = !$('#agentModel').value || !$('#agentMcp').value || !picked;
+  $('#btnAgentSend').disabled = !$('#agentModel').value;
+  updateAgentContextMeter();
 }
 
 async function loadAgentTools(serverId) {
@@ -1122,11 +1372,12 @@ async function loadAgentTools(serverId) {
 function updateAgentThinking() {
   const wrap = $('#agentThinkingWrap');
   if (!wrap) return;
-  wrap.style.display = '';
   const m = AGENT_MODELS.find(x => x.name === $('#agentModel').value);
-  const supported = !!(m && (m.capabilities || []).includes('thinking'));
-  const cb = $('#agentThinking');
-  if (cb) cb.title = supported ? '当前模型支持深度思考' : '当前模型未声明 thinking 能力';
+  const info = m && m.thinking;
+  const show = !!(info && info.supported !== false);
+  wrap.style.display = show ? '' : 'none';
+  if (show) fillThinkingSelect($('#agentThinking'), info);
+  updateAgentContextMeter();
 }
 
 async function loadAgentConfigs() {
@@ -1138,8 +1389,11 @@ async function loadAgentConfigs() {
   const oldModel = $('#agentModel').value;
   const oldServer = $('#agentMcp').value;
   $('#agentModel').innerHTML = models.length
-    ? models.map(m => `<option value="${m.name}">${m.name}</option>`).join('')
-    : '<option value="">（没有支持工具调用的 Ollama 模型）</option>';
+    ? models.map(m => {
+        const label = m.label || m.name;
+        return `<option value="${m.name}">${m.backend === 'openai' ? label + '（API）' : label}</option>`;
+      }).join('')
+    : '<option value="">（没有支持工具调用的 API 模型）</option>';
   $('#agentMcp').innerHTML = servers.length
     ? servers.map(s => `<option value="${s.id}">${s.name}</option>`).join('')
     : '<option value="">（请先在 MCP 页配置服务器）</option>';
@@ -1153,8 +1407,9 @@ function agentNewChat() {
   if (AGENT_ABORT) AGENT_ABORT.abort();
   AGENT_ABORT = null;
   AGENT_HISTORY = [];
-  $('#agentBox').innerHTML = '<div class="empty">选择支持工具调用的 Ollama 模型和 MCP 服务器</div>';
+  $('#agentBox').innerHTML = '<div class="empty">选择支持工具调用的模型和 MCP 服务器</div>';
   $('#agentState').textContent = '';
+  updateAgentContextMeter();
 }
 
 async function agentSend() {
@@ -1163,12 +1418,12 @@ async function agentSend() {
   const model = $('#agentModel').value;
   const server = $('#agentMcp').value;
   if (!text) return;
-  if (!model || !server) return toast('请先选择工具模型和 MCP 服务器');
-  if (!AGENT_SELECTED_TOOLS.size) return toast('请至少选择一个 MCP 工具');
+  if (!model) return toast('请先选择模型');
   $('#agentInput').value = '';
   $('#agentInput').style.height = 'auto';
   AGENT_HISTORY.push({ role: 'user', content: text });
   agentMsg('user', text);
+  updateAgentContextMeter();
   const out = agentMsg('assistant', '');
   out.turn.classList.add('running');
   out.title.textContent = '运行中 · 0 秒';
@@ -1196,7 +1451,7 @@ async function agentSend() {
     const resp = await fetch(`/api/agent/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, server, messages: AGENT_HISTORY,
-                             thinking: !!($('#agentThinking') && $('#agentThinking').checked),
+                             thinking: ($('#agentThinking') && $('#agentThinking').value) || 'off',
                              tools: [...AGENT_SELECTED_TOOLS] }),
       signal: AGENT_ABORT.signal,
     });
@@ -1280,6 +1535,7 @@ async function agentSend() {
           const a = agentEnsureAnswer(out);
           a.raw += data.text || '';
           a.body.textContent = a.raw;
+          updateAgentContextMeter(acc);
           agentScrollIf(stick);
         } else if (ev[1] === 'done') {
           acc = data.text || acc;
@@ -1301,6 +1557,7 @@ async function agentSend() {
       }
     }
     if (acc) AGENT_HISTORY.push({ role: 'assistant', content: acc });
+    updateAgentContextMeter();
   } catch (e) {
     const last = out.answers[out.answers.length - 1];
     if (e.name === 'AbortError') {
@@ -1333,6 +1590,7 @@ async function agentSend() {
     $('#btnAgentStop').disabled = true;
     $('#agentState').textContent = acc ? '完成' : '未完成';
     AGENT_ABORT = null;
+    updateAgentContextMeter();
   }
 }
 
@@ -1343,18 +1601,95 @@ function selectedServiceConfig(name) {
   return SERVICE_CONFIGS.find(c => c.name === name) || null;
 }
 
+function thinkingLabel(value) {
+  const labels = { off: '关闭', on: '开启', low: '低', medium: '中',
+                   high: '高', minimal: '最低' };
+  return labels[value] || value;
+}
+
+function fillThinkingSelect(select, info) {
+  if (!select) return;
+  const old = select.value;
+  if (!info || info.supported === false) {
+    select.innerHTML = '';
+    return;
+  }
+  let values = Array.isArray(info.values) ? info.values.map(String) : [];
+  if (!values.length) values = ['off', 'low', 'medium', 'high'];
+  values = [...new Set(values.filter(Boolean))];
+  select.innerHTML = values.map(v =>
+    `<option value="${v}">${thinkingLabel(v)}</option>`).join('');
+  const wanted = old && values.includes(old) ? old
+    : (info.default && values.includes(String(info.default))
+      ? String(info.default)
+      : (values.includes('off') ? 'off' : values[0]));
+  select.value = wanted || values[0] || 'off';
+}
+
+function estimateTextTokens(text) {
+  return Math.ceil(String(text || '').length / 4);
+}
+
+function estimateMessagesTokens(messages) {
+  let n = 0;
+  (messages || []).forEach(m => {
+    const c = m && m.content;
+    if (Array.isArray(c)) c.forEach(part => { n += estimateTextTokens(part.text || ''); });
+    else n += estimateTextTokens(c || '');
+  });
+  return n;
+}
+
+function renderContextMeter(id, used, total, output, contextDefault, outputDefault) {
+  const box = $(id);
+  if (!box) return;
+  total = Number(total) || 1000000;
+  used = Math.max(0, Number(used) || 0);
+  const pct = Math.max(0, Math.min(100, used / total * 100));
+  const outputText = output ? contextLabel(output, outputDefault) : '';
+  box.className = 'ctxmeter' + (pct >= 95 ? ' err' : (pct >= 80 ? ' warn' : ''));
+  box.innerHTML =
+    `<span>上下文 ≈ ${contextLabel(used, false)} / ${contextLabel(total, contextDefault)}</span>` +
+    `<span class="ctxbar"><i style="width:${pct.toFixed(1)}%"></i></span>` +
+    `<span>${pct.toFixed(1)}%</span>` +
+    (outputText ? `<span>输出上限 ${outputText}</span>` : '');
+}
+
+function updateChatContextMeter(extra) {
+  const c = selectedChatConfig($('#chatConfig').value) || {};
+  const total = c.context || 1000000;
+  const output = c.output || 256000;
+  const used = estimateMessagesTokens(HISTORY) + estimateTextTokens(extra || '');
+  renderContextMeter('#chatContextMeter', used, total, output,
+                     c.context_default !== false, c.output_default !== false);
+}
+
+function updateAgentContextMeter(extra) {
+  const m = AGENT_MODELS.find(x => x.name === $('#agentModel').value) || {};
+  const total = m.context || 1000000;
+  const output = m.output || 256000;
+  let toolsChars = 0;
+  AGENT_SELECTED_TOOLS.forEach(name => {
+    const tool = AGENT_TOOLS.find(t => t.name === name);
+    if (tool) toolsChars += JSON.stringify(tool).length;
+  });
+  const used = estimateMessagesTokens(AGENT_HISTORY) +
+               estimateTextTokens(extra || '') + Math.ceil(toolsChars / 4);
+  renderContextMeter('#agentContextMeter', used, total, output,
+                     m.context_default !== false, m.output_default !== false);
+}
+
 function updateChatBackend() {
   const c = selectedChatConfig($('#chatConfig').value);
-  const remote = !!(c && c.backend === 'ollama');
+  const remote = !!(c && (c.backend === 'ollama' || c.backend === 'openai'));
   const think = $('#chatThinkingWrap');
   if (think) {
-    think.style.display = '';
-    const cb = $('#chatThinking');
-    if (cb) {
-      cb.disabled = !remote;
-      cb.title = remote ? '当前 Ollama 模型支持深度思考' : '本地字符级模型不支持深度思考';
-    }
+    const info = remote && c ? c.thinking : null;
+    const show = !!(info && info.supported !== false);
+    think.style.display = show ? '' : 'none';
+    if (show) fillThinkingSelect($('#chatThinking'), info);
   }
+  updateChatContextMeter();
 }
 
 const PY = {
@@ -1627,56 +1962,22 @@ async function autoDetectEnv() {
   updateTorchCategory(sub, false);
   const label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : catId;
   toast('已检测芯片类型：' + label + (sub ? ' / 驱动 ' + sub : ''));
-  detectOllama(true);
-}
-
-async function detectOllama(useInput, reloadModels = useInput) {
-  const btn = $('#btnOllamaDetect');
-  const state = $('#ollamaState');
-  const input = $('#ollamaUrl');
-  btn.disabled = true;
-  state.className = 'installed pending';
-  state.textContent = '检测中…';
-  try {
-    const custom = useInput ? input.value.trim() : '';
-    const query = useInput ? '?url=' + encodeURIComponent(custom) : '';
-    const r = await api('env/ollama' + query);
-    if (r.url) input.value = r.url;
-    if (r.ok) {
-      const models = r.models || [];
-      const chat = (r.chat_models || []).length;
-      const embedding = (r.embedding_models || []).length;
-      state.className = 'installed ok';
-      state.textContent = '已连接' + (r.version ? ' v' + r.version : '') +
-        ` · ${models.length} 个模型（${chat} 对话 / ${embedding} 嵌入）`;
-      state.title = models.join('\n');
-      if (reloadModels) {
-        try {
-          await loadChatConfigs();
-          await loadAgentConfigs();
-        } catch (e) {
-          console.error('刷新模型列表失败', e);
-        }
-      }
-    } else {
-      state.className = 'installed missing';
-      state.textContent = '未连接：' + (r.error || '无法连接 Ollama');
-      state.title = '';
-    }
-  } catch (e) {
-    state.className = 'installed missing';
-    state.textContent = '检测失败：' + e.message;
-  } finally {
-    btn.disabled = false;
-  }
 }
 
 $('#btnEnvDetect').onclick = autoDetectEnv;
-$('#btnOllamaDetect').onclick = () => detectOllama(true);
-$('#ollamaUrl').addEventListener('change', () => detectOllama(true));
 $('#mcpSelect').addEventListener('change', () => {
   mcpFillForm(MCP_SERVERS.find(s => s.id === $('#mcpSelect').value) || null);
 });
+$('#apiSelect').addEventListener('change', () => {
+  apiFillForm(OPENAI_APIS.find(a => a.id === $('#apiSelect').value) || null);
+});
+$('#btnApiNew').onclick = () => {
+  $('#apiSelect').value = '';
+  apiFillForm(null);
+};
+$('#btnApiSave').onclick = saveApiConfig;
+$('#btnApiDelete').onclick = deleteApiConfig;
+$('#btnApiDetect').onclick = detectCurrentApi;
 $('#btnMcpNew').onclick = () => {
   $('#mcpSelect').value = '';
   mcpFillForm(null);
@@ -1933,11 +2234,13 @@ async function send() {
   const cfgName = $('#chatConfig').value;
   if (!cfgName) { toast('先选一个配置'); return; }
   const selected = CHAT_CONFIGS.find(x => x.name === cfgName) || {};
-  if (selected.backend !== 'ollama' && !(await ensurePy('chat'))) return;
+  if (selected.backend !== 'ollama' && selected.backend !== 'openai' &&
+      !(await ensurePy('chat'))) return;
   $('#chatInput').value = '';
   $('#chatInput').style.height = 'auto';
   HISTORY.push({ role: 'user', content: text });
   renderMsg('user', text);
+  updateChatContextMeter();
   const { body, bubble, think } = renderMsg('assistant', '');
   bubble.classList.add('typing');
   $('#btnSend').disabled = true;
@@ -1946,9 +2249,9 @@ async function send() {
   chatAbort = new AbortController();
   let acc = '';
   try {
-    const payload = selected.backend === 'ollama'
+    const payload = selected.backend === 'ollama' || selected.backend === 'openai'
       ? { config: cfgName, messages: HISTORY,
-          thinking: !!($('#chatThinking') && $('#chatThinking').checked) }
+          thinking: ($('#chatThinking') && $('#chatThinking').value) || 'off' }
       : { config: cfgName, text };
     const resp = await fetch(`/api/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1981,6 +2284,7 @@ async function send() {
           }
         } else if (ev[1] === 'token') {
           acc += data.text; body.textContent = acc;
+          updateChatContextMeter(acc);
           chatScrollIf(stick);
         } else if (ev[1] === 'done') {
           acc = data.text || acc;
@@ -1999,6 +2303,7 @@ async function send() {
       }
     }
     if (acc) HISTORY.push({ role: 'assistant', content: acc });
+    updateChatContextMeter();
   } catch (e) {
     if (e.name === 'AbortError') body.textContent = acc + '（已停止）';
     else body.textContent = '出错：' + e.message;
@@ -2008,11 +2313,12 @@ async function send() {
     $('#btnChatStop').disabled = true;
     chatAbort = null;
     $('#chatState').textContent = '';
+    updateChatContextMeter();
   }
 }
 
 $('#btnSend').onclick = send;
-$('#btnNewChat').onclick = () => { HISTORY.length = 0; $('#chatBox').innerHTML = ''; emptyHint(); };
+$('#btnNewChat').onclick = () => { HISTORY.length = 0; $('#chatBox').innerHTML = ''; emptyHint(); updateChatContextMeter(); };
 $('#chatInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
@@ -2135,7 +2441,7 @@ function srvEmbed(d) {
   if (empty) empty.remove();
   const card = el('div', 'embedcard');
   const top = el('div', 'etop');
-  top.appendChild(el('span', 'emodel', d.model || 'Ollama'));
+  top.appendChild(el('span', 'emodel', d.model || 'embedding'));
   top.appendChild(el('span', 'etime',
     new Date().toLocaleTimeString('zh-CN', { hour12: false })));
   card.appendChild(top);
@@ -2169,7 +2475,7 @@ document.querySelectorAll('.subtabs button[data-srv]').forEach(b => b.onclick = 
 $('#btnClearSrv').onclick = () => {
   $('#srvChat').innerHTML = '<div class="empty">这里显示模型对话内容</div>';
   $('#srvLog').textContent = '';
-  $('#srvEmbed').innerHTML = '<div class="empty">这里显示 Ollama embedding 请求摘要</div>';
+  $('#srvEmbed').innerHTML = '<div class="empty">这里显示 embedding 请求摘要</div>';
 };
 
 $('#btnSrvStart').onclick = async () => {
@@ -2303,8 +2609,8 @@ async function startupDetect() {
   try {
     ENV_DETECTED = true;
     await refreshEnv(true);
-    await detectOllama(false);
     await detectMcpServers();
+    await detectOpenAIApis();
   } finally {
     if (mask) {
       mask.classList.add('hide');
@@ -2318,6 +2624,7 @@ async function startupDetect() {
   initTrainTerm();            // xterm 必须在回填日志前初始化
   await startupDetect();      // 启动时只检测一次，之后靠用户主动检测
   await loadConfigs();
+  await loadApiConfigs();
   await loadMcpConfigs();
   await loadModels();
   renderSignList();           // 签名页：列出所有标准模型目录及其签名状态

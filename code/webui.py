@@ -34,7 +34,7 @@ import urllib.error
 import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import urlparse, parse_qs, unquote, urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -43,6 +43,7 @@ if HERE not in sys.path:
 import common                                                     # noqa: E402
 import ollama_client as ollama                                    # noqa: E402
 import mcp_client                                                 # noqa: E402
+import openai_client                                              # noqa: E402
 
 common.setup_stdio()
 ROOT = common.find_root()
@@ -56,6 +57,8 @@ MCP_STATUS_FILE = os.path.join(CACHE_DIR, "mcp_status.json")
 MCP_LOCK = threading.Lock()
 MCP_CLIENTS = {}
 MCP_CLIENTS_LOCK = threading.RLock()
+OPENAI_CONFIG_FILE = os.path.join(CACHE_DIR, "openai_apis.json")
+OPENAI_STATUS_FILE = os.path.join(CACHE_DIR, "openai_status.json")
 STATE = {"token": "", "started": time.time(), "train": None, "server": None}
 
 
@@ -264,14 +267,23 @@ def find_mcp_status(server_id):
 
 def agent_models():
     out = []
-    for name in ollama.list_models():
-        caps = set(ollama.model_capabilities(name))
-        if "tools" not in caps:
-            continue
-        if not (caps & {"completion", "chat"}):
-            continue
-        out.append({"name": ollama.model_id(name), "model": name,
-                    "backend": "ollama", "capabilities": sorted(caps)})
+    for api in load_openai_apis():
+        for model in openai_models_for(api):
+            if model.get("kind") == "embedding":
+                continue
+            if not model.get("supports_tools"):
+                continue
+            out.append({"name": openai_model_name(api, model["name"]),
+                        "model": model["name"], "label": f"{api['name']}/{model['name']}",
+                        "backend": "openai", "api_id": api["id"],
+                        "capabilities": ["chat", "tools"],
+                        "context": model.get("context") or 1000000,
+                        "context_default": bool(model.get("context_default", True)),
+                        "output": model.get("output") or 256000,
+                        "output_default": bool(model.get("output_default", True)),
+                        "thinking": model.get("thinking") or
+                                    {"supported": None, "values": None,
+                                     "default": "off", "mode": "unknown"}})
     return out
 
 
@@ -655,36 +667,279 @@ def list_models():
     return sorted(out, key=lambda m: m["path"])
 
 
-def list_chat_configs():
-    """对话下拉用：本地配置 + 仅支持对话的 Ollama 模型。"""
+def load_openai_apis():
+    return openai_client.load_apis(OPENAI_CONFIG_FILE)
+
+
+def save_openai_apis(apis):
+    with MCP_LOCK:
+        ensure_cache_dir()
+    return openai_client.save_apis(OPENAI_CONFIG_FILE, apis)
+
+
+def load_openai_status():
+    try:
+        with open(OPENAI_STATUS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_openai_status(status):
+    try:
+        ensure_cache_dir()
+        with MCP_LOCK:
+            with open(OPENAI_STATUS_FILE, "w", encoding="utf-8") as f:
+                json.dump(status, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def is_ollama_api(api):
+    try:
+        raw = ollama.base_url(api.get("base_url"))
+        default = ollama.base_url()
+        if "ollama" in str(api.get("name") or "").lower():
+            return True
+        if raw.rstrip("/").lower() == default.rstrip("/").lower():
+            return True
+        parts = urlsplit(raw)
+        return parts.hostname in ("127.0.0.1", "localhost") and parts.port == 11434
+    except Exception:
+        return False
+
+
+def augment_ollama_models(api, models):
+    """Ollama 的 /v1/models 不带能力，用原生 /api/show 补齐。"""
+    if not is_ollama_api(api):
+        return models
+    base = ollama.base_url(api.get("base_url"))
+    for model in models:
+        name = model.get("name") or ""
+        caps = set(ollama.model_capabilities(name, base))
+        if caps:
+            is_embed = "embedding" in caps
+            model["kind"] = "embedding" if is_embed else "chat"
+            model["supports_tools"] = False if is_embed else ("tools" in caps)
+            if is_embed:
+                model["thinking"] = {"supported": False, "values": None,
+                                     "default": None, "mode": "unsupported"}
+            else:
+                info = ollama.model_thinking(name, base)
+                if info:
+                    model["thinking"] = info
+                elif "thinking" not in caps:
+                    model["thinking"] = {"supported": False, "values": None,
+                                         "default": None, "mode": "unsupported"}
+        context = ollama.model_context(name, base)
+        if context:
+            model["context"] = context
+            model["context_default"] = False
+    return models
+
+
+def detect_openai_apis():
+    """启动时检测全部 API 的 /models；GET 不消耗生成 Token。"""
+    status = load_openai_status()
+    for api in load_openai_apis():
+        try:
+            models = openai_client.list_model_infos(api)
+            models = augment_ollama_models(api, models)
+            status[api["id"]] = {"ok": True, "models": models, "error": ""}
+        except Exception as e:
+            status[api["id"]] = {"ok": False, "models": [],
+                                 "error": f"{type(e).__name__}: {e}"}
+    save_openai_status(status)
+    return status
+
+
+def find_openai_status(api_id):
+    return load_openai_status().get(api_id) or {}
+
+
+def find_openai_api(api_id):
+    return openai_client.find_api(load_openai_apis(), api_id)
+
+
+def public_openai_api(api):
+    out = dict(api)
+    out["key_set"] = openai_client.key_status(api)
+    st = find_openai_status(api["id"])
+    out["models"] = st.get("models") or []
+    out["ok"] = bool(st.get("ok"))
+    out["error"] = st.get("error") or ""
+    return out
+
+
+def openai_model_name(api, model):
+    return f"api:{api['id']}/{model}"
+
+
+def parse_openai_model(model):
+    raw = str(model or "")
+    if not raw.startswith("api:"):
+        return None, ""
+    rest = raw[4:]
+    if "/" not in rest:
+        return None, ""
+    api_id, upstream = rest.split("/", 1)
+    return api_id, upstream
+
+
+def openai_models_for(api):
+    st = find_openai_status(api["id"])
+    return st.get("models") or []
+
+
+def _thinking_level(value):
+    """把旧布尔值或思考等级统一成 off/low/medium/high。"""
+    if isinstance(value, bool):
+        return "medium" if value else "off"
+    text = str(value or "").strip().lower()
+    if text in ("", "off", "false", "0", "none", "no"):
+        return "off"
+    if text in ("true", "on", "yes", "1"):
+        return "medium"
+    if text in ("low", "medium", "high", "minimal"):
+        return text
+    return "off"
+
+
+def openai_model_thinking(api, model):
+    for item in openai_models_for(api):
+        if item.get("name") == model:
+            return item.get("thinking") or {}
+    return {}
+
+
+def openai_model_context(api, model):
+    for item in openai_models_for(api):
+        if item.get("name") == model:
+            try:
+                return max(1024, int(item.get("context") or 1000000))
+            except (TypeError, ValueError):
+                return 1000000
+    return 1000000
+
+
+def openai_model_output(api, model):
+    for item in openai_models_for(api):
+        if item.get("name") == model:
+            try:
+                return max(1024, int(item.get("output") or 256000))
+            except (TypeError, ValueError):
+                return 256000
+    return 256000
+
+
+def openai_output_budget(api, model):
+    context = openai_model_context(api, model)
+    output = openai_model_output(api, model)
+    # 单轮输出不能超过上下文；给输入至少保留一半空间。
+    return min(output, max(1024, context // 2))
+
+
+def _trim_for_context(messages, context, reserve=256000):
+    """按保守字符数裁剪历史；保留 system 和最近消息，避免超上下文。"""
+    budget = max(1024, int(context) - reserve)
+    if not messages:
+        return messages
+    def size(msg):
+        text = msg.get("content") if isinstance(msg, dict) else ""
+        if isinstance(text, list):
+            text = "".join(str(x.get("text") or "") for x in text
+                           if isinstance(x, dict))
+        return len(str(text or ""))
+    total = sum(size(m) for m in messages)
+    if total <= budget:
+        return messages
+    system = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
+    rest = [m for m in messages if not (isinstance(m, dict) and m.get("role") == "system")]
+    kept = []
+    used = sum(size(m) for m in system)
+    for msg in reversed(rest):
+        n = size(msg)
+        if used + n > budget and kept:
+            break
+        if used + n > budget:
+            # 单条仍然过长时保留尾部，至少让请求有机会发出去。
+            if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+                msg = dict(msg)
+                msg["content"] = msg["content"][-max(256, budget - used):]
+            n = size(msg)
+        kept.append(msg)
+        used += n
+    return system + list(reversed(kept))
+
+
+def openai_thinking_payload(info, level):
+    """把界面上的思考档位映射成上游 API 参数。"""
+    info = info or {}
+    if info.get("supported") is False:
+        return {}
+    if level == "off":
+        if info.get("mode") == "boolean":
+            return {"thinking": False}
+        return {}
+    if info.get("mode") == "boolean":
+        return {"thinking": True}
+    return {"reasoning_effort": level}
+
+
+def ollama_thinking_payload(info, level):
+    """Ollama 原生 think 支持布尔和字符串；OpenAI 兼容层同时带 reasoning_effort。"""
+    info = info or {}
+    if info.get("supported") is False:
+        return {}
+    if level == "off":
+        return {"think": False, "reasoning_effort": "none"}
+    think = True if info.get("mode") == "boolean" else level
+    return {"think": think, "reasoning_effort": level}
+
+
+def list_chat_configs(include_api=True):
+    """对话下拉用：本地配置 + OpenAI 兼容 API 的对话模型。"""
     out = []
     for c in common.chat_configs(ROOT):
         out.append({"name": c["name"], "model": c["model"], "backend": "local"})
-    for name in ollama.list_models():
-        if ollama.is_chat_model(name):
-            out.append({"name": ollama.model_id(name), "model": name,
-                        "backend": "ollama", "kind": "chat"})
+    if include_api:
+        for api in load_openai_apis():
+            for model in openai_models_for(api):
+                if model.get("kind") == "embedding":
+                    continue
+                out.append({"name": openai_model_name(api, model["name"]),
+                            "model": model["name"],
+                            "label": f"{api['name']}/{model['name']}",
+                            "backend": "openai", "api_id": api["id"],
+                            "supports_tools": bool(model.get("supports_tools")),
+                            "context": model.get("context") or 1000000,
+                            "context_default": bool(model.get("context_default", True)),
+                            "output": model.get("output") or 256000,
+                            "output_default": bool(model.get("output_default", True)),
+                            "thinking": model.get("thinking") or
+                                        {"supported": None, "values": None,
+                                         "default": "off", "mode": "unknown"}})
     return out
 
 
 def list_service_configs():
-    """服务页下拉用：本地配置 + 全部 Ollama 模型（含 embedding）。"""
+    """服务页下拉用：本地配置 + OpenAI 兼容 API 的对话 / 嵌入模型。"""
     out = []
     for c in common.chat_configs(ROOT):
         out.append({"name": c["name"], "model": c["model"],
                     "backend": "local", "kind": "chat"})
-    for name in ollama.list_models():
-        caps = set(ollama.model_capabilities(name))
-        if "embedding" in caps:
-            kind = "embedding"
-        elif caps & {"completion", "chat"}:
-            kind = "chat"
-        elif caps:
-            kind = "other"
-        else:
-            kind = "embedding" if ollama.is_embedding_model(name) else "chat"
-        out.append({"name": ollama.model_id(name), "model": name,
-                    "backend": "ollama", "kind": kind})
+    for api in load_openai_apis():
+        for model in openai_models_for(api):
+            out.append({"name": openai_model_name(api, model["name"]),
+                        "model": model["name"],
+                        "label": f"{api['name']}/{model['name']}",
+                        "backend": "openai", "api_id": api["id"],
+                        "kind": model.get("kind") or "chat",
+                        "context": model.get("context") or 1000000,
+                        "context_default": bool(model.get("context_default", True)),
+                        "output": model.get("output") or 256000,
+                        "output_default": bool(model.get("output_default", True))})
     return out
 
 
@@ -881,6 +1136,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/mcp/configs":
             self._json({"ok": True, "servers": load_mcp_servers(),
                         "status": load_mcp_status()})
+        elif path == "/api/openai/configs":
+            self._json({"ok": True,
+                        "apis": [public_openai_api(a) for a in load_openai_apis()],
+                        "status": load_openai_status()})
         elif path == "/api/agent/configs":
             self._json({"ok": True, "models": agent_models(),
                         "servers": load_mcp_servers(),
@@ -937,6 +1196,20 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/mcp/detect":
                 status = detect_mcp_servers()
                 self._json({"ok": True, "status": status})
+            elif path == "/api/openai/configs":
+                try:
+                    apis = save_openai_apis(body.get("apis") or [])
+                except ValueError as e:
+                    return self._err(400, str(e))
+                status = detect_openai_apis()
+                self._json({"ok": True,
+                            "apis": [public_openai_api(a) for a in apis],
+                            "status": status})
+            elif path == "/api/openai/detect":
+                status = detect_openai_apis()
+                self._json({"ok": True, "status": status})
+            elif path == "/api/openai/test":
+                self._openai_test(body)
             elif path == "/api/agent/chat":
                 self._agent_chat(body)
             elif path == "/api/sign":
@@ -1094,7 +1367,13 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True})
 
     def _chat(self, body, qs, lan=False):
-        cfg = common.config_stem(body.get("config") or "")
+        raw_cfg = str(body.get("config") or "").strip()
+        if raw_cfg.startswith("api:"):
+            api_id, upstream = parse_openai_model(raw_cfg)
+            if not api_id or not upstream:
+                return self._err(400, "API 模型名不合法")
+            return self._chat_openai(api_id, upstream, body, lan)
+        cfg = common.config_stem(raw_cfg)
         model = body.get("model") or ""
         # 前端传 messages（多轮）；也兼容旧的单条 text
         msgs = body.get("messages")
@@ -1213,9 +1492,9 @@ class Handler(BaseHTTPRequestHandler):
             if key in body and body[key] is not None:
                 payload[key] = body[key]
         if "thinking" in body:
-            thinking = bool(body["thinking"])
-            payload["think"] = thinking
-            payload["reasoning_effort"] = "medium" if thinking else "none"
+            level = _thinking_level(body["thinking"])
+            payload.update(ollama_thinking_payload(
+                ollama.model_thinking(tag), level))
 
         try:
             conn, resp = ollama.open_chat(payload)
@@ -1261,6 +1540,72 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+    def _chat_openai(self, api_id, model, body, lan=False):
+        """把 WebUI 对话转给用户配置的 OpenAI 兼容服务。"""
+        api = find_openai_api(api_id)
+        if not api:
+            return self._err(404, "API 服务不存在")
+        msgs = body.get("messages")
+        if not isinstance(msgs, list) or not msgs:
+            text = (body.get("text") or "").strip()
+            if not text:
+                return self._err(400, "消息为空")
+            msgs = [{"role": "user", "content": text}]
+        payload = {"model": model, "messages": msgs, "stream": True}
+        for key in ("temperature", "top_p", "max_tokens", "max_completion_tokens"):
+            if key in body and body[key] is not None:
+                payload[key] = body[key]
+        output_budget = openai_output_budget(api, model)
+        payload.setdefault("max_tokens", output_budget)
+        payload["messages"] = _trim_for_context(
+            msgs, openai_model_context(api, model), output_budget)
+        if "thinking" in body:
+            level = _thinking_level(body.get("thinking"))
+            payload.update(openai_thinking_payload(
+                openai_model_thinking(api, model), level))
+        try:
+            conn, resp = openai_client.open_chat(api, payload, timeout=300)
+        except Exception as e:
+            return self._err(502, f"无法连接 API：{type(e).__name__}: {e}")
+        if resp.status < 200 or resp.status >= 300:
+            try:
+                raw = resp.read().decode("utf-8", errors="replace")
+            except Exception:
+                raw = ""
+            conn.close()
+            return self._err(resp.status, f"API 返回错误：{raw[:500]}")
+
+        self._sse_start()
+        parts = []
+        reasoning_parts = []
+        try:
+            self._sse("meta", {"model": f"{api['name']}/{model}", "config": f"{api['name']}/{model}",
+                               "info": {"backend": "openai",
+                                        "thinking": _thinking_level(body.get("thinking")) != "off"}})
+            for obj in ollama.iter_sse(resp):
+                reason = ollama.delta_reasoning(obj)
+                if reason:
+                    reasoning_parts.append(reason)
+                    self._sse("reasoning", {"text": reason})
+                piece = ollama.delta_text(obj)
+                if piece:
+                    parts.append(piece)
+                    self._sse("token", {"text": piece})
+            self._sse("done", {"text": "".join(parts),
+                               "reasoning": "".join(reasoning_parts)})
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        except Exception as e:
+            try:
+                self._sse("error", {"error": f"{type(e).__name__}: {e}"})
+            except OSError:
+                pass
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
     def _server_start(self, body):
         c = STATE["server"]
         if c and c.alive():
@@ -1269,16 +1614,23 @@ class Handler(BaseHTTPRequestHandler):
         if port_in_use(port):
             return self._err(409, f"端口 {port} 已被占用（可能有上次残留的服务进程），"
                                   "请先结束它，或换一个端口")
-        cfgs = [common.config_stem(n) for n in (body.get("configs") or [])
-                if isinstance(n, str) and n.strip()]
-        probe = cfgs[0] if cfgs else ""
+        raw_targets = [str(n).strip() for n in (body.get("configs") or [])
+                       if isinstance(n, str) and str(n).strip()]
+        cfgs = [common.config_stem(n) for n in raw_targets
+                if not n.startswith("api:")]
+        api_ids = [n[4:].split("/", 1)[0] for n in raw_targets
+                   if n.startswith("api:")]
+        targets = raw_targets or [c["name"] for c in common.chat_configs(ROOT)]
+        local_targets = [common.config_stem(n) for n in targets
+                         if not n.startswith("api:") and not ollama.is_remote(n)]
+        if not local_targets and not api_ids:
+            # “全部配置”时 API 配置由 http_server 默认全部加载
+            api_ids = []
+        probe = local_targets[0] if local_targets else ""
         if not probe:
             all_cfgs = common.chat_configs(ROOT)
             probe = all_cfgs[0]["name"] if all_cfgs else ""
-        if not probe:
-            return self._err(400, "没有可用配置，无法启动桥接服务")
-        targets = cfgs or [c["name"] for c in common.chat_configs(ROOT)]
-        if not targets:
+        if not local_targets and not api_ids and raw_targets:
             return self._err(400, "没有可用配置，无法启动桥接服务")
         py, source = common.resolve_python(ROOT)
         if not py:
@@ -1295,10 +1647,10 @@ class Handler(BaseHTTPRequestHandler):
         args = [py, os.path.join(ROOT, "code", "http_server.py"),
                 "--port", str(port), "--events", "--parent-pid", str(os.getpid()),
                 "--ollama-url", ollama.base_url()]
-        for name in targets:
-            # Ollama 模型由 http_server 自动发现，不作为本地 --config 传进去
-            if not ollama.is_remote(name):
-                args += ["--config", name]
+        for name in local_targets:
+            args += ["--config", name]
+        for api_id in api_ids:
+            args += ["--openai-api", api_id]
 
         def on_line(line):
             if line.startswith("@@EV@@ "):
@@ -1344,68 +1696,120 @@ class Handler(BaseHTTPRequestHandler):
             for t in tools if isinstance(t, dict)
         ]})
 
+    def _openai_test(self, body):
+        try:
+            cfg = openai_client.normalize_api(body.get("api") or {})
+        except ValueError as e:
+            return self._err(400, str(e))
+        try:
+            models = openai_client.list_model_infos(cfg)
+            models = augment_ollama_models(cfg, models)
+        except Exception as e:
+            return self._err(502, f"API 连接失败：{type(e).__name__}: {e}")
+        saved = find_openai_api(cfg.get("id") or "")
+        if saved:
+            status = load_openai_status()
+            status[cfg["id"]] = {"ok": True, "models": models, "error": ""}
+            save_openai_status(status)
+        self._json({"ok": True, "name": cfg["name"], "models": models,
+                    "saved": bool(saved)})
+
     def _agent_chat(self, body):
         model = str(body.get("model") or "").strip()
         server_id = str(body.get("server") or "").strip()
-        if not ollama.is_remote(model):
-            return self._err(400, "Agent 只支持 Ollama 模型")
-        tag = ollama.model_tag(model)
-        caps = set(ollama.model_capabilities(tag))
-        if "tools" not in caps or not (caps & {"completion", "chat"}):
-            return self._err(400, "这个 Ollama 模型不支持工具调用")
-        server = find_mcp_server(server_id)
-        if not server:
-            return self._err(400, "MCP 服务器不存在，请先在 MCP 页保存")
+        api = None
+        if model.startswith("api:"):
+            api_id, upstream = parse_openai_model(model)
+            if not api_id or not upstream:
+                return self._err(400, "API 模型名不合法")
+            api = find_openai_api(api_id)
+            if not api:
+                return self._err(400, "API 服务不存在，请先在 API 页保存")
+            allowed = {m.get("name") for m in openai_models_for(api)
+                       if m.get("supports_tools")}
+            if upstream not in allowed:
+                return self._err(400, "这个 API 模型没有检测到工具调用能力")
+            try:
+                openai_client.api_key(api)
+            except Exception as e:
+                return self._err(400, str(e))
+            tag = upstream
+            backend = "openai"
+            model_label = f"{api['name']}/{upstream}"
+        else:
+            if not ollama.is_remote(model):
+                return self._err(400, "Agent 只支持 Ollama 模型或 API 服务")
+            tag = ollama.model_tag(model)
+            caps = set(ollama.model_capabilities(tag))
+            if "tools" not in caps or not (caps & {"completion", "chat"}):
+                return self._err(400, "这个 Ollama 模型不支持工具调用")
+            backend = "ollama"
+            model_label = model
+        server = find_mcp_server(server_id) if server_id else None
         msgs = body.get("messages")
         if not isinstance(msgs, list) or not msgs:
             text = str(body.get("text") or "").strip()
             if not text:
                 return self._err(400, "消息不能为空")
             msgs = [{"role": "user", "content": text}]
-        thinking = bool(body.get("thinking"))
+        thinking = _thinking_level(body.get("thinking"))
+        thinking_info = openai_model_thinking(api, upstream) if backend == "openai" else {}
 
         self._sse_start()
         client = None
+        tools = []
         try:
-            client = start_mcp_client(server)
             selected = body.get("tools")
             selected_names = None
             if isinstance(selected, list) and selected:
                 selected_names = {str(x) for x in selected}
-            elif selected is not None:
-                self._sse("error", {"error": "至少选择一个 MCP 工具"})
-                return
-            all_tools = client.list_tools()
-            if selected_names is not None:
+            if server and selected_names:
+                client = start_mcp_client(server)
+                all_tools = client.list_tools()
                 all_tools = [t for t in all_tools
                              if isinstance(t, dict) and t.get("name") in selected_names]
-            tools = mcp_client.openai_tools(all_tools)
-            if not tools:
-                self._sse("error", {"error": "没有匹配的 MCP 工具"})
-                return
-            self._sse("meta", {"model": model, "server": server["name"],
-                               "tools": len(tools), "thinking": thinking})
+                tools = mcp_client.openai_tools(all_tools)
+            self._sse("meta", {"model": model_label,
+                               "server": server["name"] if server else "",
+                               "tools": len(tools), "thinking": thinking,
+                               "backend": backend})
             messages = list(msgs)
-            messages.insert(0, {"role": "system", "content":
-                "你是带 MCP 工具调用的 Agent。只能调用 tools 列表中真实存在的工具名，"
-                "不要编造工具名，也不要把工具调用写进普通文本。创建文件时优先使用文件"
-                "写入工具；内容过长时拆成多次创建/追加，不要在一次工具调用里塞入过长内容。"})
+            if tools:
+                messages.insert(0, {"role": "system", "content":
+                    "你是带 MCP 工具调用的 Agent。只能调用 tools 列表中真实存在的工具名，"
+                    "不要编造工具名，也不要把工具调用写进普通文本。创建文件时优先使用文件"
+                    "写入工具；内容过长时拆成多次创建/追加，不要在一次工具调用里塞入过长内容。"})
+            else:
+                messages.insert(0, {"role": "system", "content":
+                    "你是普通对话助手。当前没有启用任何 MCP 工具，不要生成工具调用，"
+                    "直接回答用户。"})
             user_query = ""
             for item in reversed(msgs):
                 if isinstance(item, dict) and item.get("role") == "user":
                     user_query = str(item.get("content") or "")
                     break
-            for _ in range(8):
+            while True:
+                output_budget = (openai_output_budget(api, upstream)
+                                 if backend == "openai" else 256000)
                 payload = {"model": tag, "messages": messages,
-                           "stream": True, "tools": tools,
-                           "max_tokens": 8192,
-                           "think": thinking,
-                           "reasoning_effort": "medium" if thinking else "none"}
-                conn, resp = ollama.open_chat(payload, timeout=300)
+                           "stream": True, "max_tokens": output_budget}
+                if tools:
+                    payload["tools"] = tools
+                if backend == "openai":
+                    payload["messages"] = _trim_for_context(
+                        messages, openai_model_context(api, upstream),
+                        output_budget)
+                if backend == "openai":
+                    payload.update(openai_thinking_payload(thinking_info, thinking))
+                    conn, resp = openai_client.open_chat(api, payload, timeout=300)
+                else:
+                    payload.update(ollama_thinking_payload(
+                        ollama.model_thinking(tag), thinking))
+                    conn, resp = ollama.open_chat(payload, timeout=300)
                 if resp.status < 200 or resp.status >= 300:
                     raw = resp.read().decode("utf-8", errors="replace")
                     conn.close()
-                    self._sse("error", {"error": f"Ollama {resp.status}：{raw[:500]}"})
+                    self._sse("error", {"error": f"{backend} {resp.status}：{raw[:500]}"})
                     return
                 parts = []
                 calls = {}
@@ -1453,8 +1857,12 @@ class Handler(BaseHTTPRequestHandler):
                         call["id"] = f"call_{i}"
                 if finish_reason == "length":
                     self._sse("error", {"error":
-                        "模型输出达到长度上限，工具参数或回答可能被截断；"
-                        "请少选一些 MCP 工具，或让模型把文件内容拆成多次创建/追加。"})
+                        f"模型输出达到单轮 max_tokens={output_budget} 的上限（不是上下文上限）；"
+                        "回答或工具参数可能被截断。请减少工具数量，或让模型把内容拆成多次创建/追加。"})
+                    return
+                if call_list and not tools:
+                    self._sse("error", {"error":
+                        "当前没有启用 MCP 工具，但模型返回了工具调用；已忽略本次工具调用。"})
                     return
                 if call_list:
                     messages.append({"role": "assistant",
@@ -1501,7 +1909,6 @@ class Handler(BaseHTTPRequestHandler):
                 text = "".join(parts)
                 self._sse("done", {"text": text})
                 return
-            self._sse("error", {"error": "工具调用轮数超过上限"})
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         except Exception as e:
@@ -1571,7 +1978,7 @@ class LANHandler(Handler):
             self._send_file(LOGO_PATH,
                             "image/x-icon")
         elif path == "/api/chat/configs":
-            self._json({"ok": True, "configs": list_chat_configs()})
+            self._json({"ok": True, "configs": list_chat_configs(include_api=False)})
         else:
             self._json({"ok": True, "models": list_models()})
 
@@ -1580,7 +1987,7 @@ class LANHandler(Handler):
             self._err(403, "局域网只开放对话页")
             return
         body = self._body()
-        allowed = {c["name"] for c in list_chat_configs()}
+        allowed = {c["name"] for c in list_chat_configs(include_api=False)}
         if (body.get("config") or "").strip() not in allowed:
             self._err(400, "配置不在清单里")
             return
