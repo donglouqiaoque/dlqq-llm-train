@@ -74,8 +74,9 @@
     或旧提交信息直接编写；必须先执行一次只读 git 命令（建议组合
     `git status --short --untracked-files=all`、`git diff --stat`、`git diff --name-status`，
     必要时只读 `git diff -- <文件>`）确认本次实际改动，再按真实差异撰写。提交信息写入
-    `.ai_res/git_log/<日期>_<时间>.txt`，由用户提交；AI 不执行 `git add` / `commit` / `push`；
-    只写本仓库的改动，和本仓库无关或 git 忽略的内容不要写进 git 提交信息。
+    `.ai_res/git_log/<YYYY-MM-DD_HH-MM-SS>.txt`。命名前必须先查询当前实际时间，并按查询结果
+    命名，禁止凭直觉或估算写文件名。提交信息由用户提交；AI 不执行 `git add` / `commit` /
+    `push`；只写本仓库的改动，和本仓库无关或 git 忽略的内容不要写进 git 提交信息。
 
 ## 二、目录结构（当前架构）
 
@@ -249,9 +250,10 @@ Ollama 对话列表通过 `/api/show` 的 `capabilities` 过滤 embedding 等非
 （JSON-RPC POST + Mcp-Session-Id）。已配置的 MCP 客户端在 WebUI 启动时创建并常驻，STDIO 进程
 生命周期跟随 WebUI；修改配置时只重启对应服务器，WebUI 退出时统一关闭。`Agent` 只允许带
 `tools` 能力的 Ollama 模型，按 `tool_calls → tools/call → tool result` 循环，最多 8 轮；
-每轮使用 Ollama SSE，最终回答逐 token 推给前端；思考、回答和工具调用按模型实际输出顺序
-交替显示，工具卡片插在对应思考段里调用发生的位置。Agent 请求可带 `tools` 名称列表做多选
-过滤；`thinking=true` 时透传 `think` / `reasoning_effort` 并显示思考过程，本地字符级模型
+每轮使用 Ollama SSE，最终回答逐 token 推给前端；顶部显示运行状态和用时，点击顶部只折叠
+思考/工具调用行，回答始终显示；思考、工具调用、回答按模型实际输出顺序作为平级时间线行
+展示。Agent 请求可带 `tools` 名称列表做多选过滤；
+`thinking=true` 时透传 `think` / `reasoning_effort` 并显示思考过程，本地字符级模型
 不支持该开关。工具结果之后会补一条内部续跑 user 提示，避免 Ollama/Qwen 把纯 tool 轮次判成
 “no user query found in messages”。服务器定义保存在 `.cache/mcp_servers.json`；启动时检测
 全部服务器并写入 `.cache/mcp_status.json`。

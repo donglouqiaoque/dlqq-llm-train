@@ -91,9 +91,10 @@
     git command (recommended combination: `git status --short --untracked-files=all`,
     `git diff --stat`, `git diff --name-status`; read-only `git diff -- <file>` when needed) to
     confirm the actual changes, then write the message from that diff. Write the message to
-    `.ai_res/git_log/<date>_<time>.txt`; the user performs the commit and AI never runs
-    `git add`, `commit`, or `push`; describe only this repository's changes, and do not put
-    content unrelated to this repository or ignored by git into the commit message.
+    `.ai_res/git_log/<YYYY-MM-DD_HH-MM-SS>.txt`. Before naming the file, query the actual current
+    time and name it from that result; never guess or estimate the filename. The user performs the
+    commit and AI never runs `git add`, `commit`, or `push`; describe only this repository's changes,
+    and do not put content unrelated to this repository or ignored by git into the commit message.
 
 ## 2. Layout (current architecture)
 
@@ -282,9 +283,10 @@ line) and Streamable HTTP (JSON-RPC POST + Mcp-Session-Id). Configured MCP clien
 WebUI startup and stay resident; a STDIO process lives as long as the WebUI, is restarted only when
 its config changes, and is closed when the WebUI exits. Agent accepts only Ollama models with the
 `tools` capability and loops over `tool_calls → tools/call → tool result` for at most 8 rounds;
-each round uses Ollama SSE, the final answer streams token by token; reasoning, answers and tool
-calls alternate in the model's actual output order, with tool cards inside the reasoning segment
-where the call occurred. Agent requests may include a `tools` name list for multi-select filtering;
+each round uses Ollama SSE, the final answer streams token by token; a turn header shows status and
+elapsed time, and clicking it collapses only reasoning/tool-call rows while answers stay visible;
+reasoning, tool calls and answers appear as flat timeline rows in the model's actual output order.
+Agent requests may include a `tools` name list for multi-select filtering;
 `thinking=true` forwards `think` / `reasoning_effort` and shows the reasoning, while local
 character-level models do not support that toggle. After tool results, an internal continuation user
 turn is added so Ollama/Qwen does not reject a pure tool turn with

@@ -902,15 +902,18 @@ conversation; a config change restarts that process, and WebUI exit closes them 
 
 The **Agent** tab only lists Ollama models with the `tools` capability and saved MCP servers.
 Model, MCP server, the **Tools** multi-select and **Enable deep thinking** live above the composer.
-For each message:
+The tool panel can search by tool name or description; Select all / Clear apply to the current
+filter results. For each message:
 
 ```text
 user message → Ollama tool_calls → MCP tools/call → tool result → Ollama continues
 ```
 
-Tool cards are shown inside the **thinking process** at the point where each call occurred, and
-the final answer streams token by token. As soon as the tool name is known, the card shows
-"preparing / calling"; it changes to "done" or "failed" after execution. With deep thinking enabled,
+Execution is shown as a flat Agent timeline rather than nested bubbles: the turn header shows
+status and elapsed time, and clicking it collapses all reasoning / tool-call rows while answers
+remain visible. Reasoning / tool call / answer rows follow in the model's actual output order. As
+soon as the tool name is known, the row shows "preparing / calling"; it changes to "done" or
+"failed" after execution, and arguments/results can be expanded. With deep thinking enabled,
 reasoning and tool calls are interleaved above the answer in their actual order. Embedding models
 and local character-level models are not listed in Agent; local character-level models do not
 support the thinking toggle. The bridge continues to forward client-provided `tools` to Ollama as

@@ -155,25 +155,55 @@
                        white-space:pre-wrap; word-break:break-word; margin-bottom:6px; }
   .embedcard .einput::before { content:"输入："; color:var(--muted); }
   .embedcard .thinking { margin:6px 0 0; }
-  .agent-tool { margin:8px 0; border:1px solid #2b3444; border-radius:8px;
-                background:#0e1219; padding:7px 10px; font-size:12px; color:#aab4c4; }
-  .agent-tool summary { cursor:pointer; color:#9fb8d8; user-select:none; }
-  .agent-tool pre { margin:6px 0 0; white-space:pre-wrap; word-break:break-word;
-                    max-height:220px; overflow:auto; font:12px/1.5 Consolas, monospace; }
-  .agent-tool.err { border-color:#63343a; }
-  .agent-tool.err summary { color:#e38b93; }
-  .think-flow { padding:0 10px 9px; max-height:420px; overflow:auto; }
+  .agent-turn { flex:1 1 auto; min-width:0; border-top:1px solid var(--line);
+                padding-top:7px; }
+  .agent-turn-head { display:flex; align-items:center; gap:7px; width:100%;
+                     padding:2px 0 8px; color:#dfe6f5; background:none; border:0;
+                     font:inherit; text-align:left; cursor:pointer; }
+  .agent-turn-caret::before { content:"▾"; color:var(--muted); font-size:11px; }
+  .agent-turn.collapsed .agent-turn-caret::before { content:"▸"; }
+  .agent-turn-title { font-size:13px; }
+  .agent-turn-meta { margin-left:auto; font-size:11px; color:var(--muted); font-weight:normal; }
+  .agent-turn.running .agent-turn-title::after {
+    content:"●"; margin-left:7px; color:var(--accent); font-size:9px;
+    animation:blink 1s steps(1) infinite;
+  }
+  .agent-turn.collapsed .agent-step:not(.agent-answer) { display:none; }
+  .agent-flow { display:flex; flex-direction:column; }
+  .agent-step { border-top:1px solid #1d2532; padding:7px 0; }
+  .agent-step:first-child { border-top:0; }
+  .agent-step > summary { list-style:none; cursor:pointer; display:flex; align-items:center;
+                          gap:7px; min-width:0; color:#9fb8d8; user-select:none; }
+  .agent-step > summary::-webkit-details-marker { display:none; }
+  .agent-step > summary::before { content:"▸"; color:var(--muted); font-size:10px; }
+  .agent-step[open] > summary::before { content:"▾"; }
+  .agent-step-icon { flex:0 0 auto; opacity:.8; }
+  .agent-step-label { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+                      white-space:nowrap; }
+  .agent-step-status { flex:0 0 auto; margin-left:auto; font-size:11px; color:var(--muted); }
+  .agent-step-status.ok { color:#7fcf9b; }
+  .agent-step-status.err { color:#e38b93; }
+  .agent-think .think-flow { margin:5px 0 0 23px; max-height:360px; overflow:auto; }
   .think-text { white-space:pre-wrap; word-break:break-word; color:#aab4c4;
-                font:12px/1.55 Consolas, monospace; margin:0 0 6px; }
-  .agent-flow { display:flex; flex-direction:column; gap:8px; }
-  .agent-flow .thinking { margin:0; }
-  .agent-flow .body { margin:0; }
+                font:12px/1.55 Consolas, monospace; margin:0 0 5px; }
+  .agent-tool-step pre { margin:5px 0 0 23px; padding:7px 9px; white-space:pre-wrap;
+                         word-break:break-word; max-height:220px; overflow:auto;
+                         font:12px/1.5 Consolas, monospace; color:#aab4c4;
+                         background:#0b1017; border:1px solid #202a38; border-radius:7px; }
+  .agent-tool-step .agent-tool-result:empty { display:none; }
+  .agent-tool-step.err > summary { color:#e38b93; }
+  .agent-answer { padding:8px 0 2px; }
+  .agent-answer:first-child { padding-top:2px; }
   .agent-bar { flex-wrap:wrap; row-gap:5px; }
   .agent-bar select { max-width:190px; }
   .agent-tool-panel { flex:0 0 auto; border:1px solid var(--line); border-radius:9px;
                       background:#10151d; padding:7px 10px; margin-bottom:8px; }
   .agent-tool-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
   .agent-tool-head button { padding:3px 8px; font-size:12px; }
+  .agent-tool-search { flex:1 1 180px; min-width:150px; padding:5px 9px; font-size:12px;
+                       color:var(--fg); background:#0b1017; border:1px solid var(--line);
+                       border-radius:7px; outline:none; }
+  .agent-tool-search:focus { border-color:var(--accent); }
   .agent-tool-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr));
                      gap:4px 12px; max-height:180px; overflow:auto; }
   .agent-tool-item { display:flex; align-items:center; gap:5px; min-width:0;
@@ -412,8 +442,10 @@
       <div class="agent-tool-panel" id="agentToolPanel" style="display:none">
         <div class="agent-tool-head">
           <strong>可用工具</strong>
-          <button id="btnAgentToolsAll">全选</button>
-          <button id="btnAgentToolsNone">清空</button>
+          <input class="agent-tool-search" id="agentToolSearch" type="search"
+                 placeholder="搜索工具名或说明">
+          <button id="btnAgentToolsAll" title="全选当前筛选结果">全选</button>
+          <button id="btnAgentToolsNone" title="清空当前筛选结果">清空</button>
           <span class="muted" id="agentToolsCount"></span>
         </div>
         <div class="agent-tool-list" id="agentToolList"></div>
@@ -891,30 +923,54 @@ function agentMsg(role, text) {
   const box = $('#agentBox');
   const empty = box.querySelector('.empty');
   if (empty) empty.remove();
-  const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot'));
+  const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot agent-msg'));
   wrap.appendChild(el('div', 'avatar', role === 'user' ? '你' : 'AI'));
-  const bubble = el('div', 'bubble');
   let body = null;
+  let bubble = null;
+  let turn = null;
+  let title = null;
+  let meta = null;
   let flow = null;
   if (role === 'user') {
+    bubble = el('div', 'bubble');
     body = el('div', 'body', text || '');
     bubble.appendChild(body);
+    wrap.appendChild(bubble);
   } else {
+    turn = el('div', 'agent-turn');
+    const head = el('button', 'agent-turn-head');
+    head.type = 'button';
+    head.title = '折叠/展开思考和工具调用';
+    head.setAttribute('aria-expanded', 'true');
+    head.appendChild(el('span', 'agent-turn-caret'));
+    title = el('span', 'agent-turn-title', '运行中…');
+    meta = el('span', 'agent-turn-meta');
+    head.appendChild(title);
+    head.appendChild(meta);
+    head.onclick = () => {
+      turn.classList.toggle('collapsed');
+      head.setAttribute('aria-expanded',
+        turn.classList.contains('collapsed') ? 'false' : 'true');
+    };
+    turn.appendChild(head);
     flow = el('div', 'agent-flow');
-    bubble.appendChild(flow);
+    turn.appendChild(flow);
+    wrap.appendChild(turn);
   }
-  wrap.appendChild(bubble);
   box.appendChild(wrap);
   box.scrollTop = box.scrollHeight;
-  return { body, bubble, flow, answers: [] };
+  return { body, bubble, turn, title, meta, flow, answers: [], startedAt: Date.now() };
 }
 
 function agentEnsureThink(out) {
   let last = out.flow.lastElementChild;
-  if (!last || !last.classList.contains('thinking')) {
-    const details = el('details', 'thinking');
-    details.style.display = 'none';
-    details.appendChild(el('summary', '', '思考过程'));
+  if (!last || !last.classList.contains('agent-think')) {
+    const details = el('details', 'agent-step agent-think');
+    details.open = true;
+    const summary = el('summary', 'agent-step-head');
+    summary.appendChild(el('span', 'agent-step-icon', '🧠'));
+    summary.appendChild(el('span', 'agent-step-label', '思考'));
+    details.appendChild(summary);
     const flow = el('div', 'think-flow');
     details.appendChild(flow);
     details._think = { box: details, flow };
@@ -927,7 +983,7 @@ function agentEnsureThink(out) {
 function agentEnsureAnswer(out) {
   let last = out.flow.lastElementChild;
   if (!last || !last.classList.contains('agent-answer')) {
-    last = el('div', 'body agent-answer');
+    last = el('div', 'agent-step agent-answer body');
     last.dataset.raw = '';
     out.flow.appendChild(last);
     out.answers.push({ body: last, raw: '' });
@@ -944,29 +1000,28 @@ function agentThinkText(think) {
   return last;
 }
 
-function agentShowThink(think) {
-  if (think.box.style.display === 'none') {
-    think.box.style.display = '';
-    think.box.open = true;
-  }
-}
-
-function agentToolCard(name, args, think, status, index) {
-  agentShowThink(think);
-  const details = el('details', 'agent-tool');
+function agentToolCard(name, args, out, status, index) {
+  const details = el('details', 'agent-step agent-tool-step');
   details.open = true;
-  const summary = el('summary', '', '调用工具：' + (name || '') +
-                                  (status ? `（${status}）` : ''));
+  const summary = el('summary', 'agent-step-head');
+  const label = el('span', 'agent-step-label', '调用工具 ' + (name || ''));
+  const statusEl = el('span', 'agent-step-status', status || '');
+  summary.appendChild(el('span', 'agent-step-icon', '🔧'));
+  summary.appendChild(label);
+  summary.appendChild(statusEl);
+  const pre = el('pre', 'agent-tool-args', JSON.stringify(args || {}, null, 2));
+  const result = el('pre', 'agent-tool-result');
   details.appendChild(summary);
-  const pre = el('pre', '', JSON.stringify(args || {}, null, 2));
   details.appendChild(pre);
-  think.flow.appendChild(details);
-  return { details, summary, pre, name, index };
+  details.appendChild(result);
+  out.flow.appendChild(details);
+  return { details, summary, label, statusEl, pre, result, name, index };
 }
 
 function agentToolStatus(card, status) {
-  card.summary.textContent = '调用工具：' + (card.name || '') +
-                             (status ? `（${status}）` : '');
+  card.statusEl.textContent = status || '';
+  card.statusEl.className = 'agent-step-status' +
+    (status === '完成' ? ' ok' : status === '失败' ? ' err' : '');
 }
 
 function agentFindToolCard(cards, data) {
@@ -988,13 +1043,31 @@ function agentScrollIf(stick) {
   box.scrollTop = box.scrollHeight;
 }
 
+function agentDuration(ms) {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec} 秒`;
+  return `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
+}
+
+function agentVisibleTools() {
+  const input = $('#agentToolSearch');
+  const q = (input ? input.value : '').trim().toLowerCase();
+  if (!q) return AGENT_TOOLS;
+  return AGENT_TOOLS.filter(t =>
+    (t.name || '').toLowerCase().includes(q) ||
+    (t.description || '').toLowerCase().includes(q));
+}
+
 function renderAgentTools() {
   const box = $('#agentToolList');
+  const tools = agentVisibleTools();
   box.innerHTML = '';
   if (!AGENT_TOOLS.length) {
     box.innerHTML = '<div class="muted">没有可用工具</div>';
+  } else if (!tools.length) {
+    box.innerHTML = '<div class="muted">没有匹配的工具</div>';
   } else {
-    AGENT_TOOLS.forEach(t => {
+    tools.forEach(t => {
       const row = el('label', 'agent-tool-item');
       const cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -1016,14 +1089,19 @@ function renderAgentTools() {
 function updateAgentToolCount() {
   const total = AGENT_TOOLS.length;
   const picked = AGENT_SELECTED_TOOLS.size;
+  const shown = agentVisibleTools().length;
+  const searching = !!($('#agentToolSearch') && $('#agentToolSearch').value.trim());
   $('#btnAgentTools').textContent = `工具 ${picked}/${total}`;
-  $('#agentToolsCount').textContent = total ? `已选 ${picked} / ${total}` : '';
+  $('#agentToolsCount').textContent = total
+    ? `已选 ${picked} / ${total}` + (searching ? ` · 匹配 ${shown}` : '')
+    : '';
   $('#btnAgentSend').disabled = !$('#agentModel').value || !$('#agentMcp').value || !picked;
 }
 
 async function loadAgentTools(serverId) {
   AGENT_TOOLS = [];
   AGENT_SELECTED_TOOLS = new Set();
+  if ($('#agentToolSearch')) $('#agentToolSearch').value = '';
   if (serverId) {
     let status = MCP_STATUS[serverId];
     if (!status || !status.tools) {
@@ -1092,7 +1170,12 @@ async function agentSend() {
   AGENT_HISTORY.push({ role: 'user', content: text });
   agentMsg('user', text);
   const out = agentMsg('assistant', '');
-  out.bubble.classList.add('typing');
+  out.turn.classList.add('running');
+  out.title.textContent = '运行中 · 0 秒';
+  const turnTimer = setInterval(() => {
+    if (!AGENT_ABORT) return;
+    out.title.textContent = `运行中 · ${agentDuration(Date.now() - out.startedAt)}`;
+  }, 1000);
   $('#btnAgentSend').disabled = true;
   $('#btnAgentStop').disabled = false;
   $('#agentState').textContent = '运行中…';
@@ -1118,6 +1201,7 @@ async function agentSend() {
       signal: AGENT_ABORT.signal,
     });
     if (!resp.ok) {
+      out.failed = true;
       const a = agentEnsureAnswer(out);
       a.raw = '请求失败：' + (await resp.text());
       a.body.textContent = a.raw;
@@ -1145,18 +1229,17 @@ async function agentSend() {
         }
         const stick = agentAtBottom();
         if (ev[1] === 'meta') {
+          out.meta.textContent = `${data.server} · ${data.tools} 个工具`;
           $('#agentState').textContent = `${data.server} · ${data.tools} 个工具`;
         } else if (ev[1] === 'reasoning') {
           const think = agentEnsureThink(out);
-          agentShowThink(think);
           agentThinkText(think).textContent += data.text || '';
           agentScrollIf(stick);
         } else if (ev[1] === 'tool_pending') {
           $('#agentState').textContent = `准备调用 ${data.name}…`;
-          const think = agentEnsureThink(out);
           let card = agentFindToolCard(cards, data);
           if (!card) {
-            card = agentToolCard(data.name, {}, think, '准备中…', data.index);
+            card = agentToolCard(data.name, {}, out, '准备中…', data.index);
             cards.push(card);
           } else {
             agentToolStatus(card, '准备中…');
@@ -1164,13 +1247,13 @@ async function agentSend() {
           agentScrollIf(stick);
         } else if (ev[1] === 'tool') {
           $('#agentState').textContent = `正在调用 ${data.name}…`;
-          const think = agentEnsureThink(out);
           let card = agentFindToolCard(cards, data);
           if (!card) {
-            card = agentToolCard(data.name, data.arguments, think, '执行中…', data.index);
+            card = agentToolCard(data.name, data.arguments, out, '执行中…', data.index);
             cards.push(card);
           } else {
             card.name = data.name || card.name;
+            card.label.textContent = '调用工具 ' + card.name;
             card.pre.textContent = JSON.stringify(data.arguments || {}, null, 2);
             agentToolStatus(card, '执行中…');
           }
@@ -1179,7 +1262,8 @@ async function agentSend() {
           const card = agentFindToolCard(cards, data);
           if (card) {
             card.done = true;
-            card.pre.textContent += '\n\n' + (data.text || '');
+            card.result.textContent += (card.result.textContent ? '\n\n' : '') +
+                                       (data.text || '');
             if (data.is_error) {
               card.details.classList.add('err');
               agentToolStatus(card, '失败');
@@ -1208,6 +1292,7 @@ async function agentSend() {
           }
           agentScrollIf(stick);
         } else if (ev[1] === 'error') {
+          out.failed = true;
           const a = agentEnsureAnswer(out);
           a.raw = '错误：' + (data.error || '未知错误');
           a.body.textContent = a.raw;
@@ -1219,21 +1304,31 @@ async function agentSend() {
   } catch (e) {
     const last = out.answers[out.answers.length - 1];
     if (e.name === 'AbortError') {
+      out.failed = 'stopped';
       if (last) {
         last.raw += '（已停止）';
         last.body.textContent = last.raw;
       }
-    } else if (last) {
-      last.raw += '\n\n出错：' + e.message;
-      last.body.textContent = last.raw;
     } else {
-      const a = agentEnsureAnswer(out);
-      a.raw = '出错：' + e.message;
-      a.body.textContent = a.raw;
+      out.failed = true;
+      if (last) {
+        last.raw += '\n\n出错：' + e.message;
+        last.body.textContent = last.raw;
+      } else {
+        const a = agentEnsureAnswer(out);
+        a.raw = '出错：' + e.message;
+        a.body.textContent = a.raw;
+      }
     }
   } finally {
     clearInterval(idleTimer);
-    out.bubble.classList.remove('typing');
+    clearInterval(turnTimer);
+    out.turn.classList.remove('running');
+    const elapsed = agentDuration(Date.now() - out.startedAt);
+    if (out.failed === 'stopped') out.title.textContent = `已停止 · 用时 ${elapsed}`;
+    else if (out.failed) out.title.textContent = `失败 · 用时 ${elapsed}`;
+    else if (acc) out.title.textContent = `已完成 · 用时 ${elapsed}`;
+    else out.title.textContent = `未完成 · 用时 ${elapsed}`;
     updateAgentToolCount();
     $('#btnAgentStop').disabled = true;
     $('#agentState').textContent = acc ? '完成' : '未完成';
@@ -1597,16 +1692,19 @@ $('#btnAgentSend').onclick = agentSend;
 $('#btnAgentStop').onclick = () => { if (AGENT_ABORT) AGENT_ABORT.abort(); };
 $('#btnAgentTools').onclick = () => {
   const panel = $('#agentToolPanel');
-  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  const open = panel.style.display === 'none';
+  panel.style.display = open ? 'block' : 'none';
+  if (open && $('#agentToolSearch')) $('#agentToolSearch').focus();
 };
 $('#btnAgentToolsAll').onclick = () => {
-  AGENT_SELECTED_TOOLS = new Set(AGENT_TOOLS.map(t => t.name));
+  agentVisibleTools().forEach(t => AGENT_SELECTED_TOOLS.add(t.name));
   renderAgentTools();
 };
 $('#btnAgentToolsNone').onclick = () => {
-  AGENT_SELECTED_TOOLS = new Set();
+  agentVisibleTools().forEach(t => AGENT_SELECTED_TOOLS.delete(t.name));
   renderAgentTools();
 };
+$('#agentToolSearch').addEventListener('input', renderAgentTools);
 $('#agentMcp').addEventListener('change', () => loadAgentTools($('#agentMcp').value));
 $('#agentModel').addEventListener('change', () => { updateAgentThinking(); updateAgentToolCount(); });
 $('#agentInput').addEventListener('keydown', e => {

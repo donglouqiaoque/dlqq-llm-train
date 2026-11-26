@@ -16,6 +16,8 @@ res/*
 *.lnk
 # 忽略Python运行环境（Python运行环境在Release包中提供，仓库里面不包含）
 .runtime/python
+# 忽略测试工作区文件
+.runtime/default_workspace
 #-------------------------
 
 #----------排除区----------
