@@ -176,7 +176,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/openai/test` | 只检测当前选中的 API（草稿也可）；已保存配置同时更新状态并返回模型/思考能力 |
 | GET | `/api/agent/configs` | Agent 可用的工具模型 + MCP 服务器 + 检测结果 |
 | GET | `/api/agent/tools?server=<id>` | 获取某个 MCP 服务器的工具（供 Agent 多选） |
-| POST | `/api/agent/chat` | Agent 工具循环，SSE：`meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
+| POST | `/api/agent/chat` | Agent 工具循环，SSE：`context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
 | GET | `/api/corpora` | `res\` 下的语料目录（文件数、体积） |
 | GET | `/api/train/status` `train/log` | 训练状态与增量日志 |
 | GET | `/api/server/status` | 桥接服务状态与端口 |
@@ -184,7 +184,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/config/save` | 逐行改 value 保存（保注释与键顺序），先备份 |
 | POST | `/api/env/install` | 用项目 Python 安装 torch / numpy / transformers；`torch_type=cpu|gpu|xpu|auto`，`torch_version` / `numpy_version` / `transformers_version` 可留空；兼容旧 `torch_index=cpu|cu126|cu128|xpu|auto`；输出走 `env-log` |
 | POST | `/api/train/start` `train/stop` | 启动 / 停止训练子进程 |
-| POST | `/api/chat` | 对话，返回 SSE：`meta` / `reasoning` / `token` / `done` / `error` |
+| POST | `/api/chat` | 对话，返回 SSE：`context` / `meta` / `reasoning` / `token` / `done` / `error` |
 | POST | `/api/server/start` `server/stop` | 启停桥接服务 |
 | POST | `/api/sign` | `mode=compute|verify`，跑签名工具 |
 
@@ -250,6 +250,7 @@ embeddings 请求。配置保存在 `.cache/openai_apis.json`，只保存 `name`
 Ollama 配置还会用 `/api/show` 补齐类型、工具、思考和上下文。每个模型用
 `api:<配置id>/<模型>` 作为 id，类型分为 `chat` / `embedding`；Chat/Agent 只用 chat，
 服务页两者都列。API 模型由桥接服务代理 `/v1/chat/completions` 和 `/v1/embeddings`。
+Ollama 配置的聊天超时为 600 秒，其他供应商为 300 秒；Ollama 长时间思考不应被 300 秒误断开。
 思考能力按 `/models` 的可选字段解析：明确支持且有档位用实际档位；旧接口只有 true/false
 时只给 off/on；支持但无档位用默认四档；明确不支持则隐藏；完全未知时也按默认四档并默认
 选中 off。上下文上限也从 `/models` 的 `context_length` / `context_window` / `max_model_len`
@@ -264,9 +265,11 @@ Agent 的 `max_tokens` 默认 256K（有模型输出字段时用模型值，并�
 不发送 `tools`、不执行工具调用，MCP 进程仍保持常驻。带工具时按
 `tool_calls → tools/call → tool result` 循环，直到模型不再返回工具调用；
 不再使用固定 8 轮上限，用户可随时停止；
-每轮使用 SSE，最终回答逐 token 推给前端；顶部显示运行状态和用时，点击顶部只折叠
-思考/工具调用行，回答始终显示；思考、工具调用、回答按模型实际输出顺序作为平级时间线行
-展示。Agent 请求可带 `tools` 名称列表做多选过滤；
+每轮使用 SSE，最终回答逐 token 推给前端；顶部显示运行状态和用时，默认折叠
+思考/工具调用历史，回答始终显示；点击顶部展开历史，单条参数/结果再自行展开。
+思考、工具调用、回答按模型实际输出顺序作为平级时间线行展示。工具参数和结果完整显示并
+完整回填给模型，不做硬截断；只执行本次勾选的工具，模型返回未勾选或不存在的工具时回填
+“工具不存在”，不调用 MCP。
 `thinking=off/low/medium/high` 时透传 `think` / `reasoning_effort` 并显示思考过程，
 API 的等级来自检测元数据，缺省时按默认四档回退；本地字符级模型不支持该控件。
 工具结果之后会补一条内部续跑 user 提示，避免 Ollama/Qwen 把纯 tool 轮次判成

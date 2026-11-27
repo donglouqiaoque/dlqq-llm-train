@@ -169,7 +169,22 @@ def _headers(api, accept="application/json"):
     return headers
 
 
-def open_chat(api, payload, timeout=300):
+DEFAULT_CHAT_TIMEOUT = 300
+OLLAMA_CHAT_TIMEOUT = 600
+
+
+def is_ollama_api(api):
+    """Ollama 的 OpenAI 兼容接口在本地推理时可能长时间无新 token。"""
+    name = str((api or {}).get("name") or "").lower()
+    base = str((api or {}).get("base_url") or "").lower()
+    return "ollama" in name or "11434" in base
+
+
+def chat_timeout(api):
+    return OLLAMA_CHAT_TIMEOUT if is_ollama_api(api) else DEFAULT_CHAT_TIMEOUT
+
+
+def open_chat(api, payload, timeout=DEFAULT_CHAT_TIMEOUT):
     """返回 (connection, response)，调用方负责 close。"""
     url = chat_url(api)
     conn, path = _connection(url, timeout)

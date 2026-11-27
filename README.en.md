@@ -898,11 +898,15 @@ user message → model tool_calls → MCP tools/call → tool result → model c
 ```
 
 Execution is shown as a flat Agent timeline rather than nested bubbles: the turn header shows
-status and elapsed time, and clicking it collapses all reasoning / tool-call rows while answers
-remain visible. Reasoning / tool call / answer rows follow in the model's actual output order. As
+status and elapsed time, reasoning / tool-call rows are collapsed by default while answers
+remain visible; clicking the header expands the history, and each arguments/result block expands
+on its own. Reasoning / tool call / answer rows follow in the model's actual output order. As
 soon as the tool name is known, the row shows "preparing / calling"; it changes to "done" or
-"failed" after execution, and arguments/results can be expanded. With a thinking level selected,
-reasoning and tool calls are interleaved above the answer in their actual order. Embedding models
+"failed" after execution, and arguments/results are shown in full and sent back to the model in
+full, with no hard truncation. Only tools selected for this request are executed; if the model
+calls an unselected or unknown tool, the result is "tool does not exist" and MCP is not called.
+With a thinking level selected, reasoning and tool calls are interleaved above the answer in
+their actual order. Embedding models
 and local character-level models are not listed in Agent; local character-level models do not
 support the thinking level. The bridge continues to forward client-provided `tools` to the model
 as before; it does not execute MCP tools inside the bridge.
@@ -942,7 +946,8 @@ tool-capable also appear in Agent. The Service page lists every API model (chat 
 the bridge proxies `/v1/chat/completions` and `/v1/embeddings`; embedding requests are written to
 the Service page's Vectors log. **Detect models** in the API tab only re-requests the selected
 API's `/models`; startup still detects every saved API. The model list shows type, tool support,
-thinking support, levels and the context limit. Context is read from `/models` fields such as
+thinking support, levels and the context limit. Ollama chat requests use a 600-second timeout while
+other providers use 300 seconds. Context is read from `/models` fields such as
 `context_length`, `context_window`, `max_model_len` and `top_provider.context_length`, falling
 back to 1M; request history is trimmed against the detected context after reserving output space.
 Note that Agent's "max_tokens output limit" error is the per-response output cap, not the context

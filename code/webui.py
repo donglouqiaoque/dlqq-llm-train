@@ -840,6 +840,17 @@ def openai_output_budget(api, model):
     return min(output, max(1024, context // 2))
 
 
+def context_tokens(messages, tools=None):
+    """按 4 字符/token 估算实际请求压力，包含工具 schema。"""
+    try:
+        text = json.dumps(messages or [], ensure_ascii=False)
+        if tools:
+            text += json.dumps(tools, ensure_ascii=False)
+        return max(1, (len(text) + 3) // 4)
+    except (TypeError, ValueError):
+        return 1
+
+
 def _trim_for_context(messages, context, reserve=256000):
     """按保守字符数裁剪历史；保留 system 和最近消息，避免超上下文。"""
     budget = max(1024, int(context) - reserve)
@@ -862,12 +873,6 @@ def _trim_for_context(messages, context, reserve=256000):
         n = size(msg)
         if used + n > budget and kept:
             break
-        if used + n > budget:
-            # 单条仍然过长时保留尾部，至少让请求有机会发出去。
-            if isinstance(msg, dict) and isinstance(msg.get("content"), str):
-                msg = dict(msg)
-                msg["content"] = msg["content"][-max(256, budget - used):]
-            n = size(msg)
         kept.append(msg)
         used += n
     return system + list(reversed(kept))
@@ -1497,7 +1502,7 @@ class Handler(BaseHTTPRequestHandler):
                 ollama.model_thinking(tag), level))
 
         try:
-            conn, resp = ollama.open_chat(payload)
+            conn, resp = ollama.open_chat(payload, timeout=600)
         except Exception as e:
             return self._err(502, f"无法连接 Ollama：{type(e).__name__}: {e}")
 
@@ -1564,7 +1569,8 @@ class Handler(BaseHTTPRequestHandler):
             payload.update(openai_thinking_payload(
                 openai_model_thinking(api, model), level))
         try:
-            conn, resp = openai_client.open_chat(api, payload, timeout=300)
+            conn, resp = openai_client.open_chat(
+                api, payload, timeout=openai_client.chat_timeout(api))
         except Exception as e:
             return self._err(502, f"无法连接 API：{type(e).__name__}: {e}")
         if resp.status < 200 or resp.status >= 300:
@@ -1579,6 +1585,11 @@ class Handler(BaseHTTPRequestHandler):
         parts = []
         reasoning_parts = []
         try:
+            self._sse("context", {
+                "used": context_tokens(payload.get("messages")),
+                "total": openai_model_context(api, model),
+                "output": openai_output_budget(api, model),
+            })
             self._sse("meta", {"model": f"{api['name']}/{model}", "config": f"{api['name']}/{model}",
                                "info": {"backend": "openai",
                                         "thinking": _thinking_level(body.get("thinking")) != "off"}})
@@ -1758,6 +1769,7 @@ class Handler(BaseHTTPRequestHandler):
         self._sse_start()
         client = None
         tools = []
+        allowed_names = set()
         try:
             selected = body.get("tools")
             selected_names = None
@@ -1769,6 +1781,8 @@ class Handler(BaseHTTPRequestHandler):
                 all_tools = [t for t in all_tools
                              if isinstance(t, dict) and t.get("name") in selected_names]
                 tools = mcp_client.openai_tools(all_tools)
+                allowed_names = {t.get("function", {}).get("name")
+                                 for t in tools if isinstance(t, dict)}
             self._sse("meta", {"model": model_label,
                                "server": server["name"] if server else "",
                                "tools": len(tools), "thinking": thinking,
@@ -1799,13 +1813,23 @@ class Handler(BaseHTTPRequestHandler):
                     payload["messages"] = _trim_for_context(
                         messages, openai_model_context(api, upstream),
                         output_budget)
+                context_total = (openai_model_context(api, upstream)
+                                 if backend == "openai" else
+                                 (ollama.model_context(tag) or 1000000))
+                self._sse("context", {
+                    "used": context_tokens(payload.get("messages"),
+                                           payload.get("tools")),
+                    "total": context_total,
+                    "output": output_budget,
+                })
                 if backend == "openai":
                     payload.update(openai_thinking_payload(thinking_info, thinking))
-                    conn, resp = openai_client.open_chat(api, payload, timeout=300)
+                    conn, resp = openai_client.open_chat(
+                        api, payload, timeout=openai_client.chat_timeout(api))
                 else:
                     payload.update(ollama_thinking_payload(
                         ollama.model_thinking(tag), thinking))
-                    conn, resp = ollama.open_chat(payload, timeout=300)
+                    conn, resp = ollama.open_chat(payload, timeout=600)
                 if resp.status < 200 or resp.status >= 300:
                     raw = resp.read().decode("utf-8", errors="replace")
                     conn.close()
@@ -1860,10 +1884,6 @@ class Handler(BaseHTTPRequestHandler):
                         f"模型输出达到单轮 max_tokens={output_budget} 的上限（不是上下文上限）；"
                         "回答或工具参数可能被截断。请减少工具数量，或让模型把内容拆成多次创建/追加。"})
                     return
-                if call_list and not tools:
-                    self._sse("error", {"error":
-                        "当前没有启用 MCP 工具，但模型返回了工具调用；已忽略本次工具调用。"})
-                    return
                 if call_list:
                     messages.append({"role": "assistant",
                                      "content": "".join(parts),
@@ -1881,28 +1901,31 @@ class Handler(BaseHTTPRequestHandler):
                             args = {}
                         self._sse("tool", {"name": name, "arguments": args,
                                            "index": indexes[i]})
-                        try:
-                            result = client.call_tool(name, args)
-                            text = mcp_client.tool_result_text(result)
-                            is_error = bool(result.get("isError")) if isinstance(result, dict) else False
-                        except Exception as e:
-                            text = f"MCP 工具调用失败：{type(e).__name__}: {e}"
+                        if name not in allowed_names or client is None:
+                            text = f"工具不存在：{name}"
                             is_error = True
-                        model_text = text[:4000]
-                        self._sse("tool_result", {"name": name, "text": model_text,
+                        else:
+                            try:
+                                result = client.call_tool(name, args)
+                                text = mcp_client.tool_result_text(result)
+                                is_error = bool(result.get("isError")) if isinstance(result, dict) else False
+                            except Exception as e:
+                                text = f"MCP 工具调用失败：{type(e).__name__}: {e}"
+                                is_error = True
+                        self._sse("tool_result", {"name": name, "text": text,
                                                    "index": indexes[i],
                                                    "is_error": is_error})
                         messages.append({"role": "tool",
                                          "tool_call_id": call.get("id") or f"call_{i}",
-                                         "content": model_text})
-                        round_results.append((name, model_text))
+                                         "content": text})
+                        round_results.append((name, text))
                     # Ollama/Qwen 在“纯 tool 结果”轮次里会丢失最新 user；
                     # 把原始请求和工具结果再次放进最新的 user，避免上下文截断后
                     # 模型只看到一句“请继续”而看不到工具结果。
                     result_text = "\n\n".join(
-                        f"【{name}】\n{text}" for name, text in round_results)[:12000]
+                        f"【{name}】\n{text}" for name, text in round_results)
                     messages.append({"role": "user", "content":
-                        f"用户请求：{user_query[:2000]}\n\n"
+                        f"用户请求：{user_query}\n\n"
                         f"工具执行结果：\n{result_text}\n\n"
                         "请根据以上工具结果继续完成用户请求。"})
                     continue

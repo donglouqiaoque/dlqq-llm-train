@@ -259,7 +259,7 @@ def detect_environment(base=None, timeout=2.5):
     return out
 
 
-def open_chat(payload, base=None, timeout=300):
+def open_chat(payload, base=None, timeout=600):
     """向 Ollama 发一个 /v1/chat/completions 请求。
 
     返回 (connection, response)，调用方负责 close。

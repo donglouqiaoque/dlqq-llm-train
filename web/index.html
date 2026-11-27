@@ -206,10 +206,29 @@
   .agent-answer:first-child { padding-top:2px; }
   .agent-bar { flex-wrap:wrap; row-gap:5px; }
   .agent-bar select { max-width:190px; }
-  #agentThinking, #chatThinking { min-width:74px; border-color:#3b4a60;
-                                 background:#0b1017; }
-  #agentThinking:focus, #chatThinking:focus { outline:none; border-color:var(--accent);
-                                               box-shadow:0 0 0 2px rgba(79,140,255,.18); }
+  #agentThinking, #chatThinking { min-width:74px; }
+  /* 输入栏控件统一保留可见边框：聚焦高亮消失后不能看起来像没有边框 */
+  #chat .composerbar select,
+  #chat .composerbar button:not(.primary):not(.danger),
+  #agent .composerbar select,
+  #agent .composerbar button:not(.primary):not(.danger) {
+    border:1px solid #465a76;
+    background-color:#0b1017;
+  }
+  #chat .composerbar select:hover,
+  #chat .composerbar button:not(.primary):not(.danger):hover,
+  #agent .composerbar select:hover,
+  #agent .composerbar button:not(.primary):not(.danger):hover {
+    border-color:#5d7899;
+  }
+  #chat .composerbar select:focus,
+  #chat .composerbar button:not(.primary):not(.danger):focus,
+  #agent .composerbar select:focus,
+  #agent .composerbar button:not(.primary):not(.danger):focus {
+    outline:none;
+    border-color:var(--accent);
+    box-shadow:0 0 0 2px rgba(79,140,255,.18);
+  }
   .agent-tool-panel { flex:0 0 auto; border:1px solid var(--line); border-radius:9px;
                       background:#10151d; padding:7px 10px; margin-bottom:8px; }
   .agent-tool-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
@@ -772,6 +791,7 @@ let AGENT_TOOLS = [];
 let AGENT_SELECTED_TOOLS = new Set();
 let AGENT_HISTORY = [];
 let AGENT_ABORT = null;
+let AGENT_CONTEXT_DATA = null;
 // 配置文件第一行常是 "# ====" 这种装饰线，不能拿来当说明
 function cleanDesc(desc) {
   const d = (desc || '').trim();
@@ -1186,11 +1206,11 @@ function agentMsg(role, text) {
     bubble.appendChild(body);
     wrap.appendChild(bubble);
   } else {
-    turn = el('div', 'agent-turn');
+    turn = el('div', 'agent-turn collapsed');
     const head = el('button', 'agent-turn-head');
     head.type = 'button';
     head.title = '折叠/展开思考和工具调用';
-    head.setAttribute('aria-expanded', 'true');
+    head.setAttribute('aria-expanded', 'false');
     head.appendChild(el('span', 'agent-turn-caret'));
     title = el('span', 'agent-turn-title', '运行中…');
     meta = el('span', 'agent-turn-meta');
@@ -1215,7 +1235,7 @@ function agentEnsureThink(out) {
   let last = out.flow.lastElementChild;
   if (!last || !last.classList.contains('agent-think')) {
     const details = el('details', 'agent-step agent-think');
-    details.open = true;
+    details.open = false;
     const summary = el('summary', 'agent-step-head');
     summary.appendChild(el('span', 'agent-step-icon', '🧠'));
     summary.appendChild(el('span', 'agent-step-label', '思考'));
@@ -1251,7 +1271,7 @@ function agentThinkText(think) {
 
 function agentToolCard(name, args, out, status, index) {
   const details = el('details', 'agent-step agent-tool-step');
-  details.open = true;
+  details.open = false;
   const summary = el('summary', 'agent-step-head');
   const label = el('span', 'agent-step-label', '调用工具 ' + (name || ''));
   const statusEl = el('span', 'agent-step-status', status || '');
@@ -1370,6 +1390,7 @@ async function loadAgentTools(serverId) {
 }
 
 function updateAgentThinking() {
+  AGENT_CONTEXT_DATA = null;
   const wrap = $('#agentThinkingWrap');
   if (!wrap) return;
   const m = AGENT_MODELS.find(x => x.name === $('#agentModel').value);
@@ -1407,6 +1428,7 @@ function agentNewChat() {
   if (AGENT_ABORT) AGENT_ABORT.abort();
   AGENT_ABORT = null;
   AGENT_HISTORY = [];
+  AGENT_CONTEXT_DATA = null;
   $('#agentBox').innerHTML = '<div class="empty">选择支持工具调用的模型和 MCP 服务器</div>';
   $('#agentState').textContent = '';
   updateAgentContextMeter();
@@ -1419,6 +1441,7 @@ async function agentSend() {
   const server = $('#agentMcp').value;
   if (!text) return;
   if (!model) return toast('请先选择模型');
+  AGENT_CONTEXT_DATA = null;
   $('#agentInput').value = '';
   $('#agentInput').style.height = 'auto';
   AGENT_HISTORY.push({ role: 'user', content: text });
@@ -1486,6 +1509,9 @@ async function agentSend() {
         if (ev[1] === 'meta') {
           out.meta.textContent = `${data.server} · ${data.tools} 个工具`;
           $('#agentState').textContent = `${data.server} · ${data.tools} 个工具`;
+        } else if (ev[1] === 'context') {
+          AGENT_CONTEXT_DATA = data;
+          updateAgentContextMeter();
         } else if (ev[1] === 'reasoning') {
           const think = agentEnsureThink(out);
           agentThinkText(think).textContent += data.text || '';
@@ -1657,6 +1683,12 @@ function renderContextMeter(id, used, total, output, contextDefault, outputDefau
 
 function updateChatContextMeter(extra) {
   const c = selectedChatConfig($('#chatConfig').value) || {};
+  if (CHAT_CONTEXT_DATA) {
+    renderContextMeter('#chatContextMeter', CHAT_CONTEXT_DATA.used,
+                       CHAT_CONTEXT_DATA.total, CHAT_CONTEXT_DATA.output,
+                       c.context_default !== false, c.output_default !== false);
+    return;
+  }
   const total = c.context || 1000000;
   const output = c.output || 256000;
   const used = estimateMessagesTokens(HISTORY) + estimateTextTokens(extra || '');
@@ -1666,6 +1698,12 @@ function updateChatContextMeter(extra) {
 
 function updateAgentContextMeter(extra) {
   const m = AGENT_MODELS.find(x => x.name === $('#agentModel').value) || {};
+  if (AGENT_CONTEXT_DATA) {
+    renderContextMeter('#agentContextMeter', AGENT_CONTEXT_DATA.used,
+                       AGENT_CONTEXT_DATA.total, AGENT_CONTEXT_DATA.output,
+                       m.context_default !== false, m.output_default !== false);
+    return;
+  }
   const total = m.context || 1000000;
   const output = m.output || 256000;
   let toolsChars = 0;
@@ -1680,6 +1718,7 @@ function updateAgentContextMeter(extra) {
 }
 
 function updateChatBackend() {
+  CHAT_CONTEXT_DATA = null;
   const c = selectedChatConfig($('#chatConfig').value);
   const remote = !!(c && (c.backend === 'ollama' || c.backend === 'openai'));
   const think = $('#chatThinkingWrap');
@@ -2154,6 +2193,7 @@ let chatAbort = null;
 let CHAT_INFO = null;
 let SRV_STARTING = false;
 const HISTORY = [];                       // {role:'user'|'assistant', content}
+let CHAT_CONTEXT_DATA = null;
 
 function el(tag, cls, text) {
   const d = document.createElement(tag);
@@ -2234,6 +2274,7 @@ async function send() {
   const cfgName = $('#chatConfig').value;
   if (!cfgName) { toast('先选一个配置'); return; }
   const selected = CHAT_CONFIGS.find(x => x.name === cfgName) || {};
+  CHAT_CONTEXT_DATA = null;
   if (selected.backend !== 'ollama' && selected.backend !== 'openai' &&
       !(await ensurePy('chat'))) return;
   $('#chatInput').value = '';
@@ -2275,10 +2316,14 @@ async function send() {
         const data = JSON.parse(ev[2]);
         const stick = chatAtBottom();
         if (ev[1] === 'meta') { CHAT_INFO = data.info; }
+        else if (ev[1] === 'context') {
+          CHAT_CONTEXT_DATA = data;
+          updateChatContextMeter();
+        }
         else if (ev[1] === 'reasoning') {
           if (think) {
             think.box.style.display = '';
-            think.box.open = true;
+            think.box.open = false;
             think.pre.textContent += data.text || '';
             chatScrollIf(stick);
           }
@@ -2318,7 +2363,7 @@ async function send() {
 }
 
 $('#btnSend').onclick = send;
-$('#btnNewChat').onclick = () => { HISTORY.length = 0; $('#chatBox').innerHTML = ''; emptyHint(); updateChatContextMeter(); };
+$('#btnNewChat').onclick = () => { HISTORY.length = 0; CHAT_CONTEXT_DATA = null; $('#chatBox').innerHTML = ''; emptyHint(); updateChatContextMeter(); };
 $('#chatInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });

@@ -735,7 +735,8 @@ class Handler(BaseHTTPRequestHandler):
         cid = "chat-" + uuid.uuid4().hex[:20]
         emit_event(t="chat", phase="start", id=cid, model=want, user=user, turns=1)
         try:
-            conn, resp = openai_client.open_chat(api, payload, timeout=300)
+            conn, resp = openai_client.open_chat(
+                api, payload, timeout=openai_client.chat_timeout(api))
         except Exception as e:
             emit_event(t="chat", phase="error", id=cid, model=want,
                        error=f"无法连接 API：{type(e).__name__}: {e}")
@@ -852,7 +853,8 @@ class Handler(BaseHTTPRequestHandler):
         # 否则上游连接和首包延迟会把问题一起拖到最后才显示。
         emit_event(t="chat", phase="start", id=cid, model=want, user=user, turns=1)
         try:
-            conn, resp = ollama.open_chat(payload, getattr(ARGS, "ollama_url", None))
+            conn, resp = ollama.open_chat(payload, getattr(ARGS, "ollama_url", None),
+                                          timeout=600)
         except Exception as e:
             emit_event(t="chat", phase="error", id=cid, model=want,
                        error=f"无法连接 Ollama：{type(e).__name__}: {e}")

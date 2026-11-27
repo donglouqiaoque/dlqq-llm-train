@@ -362,9 +362,9 @@ def openai_tools(tools):
 
 
 def tool_result_text(result):
-    """把 MCP tools/call 结果压成一段文本。"""
+    """把 MCP tools/call 结果压成一段完整文本，不做截断。"""
     if not isinstance(result, dict):
-        return str(result)[:8000]
+        return str(result)
     parts = []
     for item in result.get("content") or []:
         if not isinstance(item, dict):
@@ -375,5 +375,4 @@ def tool_result_text(result):
             parts.append(json.dumps(item["resource"], ensure_ascii=False))
     if not parts and result.get("structuredContent") is not None:
         parts.append(json.dumps(result["structuredContent"], ensure_ascii=False))
-    text = "\n".join(parts) if parts else json.dumps(result, ensure_ascii=False)
-    return text[:8000]
+    return "\n".join(parts) if parts else json.dumps(result, ensure_ascii=False)

@@ -200,7 +200,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | POST | `/api/openai/test` | detect only the selected API (draft allowed); saved configs also update status and return model/thinking capability |
 | GET | `/api/agent/configs` | tool-capable models, MCP servers and detection results for Agent |
 | GET | `/api/agent/tools?server=<id>` | list a server's tools for Agent multi-select |
-| POST | `/api/agent/chat` | Agent tool loop; SSE: `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
+| POST | `/api/agent/chat` | Agent tool loop; SSE: `context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
 | GET | `/api/corpora` | corpus directories under `res\` (file count, size) |
 | GET | `/api/train/status` `train/log` | training state and incremental log |
 | GET | `/api/server/status` | bridge state and port |
@@ -208,7 +208,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | POST | `/api/config/save` | line-level value update (keeps comments/order), backs up first |
 | POST | `/api/env/install` | install torch / numpy / transformers into the project Python; `torch_type=cpu|gpu|xpu|auto`; `torch_version` / `numpy_version` / `transformers_version` may be empty; legacy `torch_index=cpu|cu126|cu128|xpu|auto` remains supported; output via `env-log` |
 | POST | `/api/train/start` `train/stop` | start / stop the training child |
-| POST | `/api/chat` | chat, returns SSE: `meta` / `reasoning` / `token` / `done` / `error` |
+| POST | `/api/chat` | chat, returns SSE: `context` / `meta` / `reasoning` / `token` / `done` / `error` |
 | POST | `/api/server/start` `server/stop` | start / stop the bridge child |
 | POST | `/api/sign` | `mode=compute|verify`, runs the signature tool |
 
@@ -281,6 +281,8 @@ no Authorization header, which is what local Ollama uses. Models are discovered 
 Ollama config is enriched through `/api/show` with type, tool, thinking and context metadata. Each
 model uses `api:<config-id>/<model>` as its id with kind `chat` / `embedding`; Chat/Agent use chat
 only and Service lists both. The bridge proxies `/v1/chat/completions` and `/v1/embeddings`.
+Ollama chat requests use a 600-second timeout; other providers use 300 seconds, so long local
+reasoning is not cut off as a 300-second failure.
 Thinking capability follows the optional `/models` fields: explicit levels are used as-is; old
 true/false interfaces get off/on; supported without levels gets four defaults; explicitly
 unsupported hides the control; completely unknown also gets four defaults with off selected. The
@@ -299,8 +301,11 @@ tool-capable; with no tools selected it behaves as plain chat, sends no
 `tool_calls → tools/call → tool result` until the model stops requesting tools; the fixed
 8-round cap is removed and the user can stop at any time;
 each round uses SSE, the final answer streams token by token; a turn header shows status and
-elapsed time, and clicking it collapses only reasoning/tool-call rows while answers stay visible;
-reasoning, tool calls and answers appear as flat timeline rows in the model's actual output order.
+elapsed time, reasoning / tool-call history is collapsed by default while answers stay visible;
+clicking the header expands it and each argument/result block expands independently.
+Tool arguments and results are shown in full and sent back to the model in full without hard
+truncation; only tools selected for this request are executed, and an unselected or unknown tool
+returns "tool does not exist" without calling MCP.
 Agent requests may include a `tools` name list for multi-select filtering;
 `thinking=off/low/medium/high` forwards `think` / `reasoning_effort` and shows the reasoning;
 API levels come from detection metadata, with four defaults when absent. Local character-level
