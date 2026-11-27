@@ -92,10 +92,63 @@
   .muted { color:var(--muted); font-size:12px; }
   /* ---- 对话页：DSH 风格（侧栏 + 消息流 + 底部输入） ---- */
   .chatlayout { flex:1; min-height:0; display:flex; gap:14px; }
-  .chatside { width:210px; flex:0 0 210px; display:flex; flex-direction:column; gap:10px;
-              border-right:1px solid var(--line); padding-right:14px; }
+  .chatside { width:var(--side-w,210px); flex:0 0 var(--side-w,210px); position:relative;
+              display:flex; flex-direction:column; gap:10px;
+              border-right:1px solid var(--line); padding-right:14px; min-width:0; }
   .chatside .field { display:flex; flex-direction:column; gap:4px; }
   .chatside input, .chatside select { width:100%; }
+  .chatlayout.side-collapsed .chatside { display:none; }
+  .side-rail { display:none; flex:0 0 24px; width:24px; border-right:1px solid var(--line);
+               align-items:flex-start; justify-content:center; padding-top:8px; }
+  .chatlayout.side-collapsed .side-rail { display:flex; }
+  .side-rail button { width:22px; height:28px; padding:0; border:1px solid #465a76;
+                      background:#0b1017; color:var(--muted); border-radius:6px; font-size:15px; }
+  .side-rail button:hover { color:var(--fg); border-color:#708caf; }
+  .sideresizer { position:absolute; z-index:6; top:0; bottom:0; right:-7px; width:10px;
+                 cursor:col-resize; touch-action:none; }
+  .sideresizer::after { content:""; position:absolute; left:4px; top:0; bottom:0; width:1px;
+                        background:transparent; transition:background .12s; }
+  .sideresizer:hover::after { background:var(--accent); }
+  .panehead .sidecollapse { padding:1px 7px; font-size:15px; color:var(--muted); }
+  .panehead .sidecollapse:hover { color:var(--fg); }
+  .panehead { display:flex; align-items:center; gap:6px; color:var(--muted);
+              font-size:12px; padding:2px 2px 4px; }
+  .panehead span { flex:1; }
+  .panehead button { padding:1px 7px; line-height:1.5; font-size:14px; }
+  .panehead.subhead { margin-top:4px; border-top:1px solid var(--line); padding-top:8px; }
+  .sessionlist, .workspace-list { min-height:0; overflow:auto; display:flex;
+                                  flex-direction:column; gap:3px; }
+  .sessionlist { flex:1 1 auto; }
+  .agent-side .workspace-list { flex:1 1 auto; max-height:none; }
+  .agent-side .sidemeta { margin-top:2px; flex:0 0 auto; font-size:11px; line-height:1.4; }
+  .agent-side .sessionlist { flex:1 1 auto; }
+  .agent-tree { padding-right:2px; }
+  .wsgroup { display:flex; flex-direction:column; gap:2px; margin-bottom:5px; }
+  .wsrow .caret { width:12px; color:var(--muted); font-size:11px; }
+  .wsrow .ticon { font-size:12px; filter:grayscale(.2); }
+  .wspath { color:var(--muted); font:11px Consolas, monospace; word-break:break-all;
+            line-height:1.45; padding:1px 8px 4px 27px; opacity:.82; }
+  .wscount { color:var(--muted); font-size:11px; padding:1px 8px 2px 27px; opacity:.7; }
+  .wsempty { color:var(--muted); font-size:11px; padding:2px 8px 3px 27px; opacity:.55; }
+  .sessionrow.child { margin-left:16px; padding:4px 6px 4px 9px;
+                      border-left:1px solid #2e4058; border-radius:0 7px 7px 0; }
+  .sessionrow.child .t { font-size:11.5px; }
+  .sessionrow, .wsrow { display:flex; align-items:center; gap:5px; border-radius:7px; }
+  .sessionrow { padding:5px 6px; cursor:pointer; color:var(--fg); }
+  .sessionrow:hover, .wsrow:hover { background:#17202d; }
+  .sessionrow.on, .wsrow.on { background:#1b2a3e; }
+  .sessionrow .t, .wsrow .t { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+                              white-space:nowrap; font-size:12px; }
+  .sessionrow .acts, .wsrow .acts { display:none; gap:1px; }
+  .sessionrow:hover .acts, .sessionrow.on .acts,
+  .wsrow:hover .acts, .wsrow.on .acts { display:flex; }
+  .sessionrow .acts button, .wsrow .acts button { padding:1px 5px; border:0;
+                                                  background:transparent; color:var(--muted);
+                                                  font-size:12px; }
+  .sessionrow .acts button:hover, .wsrow .acts button:hover { color:var(--fg); }
+  .wsrow { padding:4px 6px; cursor:pointer; }
+  .wsrow .t { font-weight:600; }
+  .wsnew { color:var(--muted); font-size:12px; padding:3px 6px; }
   .sidemeta { margin-top:auto; color:var(--muted); font-size:12px; line-height:1.8;
               word-break:break-all; }
   .chatmain { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
@@ -346,6 +399,31 @@
   .pypath::-webkit-scrollbar-button { display:none; width:0; height:0; }
   #toast { position:fixed; right:18px; bottom:18px; background:#1d2430; border:1px solid var(--line);
            padding:10px 14px; border-radius:8px; display:none; max-width:420px; }
+  .modal-mask { position:fixed; inset:0; z-index:1200; display:flex; align-items:center;
+                justify-content:center; padding:20px; background:rgba(2,6,12,.68);
+                backdrop-filter:blur(5px); }
+  .modal-mask[hidden] { display:none !important; }
+  .modal-card { width:min(470px,100%); background:linear-gradient(180deg,#182231,#0e141d);
+                border:1px solid #3d536f; border-radius:14px; padding:20px;
+                box-shadow:0 24px 70px rgba(0,0,0,.6); }
+  .modal-title { font-size:16px; font-weight:700; color:var(--fg); margin-bottom:6px; }
+  .modal-desc { color:var(--muted); font-size:12px; line-height:1.6; margin-bottom:13px; }
+  .modal-card input[type="text"] { width:100%; box-sizing:border-box; background:#0a1018;
+                color:var(--fg); border:1px solid #526987; border-radius:8px;
+                padding:9px 11px; font:inherit; font-size:13px; outline:none; }
+  .modal-card input[type="text"]:focus { border-color:var(--accent);
+                box-shadow:0 0 0 3px rgba(79,140,255,.2); }
+  .modal-inputrow { display:flex; gap:8px; align-items:center; }
+  .modal-inputrow input { flex:1; min-width:0; }
+  .modal-inputrow button { white-space:nowrap; }
+  .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .modal-actions button { padding:6px 16px; }
+  .modal-actions button.primary { border-color:var(--accent); }
+  .modal-card select { width:100%; box-sizing:border-box; background:#0a1018; color:var(--fg);
+                border:1px solid #526987; border-radius:8px; padding:9px 11px;
+                font:inherit; font-size:13px; outline:none; }
+  .modal-card select:focus { border-color:var(--accent);
+                box-shadow:0 0 0 3px rgba(79,140,255,.2); }
   .licenses { width:100%; border-collapse:collapse; margin-top:8px; }
   .licenses th, .licenses td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
   .licenses th { color:var(--muted); font-weight:600; font-size:12px; }
@@ -420,31 +498,45 @@
   </section>
 
   <section id="chat">
-    <div class="chatmain">
-      <div class="sessionbar">
-        <label>会话</label>
-        <select id="chatSession"></select>
-        <button id="btnChatSessionDelete">删除会话</button>
-        <span class="title" id="chatSessionTitle"></span>
-      </div>
-      <div class="msgs" id="chatBox"></div>
-      <div class="composer">
-        <textarea id="chatInput" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
-        <div class="composerbar">
-          <select id="chatConfig" title="配置文件（模型、采样参数、语料都由它决定）"></select>
-          <label class="muted" id="chatThinkingWrap" style="display:none">
-            思考 <select id="chatThinking"></select>
-          </label>
-          <button id="btnChatImage" type="button">图片</button>
-          <input id="chatImageInput" type="file" accept="image/*" multiple style="display:none">
-          <button id="btnNewChat">新对话</button>
-          <span class="muted" id="chatState"></span>
-          <div class="spacer"></div>
-          <button class="danger" id="btnChatStop" disabled>停止</button>
-          <button class="primary" id="btnSend">发送</button>
+    <div class="sessionbar" style="display:none">
+      <label>会话</label>
+      <select id="chatSession"></select>
+      <button id="btnChatSessionDelete">删除会话</button>
+      <span class="title" id="chatSessionTitle"></span>
+    </div>
+    <div class="chatlayout">
+      <aside class="chatside">
+        <div class="panehead">
+          <span>会话</span>
+          <button id="btnChatSideCollapse" class="sidecollapse" type="button" title="收起侧边栏">‹</button>
+          <button id="btnChatSideNew" title="新建会话">＋</button>
         </div>
-        <div class="imagepreviews" id="chatImages"></div>
-        <div class="ctxmeter" id="chatContextMeter"></div>
+        <div class="sessionlist" id="chatSessionList"></div>
+        <div class="sideresizer" id="chatSideResizer" title="拖动调整宽度"></div>
+      </aside>
+      <div class="side-rail" id="chatSideRail">
+        <button id="btnChatSideExpand" type="button" title="展开侧边栏">›</button>
+      </div>
+      <div class="chatmain">
+        <div class="msgs" id="chatBox"></div>
+        <div class="composer">
+          <textarea id="chatInput" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+          <div class="composerbar">
+            <select id="chatConfig" title="配置文件（模型、采样参数、语料都由它决定）"></select>
+            <label class="muted" id="chatThinkingWrap" style="display:none">
+              思考 <select id="chatThinking"></select>
+            </label>
+            <button id="btnChatImage" type="button">图片</button>
+            <input id="chatImageInput" type="file" accept="image/*" multiple style="display:none">
+            <button id="btnNewChat">新对话</button>
+            <span class="muted" id="chatState"></span>
+            <div class="spacer"></div>
+            <button class="danger" id="btnChatStop" disabled>停止</button>
+            <button class="primary" id="btnSend">发送</button>
+          </div>
+          <div class="imagepreviews" id="chatImages"></div>
+          <div class="ctxmeter" id="chatContextMeter"></div>
+        </div>
       </div>
     </div>
   </section>
@@ -621,49 +713,63 @@
   </section>
 
   <section id="agent">
-    <div class="chatmain">
-      <div class="sessionbar">
-        <label>会话</label>
-        <select id="agentSession"></select>
-        <button id="btnAgentSessionDelete">删除会话</button>
-        <span class="title" id="agentSessionTitle"></span>
-      </div>
-      <div class="msgs" id="agentBox">
-        <div class="empty">选择支持工具调用的 Ollama 模型或 API 服务，以及 MCP 服务器</div>
-      </div>
-      <div class="agent-tool-panel" id="agentToolPanel" style="display:none">
-        <div class="agent-tool-head">
-          <strong>可用工具</strong>
-          <input class="agent-tool-search" id="agentToolSearch" type="search"
-                 placeholder="搜索工具名或说明">
-          <button id="btnAgentToolsAll" title="全选当前筛选结果">全选</button>
-          <button id="btnAgentToolsNone" title="清空当前筛选结果">清空</button>
-          <span class="muted" id="agentToolsCount"></span>
+    <div class="sessionbar" style="display:none">
+      <label>会话</label>
+      <select id="agentSession"></select>
+      <button id="btnAgentSessionDelete">删除会话</button>
+      <span class="title" id="agentSessionTitle"></span>
+    </div>
+    <div class="chatlayout">
+      <aside class="chatside agent-side">
+        <div class="panehead">
+          <span>工作区</span>
+          <button id="btnAgentSideCollapse" class="sidecollapse" type="button" title="收起侧边栏">‹</button>
+          <button id="btnAgentWorkspaceAdd" title="添加工作区">＋</button>
         </div>
-        <div class="agent-tool-list" id="agentToolList"></div>
+        <div class="workspace-list agent-tree" id="agentWorkspaceList"></div>
+        <div class="sideresizer" id="agentSideResizer" title="拖动调整宽度"></div>
+      </aside>
+      <div class="side-rail" id="agentSideRail">
+        <button id="btnAgentSideExpand" type="button" title="展开侧边栏">›</button>
       </div>
-      <div class="composer">
-        <textarea id="agentInput" rows="1"
-                  placeholder="输入任务，Enter 发送，Shift+Enter 换行"></textarea>
-        <div class="composerbar agent-bar">
-          <label>模型</label>
-          <select id="agentModel"></select>
-          <label>MCP</label>
-          <select id="agentMcp"></select>
-          <label class="muted" id="agentThinkingWrap" style="display:none">
-            思考 <select id="agentThinking"></select>
-          </label>
-          <button id="btnAgentTools">工具 0</button>
-          <button id="btnAgentImage" type="button">图片</button>
-          <input id="agentImageInput" type="file" accept="image/*" multiple style="display:none">
-          <button id="btnAgentNew">新对话</button>
-          <span class="muted" id="agentState"></span>
-          <div class="spacer"></div>
-          <button id="btnAgentStop" disabled>停止</button>
-          <button class="primary" id="btnAgentSend">发送</button>
+      <div class="chatmain">
+        <div class="msgs" id="agentBox">
+          <div class="empty">选择支持工具调用的 Ollama 模型或 API 服务，以及 MCP 服务器</div>
         </div>
-        <div class="imagepreviews" id="agentImages"></div>
-        <div class="ctxmeter" id="agentContextMeter"></div>
+        <div class="agent-tool-panel" id="agentToolPanel" style="display:none">
+          <div class="agent-tool-head">
+            <strong>可用工具</strong>
+            <input class="agent-tool-search" id="agentToolSearch" type="search"
+                   placeholder="搜索工具名或说明">
+            <button id="btnAgentToolsAll" title="全选当前筛选结果">全选</button>
+            <button id="btnAgentToolsNone" title="清空当前筛选结果">清空</button>
+            <span class="muted" id="agentToolsCount"></span>
+          </div>
+          <div class="agent-tool-list" id="agentToolList"></div>
+        </div>
+        <div class="composer">
+          <textarea id="agentInput" rows="1"
+                    placeholder="输入任务，Enter 发送，Shift+Enter 换行"></textarea>
+          <div class="composerbar agent-bar">
+            <label>模型</label>
+            <select id="agentModel"></select>
+            <label>MCP</label>
+            <select id="agentMcp"></select>
+            <label class="muted" id="agentThinkingWrap" style="display:none">
+              思考 <select id="agentThinking"></select>
+            </label>
+            <button id="btnAgentTools">工具 0</button>
+            <button id="btnAgentImage" type="button">图片</button>
+            <input id="agentImageInput" type="file" accept="image/*" multiple style="display:none">
+            <button id="btnAgentNew">新对话</button>
+            <span class="muted" id="agentState"></span>
+            <div class="spacer"></div>
+            <button id="btnAgentStop" disabled>停止</button>
+            <button class="primary" id="btnAgentSend">发送</button>
+          </div>
+          <div class="imagepreviews" id="agentImages"></div>
+          <div class="ctxmeter" id="agentContextMeter"></div>
+        </div>
       </div>
     </div>
   </section>
@@ -753,6 +859,33 @@
 
 <div id="toast"></div>
 
+<div id="textModal" class="modal-mask" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="textModalTitle">
+    <div class="modal-title" id="textModalTitle">重命名</div>
+    <div class="modal-desc" id="textModalDesc"></div>
+    <div class="modal-inputrow">
+      <input type="text" id="textModalInput" autocomplete="off" spellcheck="false">
+      <button id="textModalBrowse" type="button" style="display:none">浏览…</button>
+    </div>
+    <div class="modal-actions">
+      <button id="textModalCancel" type="button">取消</button>
+      <button class="primary" id="textModalOk" type="button">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="choiceModal" class="modal-mask" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="choiceModalTitle">
+    <div class="modal-title" id="choiceModalTitle">选择</div>
+    <div class="modal-desc" id="choiceModalDesc"></div>
+    <select id="choiceModalSelect"></select>
+    <div class="modal-actions">
+      <button id="choiceModalCancel" type="button">取消</button>
+      <button class="primary" id="choiceModalOk" type="button">确定</button>
+    </div>
+  </div>
+</div>
+
 <script src="/vendor/xterm/xterm.js"></script>
 <script src="/vendor/marked/marked.umd.js"></script>
 <script src="/vendor/dompurify/purify.min.js"></script>
@@ -765,6 +898,101 @@ const api = (p, opt) => fetch(`/api/${p}${p.includes('?') ? '&' : '?'}t=${TOKEN}
 function toast(msg, ms = 3000) {
   const t = $('#toast'); t.textContent = msg; t.style.display = 'block';
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms);
+}
+
+function askChoice(opts = {}) {
+  const mask = $('#choiceModal');
+  const select = $('#choiceModalSelect');
+  if (!mask || !select || !mask.hidden) return Promise.resolve(null);
+  $('#choiceModalTitle').textContent = opts.title || '选择';
+  const desc = $('#choiceModalDesc');
+  desc.textContent = opts.message || '';
+  desc.style.display = opts.message ? '' : 'none';
+  select.innerHTML = (opts.options || []).map(o =>
+    `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+  if (opts.value != null) select.value = opts.value;
+  $('#choiceModalOk').textContent = opts.confirmText || '确定';
+  mask.hidden = false;
+  return new Promise(resolve => {
+    let done = false;
+    const finish = value => {
+      if (done) return;
+      done = true;
+      mask.hidden = true;
+      select.onkeydown = null;
+      $('#choiceModalOk').onclick = null;
+      $('#choiceModalCancel').onclick = null;
+      mask.onclick = null;
+      resolve(value);
+    };
+    $('#choiceModalOk').onclick = () => finish(select.value);
+    $('#choiceModalCancel').onclick = () => finish(null);
+    mask.onclick = e => { if (e.target === mask) finish(null); };
+    select.onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(select.value); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+    };
+    setTimeout(() => select.focus(), 0);
+  });
+}
+
+function askText(opts = {}) {
+  const mask = $('#textModal');
+  const input = $('#textModalInput');
+  if (!mask || !input || !mask.hidden) return Promise.resolve(null);
+  $('#textModalTitle').textContent = opts.title || '输入';
+  const desc = $('#textModalDesc');
+  desc.textContent = opts.message || '';
+  desc.style.display = opts.message ? '' : 'none';
+  input.value = opts.value || '';
+  input.placeholder = opts.placeholder || '';
+  $('#textModalOk').textContent = opts.confirmText || '确定';
+  const browse = $('#textModalBrowse');
+  browse.style.display = opts.browse ? '' : 'none';
+  mask.hidden = false;
+  return new Promise(resolve => {
+    let done = false;
+    const finish = value => {
+      if (done) return;
+      done = true;
+      mask.hidden = true;
+      input.onkeydown = null;
+      browse.onclick = null;
+      $('#textModalOk').onclick = null;
+      $('#textModalCancel').onclick = null;
+      mask.onclick = null;
+      resolve(value);
+    };
+    browse.onclick = async () => {
+      const old = browse.textContent;
+      browse.disabled = true;
+      browse.textContent = '选择中…';
+      try {
+        const r = await api('workspaces/pick', { method: 'POST' });
+        if (r.ok && r.path) {
+          input.value = r.path;
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        } else if (!r.ok) {
+          toast(r.error || '目录选择失败');
+        }
+      } catch (e) {
+        toast('目录选择失败');
+      } finally {
+        browse.disabled = false;
+        browse.textContent = old;
+      }
+    };
+    const submit = () => finish(input.value.trim());
+    $('#textModalOk').onclick = submit;
+    $('#textModalCancel').onclick = () => finish(null);
+    mask.onclick = e => { if (e.target === mask) finish(null); };
+    input.onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+    };
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
 }
 function esc(s) { return (s || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
@@ -890,8 +1118,12 @@ let MCP_STATUS = {};                 // 启动时/手动检测结果
 let MCP_EDIT_ID = '';
 let MCP_TOOLS = [];
 let SESSIONS = [];
+let WORKSPACES = [];
+let DEFAULT_WORKSPACE_ID = '';
+let AGENT_COLLAPSED = new Set();
 let CURRENT_CHAT_SESSION = '';
 let CURRENT_AGENT_SESSION = '';
+let CURRENT_AGENT_WORKSPACE = '';
 let SESSION_LOADING = false;
 let CHAT_IMAGES = [];
 let AGENT_IMAGES = [];
@@ -1053,6 +1285,13 @@ function mcpApplyStatus(id) {
   }
 }
 
+function newSessionId() {
+  const bytes = new Uint8Array(16);
+  if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 function fillSessionSelect(kind, preferred) {
   const sel = $('#' + kind + 'Session');
   if (!sel) return;
@@ -1064,15 +1303,141 @@ function fillSessionSelect(kind, preferred) {
   sel.value = list.some(s => s.id === current) ? current : '';
 }
 
+function renderChatSessions() {
+  const box = $('#chatSessionList');
+  if (!box) return;
+  const list = SESSIONS.filter(s => s.kind === 'chat');
+  box.innerHTML = '';
+  if (!list.length) {
+    box.innerHTML = '<div class="wsnew">暂无会话</div>';
+    return;
+  }
+  list.forEach(s => {
+    const row = el('div', 'sessionrow');
+    row.title = s.title || '新会话';
+    if (s.id === CURRENT_CHAT_SESSION) row.classList.add('on');
+    const t = el('span', 't', s.title || '新会话');
+    row.appendChild(t);
+    const acts = el('span', 'acts');
+    const ren = el('button', '', '改名');
+    ren.type = 'button';
+    ren.onclick = e => { e.stopPropagation(); renameSession(s.id); };
+    const del = el('button', '', '删除');
+    del.type = 'button';
+    del.onclick = e => { e.stopPropagation(); deleteSession(s.id); };
+    acts.appendChild(ren);
+    acts.appendChild(del);
+    row.appendChild(acts);
+    row.onclick = () => openSession('chat', s.id);
+    box.appendChild(row);
+  });
+}
+
+function renderAgentWorkspaces() {
+  const box = $('#agentWorkspaceList');
+  if (!box) return;
+  box.innerHTML = '';
+  WORKSPACES.forEach(w => {
+    const group = el('div', 'wsgroup');
+    const row = el('div', 'wsrow');
+    row.title = w.path || '';
+    const expanded = !AGENT_COLLAPSED.has(w.id);
+    if (w.id === CURRENT_AGENT_WORKSPACE) row.classList.add('on');
+    const caret = el('span', 'caret', expanded ? '▾' : '▸');
+    caret.title = expanded ? '收起会话' : '展开会话';
+    caret.onclick = e => {
+      e.stopPropagation();
+      if (expanded) AGENT_COLLAPSED.add(w.id);
+      else AGENT_COLLAPSED.delete(w.id);
+      renderAgentWorkspaces();
+    };
+    row.appendChild(caret);
+    row.appendChild(el('span', 'ticon', '📁'));
+    row.appendChild(el('span', 't', w.title || w.path || '工作区'));
+    const acts = el('span', 'acts');
+    const add = el('button', '', '＋');
+    add.type = 'button';
+    add.title = '在此工作区新建会话';
+    add.onclick = e => { e.stopPropagation(); agentNewChat(w.id); };
+    const ren = el('button', '', '改名');
+    ren.type = 'button';
+    ren.onclick = e => { e.stopPropagation(); renameWorkspace(w); };
+    const del = el('button', '', '删除');
+    del.type = 'button';
+    del.onclick = e => { e.stopPropagation(); deleteWorkspace(w); };
+    acts.appendChild(add);
+    acts.appendChild(ren);
+    acts.appendChild(del);
+    row.appendChild(acts);
+    row.onclick = () => setAgentWorkspace(w.id);
+    group.appendChild(row);
+
+    const list = SESSIONS.filter(s => s.kind === 'agent' && s.workspace_id === w.id);
+    if (expanded) {
+      if (w.id === CURRENT_AGENT_WORKSPACE) {
+        group.appendChild(el('div', 'wspath', w.path || ''));
+      }
+      if (!list.length) group.appendChild(el('div', 'wsempty', '暂无会话'));
+      list.forEach(s => {
+        const sr = el('div', 'sessionrow child');
+        sr.title = s.title || '新会话';
+        if (s.id === CURRENT_AGENT_SESSION) sr.classList.add('on');
+        sr.appendChild(el('span', 't', s.title || '新会话'));
+        const sacts = el('span', 'acts');
+        const smove = el('button', '', '移动');
+        smove.type = 'button';
+        smove.onclick = e => { e.stopPropagation(); moveSession(s); };
+        const sren = el('button', '', '改名');
+        sren.type = 'button';
+        sren.onclick = e => { e.stopPropagation(); renameSession(s.id); };
+        const sdel = el('button', '', '删除');
+        sdel.type = 'button';
+        sdel.onclick = e => { e.stopPropagation(); deleteSession(s.id); };
+        sacts.appendChild(smove);
+        sacts.appendChild(sren);
+        sacts.appendChild(sdel);
+        sr.appendChild(sacts);
+        sr.onclick = () => openSession('agent', s.id);
+        group.appendChild(sr);
+      });
+    } else if (list.length) {
+      group.appendChild(el('div', 'wscount', `${list.length} 个会话`));
+    }
+    box.appendChild(group);
+  });
+}
+
+function renderAgentSessions() {
+  renderAgentWorkspaces();
+}
+
+function renderSessionLists() {
+  renderChatSessions();
+  renderAgentWorkspaces();
+}
+
 async function loadSessions() {
   try {
     const r = await api('sessions');
     SESSIONS = r.sessions || [];
+    WORKSPACES = r.workspaces || [];
+    const def = r.workspace || {};
+    DEFAULT_WORKSPACE_ID = def.id || '';
+    if (!CURRENT_AGENT_WORKSPACE) {
+      const lastWs = r.last_agent_workspace;
+      CURRENT_AGENT_WORKSPACE = WORKSPACES.some(w => w.id === lastWs)
+        ? lastWs : (def.id || (WORKSPACES[0] || {}).id || '');
+    }
     fillSessionSelect('chat');
     fillSessionSelect('agent');
-    const last = (r.workspace && r.workspace.last_session) || {};
-    if (!CURRENT_CHAT_SESSION && last.chat) await openSession('chat', last.chat);
-    if (!CURRENT_AGENT_SESSION && last.agent) await openSession('agent', last.agent);
+    renderSessionLists();
+    if (!CURRENT_CHAT_SESSION && r.last_chat_session) {
+      await openSession('chat', r.last_chat_session);
+    }
+    const lastAgent = (r.last_agent_session || {})[CURRENT_AGENT_WORKSPACE];
+    if (!CURRENT_AGENT_SESSION && lastAgent) {
+      await openSession('agent', lastAgent);
+    }
   } catch (e) {
     /* 旧后端没有会话接口时不阻塞页面 */
   }
@@ -1082,7 +1447,7 @@ async function openSession(kind, id) {
   if (!id) return;
   if ((kind === 'chat' && chatAbort) || (kind === 'agent' && AGENT_ABORT)) {
     toast('请先停止当前生成再切换会话');
-    fillSessionSelect(kind, kind === 'chat' ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION);
+    renderSessionLists();
     return;
   }
   SESSION_LOADING = true;
@@ -1090,9 +1455,11 @@ async function openSession(kind, id) {
     const r = await api('sessions?id=' + encodeURIComponent(id));
     if (!r.ok || !r.session) return;
     const data = r.session;
+    WORKSPACES = r.workspaces || WORKSPACES;
     if (kind === 'chat') {
       CURRENT_CHAT_SESSION = data.id || '';
       HISTORY.length = 0;
+      $('#chatBox').innerHTML = '';
       (data.history || []).forEach(m => {
         if (!m || (m.role !== 'user' && m.role !== 'assistant')) return;
         HISTORY.push({ role: m.role, content: m.content || '' });
@@ -1107,6 +1474,9 @@ async function openSession(kind, id) {
       updateChatContextMeter();
     } else {
       CURRENT_AGENT_SESSION = data.id || '';
+      if (data.workspace_id && WORKSPACES.some(w => w.id === data.workspace_id)) {
+        CURRENT_AGENT_WORKSPACE = data.workspace_id;
+      }
       AGENT_HISTORY = [];
       $('#agentBox').innerHTML = '';
       (data.history || []).forEach(m => {
@@ -1116,7 +1486,9 @@ async function openSession(kind, id) {
           const out = agentMsg('assistant', '');
           const a = agentEnsureAnswer(out);
           a.raw = m.content || '';
-          a.body.textContent = a.raw;
+          a.body.dataset.raw = a.raw;
+          if (typeof renderMarkdown === 'function') renderMarkdown(a.body, a.raw);
+          else a.body.textContent = a.raw;
           out.turn.classList.remove('running');
           out.title.textContent = '已完成';
         } else {
@@ -1135,8 +1507,184 @@ async function openSession(kind, id) {
         renderAgentTools();
       }
     }
+    renderSessionLists();
   } finally {
     SESSION_LOADING = false;
+  }
+}
+
+async function setAgentWorkspace(wid) {
+  if (!wid || wid === CURRENT_AGENT_WORKSPACE) return;
+  if (AGENT_ABORT) return toast('请先停止当前生成再切换工作区');
+  CURRENT_AGENT_WORKSPACE = wid;
+  AGENT_COLLAPSED.delete(wid);
+  CURRENT_AGENT_SESSION = '';
+  fillSessionSelect('agent', '');
+  renderSessionLists();
+  const latest = SESSIONS.filter(s => s.kind === 'agent' && s.workspace_id === wid)
+    .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))[0];
+  if (latest) await openSession('agent', latest.id);
+  else agentNewChat();
+}
+
+async function addAgentWorkspace() {
+  const path = await askText({
+    title: '添加 Agent 工作区',
+    message: '输入已有绝对路径，或点击“浏览…”从本机选择目录。该工作区的会话和 MCP 工具都会使用这个目录。',
+    placeholder: '例如：E:\\projects\\my-project',
+    confirmText: '添加',
+    browse: true,
+  });
+  if (!path) return;
+  try {
+    const r = await api('workspaces', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path.trim() }),
+    });
+    if (!r.ok) return toast(r.error || '添加工作区失败');
+    WORKSPACES = r.workspaces || WORKSPACES;
+    if (r.workspace && r.workspace.id) await setAgentWorkspace(r.workspace.id);
+    else renderSessionLists();
+  } catch (e) {
+    toast('添加工作区失败');
+  }
+}
+
+async function renameWorkspace(w) {
+  const title = await askText({
+    title: '重命名工作区',
+    message: '只修改显示名称，不会移动或重命名磁盘目录。',
+    value: w.title || '',
+    placeholder: '工作区名称',
+    confirmText: '保存',
+  });
+  if (title == null) return;
+  try {
+    const r = await api('workspaces', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'rename', id: w.id, title: title.trim() }),
+    });
+    if (!r.ok) return toast(r.error || '改名失败');
+    WORKSPACES = r.workspaces || WORKSPACES;
+    renderSessionLists();
+  } catch (e) {
+    toast('改名失败');
+  }
+}
+
+async function deleteWorkspace(w) {
+  if (!confirm(`删除工作区“${w.title || w.path}”？该工作区的会话会保留但不显示。`)) return;
+  try {
+    const r = await api('workspaces', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', id: w.id }),
+    });
+    if (!r.ok) return toast('默认工作区不能删除，或删除失败');
+    WORKSPACES = r.workspaces || WORKSPACES;
+    if (CURRENT_AGENT_WORKSPACE === w.id) {
+      CURRENT_AGENT_WORKSPACE = (r.default || {}).id || (WORKSPACES[0] || {}).id || '';
+      CURRENT_AGENT_SESSION = '';
+      agentNewChat();
+    }
+    renderSessionLists();
+  } catch (e) {
+    toast('删除失败');
+  }
+}
+
+async function renameSession(id) {
+  const s = SESSIONS.find(x => x.id === id);
+  if (!s) return;
+  const title = await askText({
+    title: '重命名会话',
+    message: '给这个会话起一个容易识别的名字。',
+    value: s.title || '新会话',
+    placeholder: '会话名称',
+    confirmText: '保存',
+  });
+  if (title == null) return;
+  try {
+    const r = await api('sessions/rename', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, title: title.trim() || '新会话' }),
+    });
+    if (!r.ok) return toast(r.error || '改名失败');
+    const item = SESSIONS.find(x => x.id === id);
+    if (item) item.title = r.session.title;
+    const cur = id === CURRENT_CHAT_SESSION ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION;
+    if (cur === id) $('#' + (s.kind || 'chat') + 'SessionTitle').textContent = r.session.title;
+    fillSessionSelect('chat');
+    fillSessionSelect('agent');
+    renderSessionLists();
+  } catch (e) {
+    toast('改名失败');
+  }
+}
+
+async function moveSession(s) {
+  if (AGENT_ABORT) return toast('请先停止当前生成再移动会话');
+  if (!s || s.kind !== 'agent') return;
+  const options = WORKSPACES.map(w => ({
+    value: w.id,
+    label: (w.title || w.path || '工作区') + '  —  ' + (w.path || ''),
+  }));
+  if (!options.length) return toast('没有可用工作区');
+  const wid = await askChoice({
+    title: '更改会话工作区',
+    message: '移动后，下一次 MCP 工具调用会使用新工作区的绝对路径。',
+    options,
+    value: s.workspace_id || CURRENT_AGENT_WORKSPACE,
+    confirmText: '移动',
+  });
+  if (!wid || wid === s.workspace_id) return;
+  try {
+    const r = await api('sessions/move', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: s.id, workspace_id: wid }),
+    });
+    if (!r.ok) return toast(r.error || '移动会话失败');
+    SESSIONS = r.sessions || SESSIONS;
+    const item = SESSIONS.find(x => x.id === s.id);
+    if (item) item.workspace_id = wid;
+    AGENT_COLLAPSED.delete(wid);
+    if (CURRENT_AGENT_SESSION === s.id) {
+      CURRENT_AGENT_WORKSPACE = wid;
+    }
+    renderSessionLists();
+    toast('会话已移动');
+  } catch (e) {
+    toast('移动会话失败');
+  }
+}
+
+async function deleteSession(id) {
+  if (!id) return;
+  if (!confirm('删除这个会话？')) return;
+  try {
+    const r = await api('sessions/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    if (!r.ok) return toast('删除失败');
+    SESSIONS = r.sessions || SESSIONS.filter(s => s.id !== id);
+    const wasChat = CURRENT_CHAT_SESSION === id;
+    const wasAgent = CURRENT_AGENT_SESSION === id;
+    if (wasChat) {
+      CURRENT_CHAT_SESSION = '';
+      $('#chatSessionTitle').textContent = '';
+    }
+    if (wasAgent) {
+      CURRENT_AGENT_SESSION = '';
+      $('#agentSessionTitle').textContent = '';
+    }
+    fillSessionSelect('chat');
+    fillSessionSelect('agent');
+    renderSessionLists();
+    if (wasChat) newChatSession();
+    if (wasAgent) agentNewChat();
+    toast('会话已删除');
+  } catch (e) {
+    toast('删除失败');
   }
 }
 
@@ -1148,6 +1696,7 @@ async function saveCurrentSession(kind) {
   const body = {
     id,
     kind,
+    workspace_id: kind === 'agent' ? CURRENT_AGENT_WORKSPACE : '',
     history,
     config: kind === 'chat' ? $('#chatConfig').value : '',
     model: kind === 'agent' ? $('#agentModel').value : '',
@@ -1163,10 +1712,15 @@ async function saveCurrentSession(kind) {
     });
     if (!r.ok || !r.session) return;
     if (kind === 'chat') CURRENT_CHAT_SESSION = r.session.id;
-    else CURRENT_AGENT_SESSION = r.session.id;
+    else {
+      CURRENT_AGENT_SESSION = r.session.id;
+      if (r.session.workspace_id) CURRENT_AGENT_WORKSPACE = r.session.workspace_id;
+    }
     SESSIONS = r.sessions || SESSIONS;
+    WORKSPACES = r.workspaces || WORKSPACES;
     fillSessionSelect(kind, r.session.id);
     $('#' + kind + 'SessionTitle').textContent = r.session.title || '';
+    renderSessionLists();
   } catch (e) {
     /* 会话保存失败不阻塞对话 */
   }
@@ -1175,17 +1729,21 @@ async function saveCurrentSession(kind) {
 async function deleteCurrentSession(kind) {
   const id = kind === 'chat' ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION;
   if (!id) return toast('当前会话还没有保存');
-  if (!confirm('删除当前会话？')) return;
-  const r = await api('sessions/delete', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
-  });
-  if (!r.ok) return toast('删除失败');
-  SESSIONS = r.sessions || [];
-  if (kind === 'chat') CURRENT_CHAT_SESSION = ''; else CURRENT_AGENT_SESSION = '';
-  fillSessionSelect(kind, '');
-  $('#' + kind + 'SessionTitle').textContent = '';
-  toast('会话已删除');
+  await deleteSession(id);
+}
+
+function newChatSession() {
+  HISTORY.length = 0;
+  CHAT_CONTEXT_DATA = null;
+  CHAT_IMAGES = [];
+  renderImagePreviews('chat');
+  CURRENT_CHAT_SESSION = '';
+  $('#chatBox').innerHTML = '';
+  emptyHint();
+  fillSessionSelect('chat', '');
+  $('#chatSessionTitle').textContent = '';
+  renderChatSessions();
+  updateChatContextMeter();
 }
 
 function modelHasImages(kind) {
@@ -1958,18 +2516,22 @@ async function loadAgentConfigs() {
   await loadAgentTools($('#agentMcp').value);
 }
 
-function agentNewChat() {
+function agentNewChat(wid) {
   if (AGENT_ABORT) AGENT_ABORT.abort();
   AGENT_ABORT = null;
+  if (typeof wid === 'string' && wid) CURRENT_AGENT_WORKSPACE = wid;
+  if (!CURRENT_AGENT_WORKSPACE) CURRENT_AGENT_WORKSPACE = DEFAULT_WORKSPACE_ID;
+  if (CURRENT_AGENT_WORKSPACE) AGENT_COLLAPSED.delete(CURRENT_AGENT_WORKSPACE);
   AGENT_HISTORY = [];
   AGENT_CONTEXT_DATA = null;
   AGENT_IMAGES = [];
   renderImagePreviews('agent');
-  CURRENT_AGENT_SESSION = '';
+  CURRENT_AGENT_SESSION = newSessionId();
   fillSessionSelect('agent', '');
   $('#agentSessionTitle').textContent = '';
   $('#agentBox').innerHTML = '<div class="empty">选择支持工具调用的模型和 MCP 服务器</div>';
   $('#agentState').textContent = '';
+  renderAgentSessions();
   updateAgentContextMeter();
 }
 
@@ -1980,6 +2542,7 @@ async function agentSend() {
   const server = $('#agentMcp').value;
   if (!text && !AGENT_IMAGES.length) return;
   if (!model) return toast('请先选择模型');
+  if (!CURRENT_AGENT_SESSION) CURRENT_AGENT_SESSION = newSessionId();
   if (AGENT_IMAGES.length && !modelHasImages('agent')) {
     return toast('当前模型未声明图片输入');
   }
@@ -2018,6 +2581,8 @@ async function agentSend() {
     const resp = await fetch(`/api/agent/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, server, messages: AGENT_HISTORY,
+                             workspace_id: CURRENT_AGENT_WORKSPACE,
+                             session_id: CURRENT_AGENT_SESSION,
                              thinking: ($('#agentThinking') && $('#agentThinking').value) || 'off',
                              tools: [...AGENT_SELECTED_TOOLS] }),
       signal: AGENT_ABORT.signal,
@@ -2609,7 +3174,8 @@ $('#btnMcpSave').onclick = saveMcpConfig;
 $('#btnMcpDelete').onclick = deleteMcpConfig;
 $('#btnMcpTest').onclick = testMcpConfig;
 $('#mcpTransport').addEventListener('change', mcpTransportChanged);
-$('#btnAgentNew').onclick = agentNewChat;
+$('#btnAgentNew').onclick = () => agentNewChat();
+$('#btnAgentWorkspaceAdd').onclick = addAgentWorkspace;
 $('#btnAgentSend').onclick = agentSend;
 $('#btnAgentStop').onclick = () => { if (AGENT_ABORT) AGENT_ABORT.abort(); };
 $('#btnChatImage').onclick = () => $('#chatImageInput').click();
@@ -2962,7 +3528,8 @@ async function send() {
 }
 
 $('#btnSend').onclick = send;
-$('#btnNewChat').onclick = () => { HISTORY.length = 0; CHAT_CONTEXT_DATA = null; CHAT_IMAGES = []; renderImagePreviews('chat'); CURRENT_CHAT_SESSION = ''; $('#chatBox').innerHTML = ''; emptyHint(); fillSessionSelect('chat', ''); $('#chatSessionTitle').textContent = ''; updateChatContextMeter(); };
+$('#btnNewChat').onclick = newChatSession;
+$('#btnChatSideNew').onclick = newChatSession;
 $('#chatInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
@@ -3247,6 +3814,72 @@ async function syncState() {
     }
   }
 }
+
+const SIDE_MIN = 170;
+const SIDE_MAX = 520;
+const SIDE_DEFAULT = 210;
+
+function applySideWidth(width) {
+  const w = Math.max(SIDE_MIN, Math.min(SIDE_MAX, Math.round(width)));
+  document.documentElement.style.setProperty('--side-w', w + 'px');
+  try { localStorage.setItem('dlqq-side-width', String(w)); } catch (e) {}
+}
+
+function setSideCollapsed(kind, collapsed) {
+  const layout = $('#' + kind + ' .chatlayout');
+  if (!layout) return;
+  layout.classList.toggle('side-collapsed', collapsed);
+  try { localStorage.setItem('dlqq-side-collapsed-' + kind, collapsed ? '1' : '0'); } catch (e) {}
+}
+
+function initSidebar(kind) {
+  const cap = kind.charAt(0).toUpperCase() + kind.slice(1);
+  const section = $('#' + kind);
+  const layout = section && section.querySelector('.chatlayout');
+  const aside = section && section.querySelector('.chatside');
+  const collapse = $('#btn' + cap + 'SideCollapse');
+  const expand = $('#btn' + cap + 'SideExpand');
+  const resizer = $('#' + kind + 'SideResizer');
+  if (!layout || !aside || !collapse || !expand || !resizer) return;
+  try {
+    if (localStorage.getItem('dlqq-side-collapsed-' + kind) === '1') {
+      layout.classList.add('side-collapsed');
+    }
+  } catch (e) {}
+  collapse.onclick = () => setSideCollapsed(kind, true);
+  expand.onclick = () => setSideCollapsed(kind, false);
+  resizer.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = aside.getBoundingClientRect().width;
+    resizer.setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = ev => {
+      const maxW = Math.min(SIDE_MAX, Math.max(SIDE_MIN, window.innerWidth - 240));
+      const w = Math.max(SIDE_MIN, Math.min(maxW, startWidth + ev.clientX - startX));
+      document.documentElement.style.setProperty('--side-w', Math.round(w) + 'px');
+    };
+    const onUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      resizer.removeEventListener('pointermove', onMove);
+      applySideWidth(aside.getBoundingClientRect().width);
+    };
+    resizer.addEventListener('pointermove', onMove);
+    resizer.addEventListener('pointerup', onUp, { once: true });
+    resizer.addEventListener('pointercancel', onUp, { once: true });
+  });
+  resizer.ondblclick = () => applySideWidth(SIDE_DEFAULT);
+}
+
+try {
+  const savedWidth = parseInt(localStorage.getItem('dlqq-side-width'), 10);
+  if (savedWidth) applySideWidth(savedWidth);
+} catch (e) {}
+initSidebar('chat');
+initSidebar('agent');
 
 async function startupDetect() {
   const mask = $('#bootMask');

@@ -129,7 +129,7 @@ web/                    frontend, served by webui.py (no separate web server)
 properties/             four training configs (open-sourced, comments written for outsiders)
 model/                  local weights (`model\<name>\` standard HF directory + `checkpoint-<step>\`)
 res/                    corpora (not in git)
-.cache/                 training cache/logs/config backups/MCP and API configs, status, sessions (contents ignored; hidden on Windows)
+.cache/                 training cache/logs/config backups/MCP and API configs, status, workspace registry, sessions (contents ignored; hidden on Windows)
 THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
 
@@ -202,10 +202,15 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | POST | `/api/openai/detect` | detect `/models` for every saved API at startup; result saved to `.cache/openai_status.json` |
 | POST | `/api/openai/test` | detect only the selected API (draft allowed); saved configs also update status and return model/thinking capability |
 | POST | `/api/openai/model` | save one model's manual capability overrides (context, output, tools, input types, reasoning levels) |
-| GET | `/api/sessions` | workspace info and session list; `?id=` returns one session |
-| POST | `/api/sessions` | save a session (history, model, MCP, tools, thinking) |
+| GET | `/api/sessions` | session list; `?id=` returns one, `?kind=chat\|agent&workspace=` filters |
+| POST | `/api/sessions` | save a session (history, model, MCP, tools, thinking, Agent workspace) |
 | POST | `/api/sessions/delete` | delete a session |
-| GET | `/api/workspace` | current workspace id, title, and last sessions |
+| POST | `/api/sessions/rename` | rename a session |
+| POST | `/api/sessions/move` | move an Agent session to another workspace |
+| GET | `/api/workspaces` | Agent workspace registry (path, title, default workspace) |
+| POST | `/api/workspaces` | `action=add` adds an absolute-path workspace; `rename`; `delete` |
+| POST | `/api/workspaces/pick` | open the native directory picker and return the absolute path |
+| GET | `/api/workspace` | legacy: default workspace id, title, and last sessions |
 | POST | `/api/mcp/restart` | manually reconnect one MCP server and refresh its tools |
 | GET | `/api/agent/configs` | tool-capable models, MCP servers and detection results for Agent |
 | GET | `/api/agent/tools?server=<id>` | list a server's tools for Agent multi-select |
@@ -338,14 +343,27 @@ models do not support that control. After tool results, an internal continuation
 turn is added so Ollama/Qwen does not reject a pure tool turn with
 "no user query found in messages". Server definitions live in `.cache/mcp_servers.json`; all
 servers are detected at startup and the result is written to `.cache/mcp_status.json`.
+Each `tools/call` carries the session id, agent id, and the **session's owning workspace**
+absolute path in `params._meta` under `dsh/sessionId`, `dsh/agentId`, and `dsh/workspace`; an MCP
+server can isolate session workspaces from that path. `mcp_client.MCPClient.call_tool(name, args, meta=...)`
+puts `_meta` into the request parameters.
 
-**Sessions / workspaces / images**: sessions live in `.cache/session-<id>.json`, workspace
-metadata in `.cache/workspace.json`. Chat / Agent have a session selector and auto-save each turn;
-restoring a session restores history, model, MCP, tools, and thinking. Interrupted model/tool
-turns are not replayed. When a model's `input_modalities` contains `image`, the composer shows an
-**Images** button (at most 4 images, 6 MB each); images are sent as OpenAI-compatible `image_url`
-blocks and local character-level models reject them. Image tokens use a fixed visual estimate,
-not base64 character count.
+**Sessions / workspaces / images**: sessions live in `.cache/session-<id>.json`; the Agent
+workspace registry lives in `.cache/workspaces.json`, defaults to
+`<project root>\.runtime\default_workspace`, and can add other absolute paths. The Agent sidebar is
+a "workspace → sessions" tree; each workspace shows only its own sessions and can contain multiple
+sessions. A new Agent session uses the current workspace, or the default when none is specified.
+A session stores its `workspace_id`; MCP tool calls prefer the **session's owning workspace** path
+over the temporary page selection. Workspace paths are chosen through `/api/workspaces/pick`,
+which opens the native directory dialog. Sessions support rename, delete, and moving to another
+workspace (`/api/sessions/move`); after a move, every MCP call still reads the session's current
+`workspace_id`. Each turn auto-saves; restoring a session restores history, model, MCP, tools, and
+thinking. The Chat / Agent sidebar can be collapsed and resized by dragging its right edge; the
+state is stored in browser localStorage. Interrupted model/tool turns are not replayed. When a
+model's `input_modalities` contains `image`, the composer
+shows an **Images** button (at most 4 images, 6 MB each); images are sent as OpenAI-compatible
+`image_url` blocks and local character-level models reject them. Image tokens use a fixed visual
+estimate, not base64 character count.
 
 **Stopping**: prompts use `用户：` / `助手：`; generation stops at the next `用户：`. If the vocabulary
 lacks those markers, the session falls back to plain continuation mode.

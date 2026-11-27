@@ -85,11 +85,15 @@ class MCPClient:
         result = self._request("tools/list", {})
         return result.get("tools") or []
 
-    def call_tool(self, name, arguments):
-        return self._request("tools/call", {
+    def call_tool(self, name, arguments=None, meta=None):
+        params = {
             "name": str(name),
             "arguments": arguments or {},
-        }, timeout=max(self.timeout, 120))
+        }
+        if meta:
+            params["_meta"] = meta
+        return self._request("tools/call", params,
+                             timeout=max(self.timeout, 120))
 
     def ping(self, timeout=5):
         """轻量健康检查；HTTP 客户端没有进程可 poll 时使用。"""

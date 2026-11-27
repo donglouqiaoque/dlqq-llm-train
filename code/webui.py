@@ -52,6 +52,7 @@ ROOT = common.find_root()
 WEB_DIR = os.path.join(ROOT, "web")
 LOGO_PATH = os.path.join(ROOT, ".runtime", "logo.ico")
 CACHE_DIR = os.path.join(ROOT, ".cache")
+DEFAULT_WORKSPACE_DIR = os.path.join(ROOT, ".runtime", "default_workspace")
 LOG_DIR = os.path.join(CACHE_DIR, "train-logs")
 OLLAMA_URL_FILE = os.path.join(CACHE_DIR, "ollama_url.txt")
 MCP_CONFIG_FILE = os.path.join(CACHE_DIR, "mcp_servers.json")
@@ -70,7 +71,8 @@ MCP_RECONNECTING = set()
 OPENAI_CONFIG_FILE = os.path.join(CACHE_DIR, "openai_apis.json")
 OPENAI_STATUS_FILE = os.path.join(CACHE_DIR, "openai_status.json")
 OPENAI_MODEL_OVERRIDES_FILE = os.path.join(CACHE_DIR, "openai_model_overrides.json")
-WORKSPACE_FILE = os.path.join(CACHE_DIR, "workspace.json")
+WORKSPACE_FILE = os.path.join(CACHE_DIR, "workspaces.json")
+LEGACY_WORKSPACE_FILE = os.path.join(CACHE_DIR, "workspace.json")
 SESSIONS_DIR = CACHE_DIR
 SESSION_LOCK = threading.RLock()
 STATE = {"token": "", "started": time.time(), "train": None, "server": None}
@@ -81,36 +83,255 @@ def ensure_cache_dir():
     common.hide_dir(CACHE_DIR)
 
 
-def workspace_id():
+def _canonical_path(path):
+    return os.path.abspath(os.path.expanduser(str(path or ROOT)))
+
+
+def workspace_id(path=None):
+    return hashlib.sha256(
+        os.path.normcase(_canonical_path(path or ROOT)).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def legacy_workspace_id():
+    """旧版 workspace_id 没有 normcase；用于兼容旧会话文件。"""
     return hashlib.sha256(os.path.abspath(ROOT).encode("utf-8")).hexdigest()[:16]
 
 
 def ensure_session_dir():
     ensure_cache_dir()
-    ws = workspace_id()
-    return ws, CACHE_DIR
+    return workspace_id(), CACHE_DIR
 
 
-def load_workspace():
-    ws, d = ensure_session_dir()
-    try:
-        with open(WORKSPACE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict) and data.get("id") == ws:
-            return data
-    except (OSError, ValueError):
-        pass
-    data = {"id": ws, "title": os.path.basename(os.path.abspath(ROOT)),
-            "path": os.path.abspath(ROOT), "last_session": {}}
-    save_workspace(data)
+def _new_workspace(path, title=""):
+    canonical = _canonical_path(path)
+    now = time.time()
+    return {
+        "id": workspace_id(canonical),
+        "path": canonical,
+        "title": str(title or os.path.basename(canonical) or canonical)[:80],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _default_workspace_dir():
+    os.makedirs(DEFAULT_WORKSPACE_DIR, exist_ok=True)
+    return DEFAULT_WORKSPACE_DIR
+
+
+def _default_workspace_record():
+    return _new_workspace(_default_workspace_dir(), "默认工作区")
+
+
+def _normalize_workspace_registry(data):
+    """确保注册表始终有默认工作区；旧工程根工作区迁移到 .runtime/default_workspace。"""
+    changed = False
+    if not isinstance(data, dict):
+        data = {}
+        changed = True
+    if not isinstance(data.get("workspaces"), list):
+        data["workspaces"] = []
+        changed = True
+    workspaces = []
+    for w in data["workspaces"]:
+        if not isinstance(w, dict) or not w.get("id") or not w.get("path"):
+            changed = True
+            continue
+        workspaces.append(w)
+    data["workspaces"] = workspaces
+    default_dir = os.path.normcase(_default_workspace_dir())
+    root_dir = os.path.normcase(_canonical_path(ROOT))
+    default_ws = None
+    root_ws = None
+    for w in workspaces:
+        path = os.path.normcase(_canonical_path(w.get("path")))
+        if path == default_dir:
+            default_ws = w
+        elif path == root_dir:
+            root_ws = w
+    if default_ws is None:
+        if root_ws is not None:
+            root_ws["path"] = _canonical_path(DEFAULT_WORKSPACE_DIR)
+            root_ws["title"] = "默认工作区"
+            root_ws["updated_at"] = time.time()
+            default_ws = root_ws
+        else:
+            default_ws = _default_workspace_record()
+            data["workspaces"].append(default_ws)
+        changed = True
+    if not isinstance(data.get("last_agent_session"), dict):
+        data["last_agent_session"] = {}
+        changed = True
+    if data.get("last_agent_workspace") != default_ws.get("id"):
+        if data.get("last_agent_workspace") not in {
+                w.get("id") for w in data["workspaces"]}:
+            data["last_agent_workspace"] = default_ws.get("id")
+            changed = True
+    return data, changed
+
+
+def load_workspace_registry():
+    ensure_cache_dir()
+    data = None
+    legacy = False
+    for path in (WORKSPACE_FILE, LEGACY_WORKSPACE_FILE):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                candidate = json.load(f)
+            if isinstance(candidate, dict):
+                data = candidate
+                legacy = path == LEGACY_WORKSPACE_FILE
+                if isinstance(candidate.get("workspaces"), list):
+                    break
+                if candidate.get("path") and candidate.get("id"):
+                    break
+        except (OSError, ValueError):
+            continue
+    if isinstance(data, dict) and isinstance(data.get("workspaces"), list):
+        workspaces = [w for w in data["workspaces"]
+                      if isinstance(w, dict) and w.get("id") and w.get("path")]
+        data["workspaces"] = workspaces
+    elif isinstance(data, dict) and data.get("path") and data.get("id"):
+        # 迁移旧的单工作区 workspace.json
+        w = _new_workspace(data["path"], data.get("title") or "")
+        w["id"] = data["id"]
+        last = data.get("last_session")
+        last = last if isinstance(last, dict) else {}
+        data = {"workspaces": [w],
+                "last_chat_session": str(last.get("chat") or ""),
+                "last_agent_session": ({w["id"]: str(last["agent"])}
+                                       if last.get("agent") else {}),
+                "last_agent_workspace": w["id"]}
+    else:
+        data = {"workspaces": [], "last_chat_session": "",
+                "last_agent_session": {}, "last_agent_workspace": ""}
+    data, changed = _normalize_workspace_registry(data)
+    if changed or legacy:
+        save_workspace_registry(data)
     return data
 
 
-def save_workspace(data):
-    ensure_session_dir()
+def save_workspace_registry(data):
+    ensure_cache_dir()
     with SESSION_LOCK:
         with open(WORKSPACE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def default_workspace(registry=None):
+    reg = registry or load_workspace_registry()
+    default_dir = os.path.normcase(_canonical_path(DEFAULT_WORKSPACE_DIR))
+    for w in reg.get("workspaces") or []:
+        if os.path.normcase(_canonical_path(w.get("path"))) == default_dir:
+            return w
+    workspaces = reg.get("workspaces") or []
+    return workspaces[0] if workspaces else _default_workspace_record()
+
+
+def find_workspace(wid):
+    for w in load_workspace_registry().get("workspaces") or []:
+        if w.get("id") == wid:
+            return w
+    return None
+
+
+def add_workspace(path, title=""):
+    canonical = _canonical_path(path)
+    if not os.path.isdir(canonical):
+        raise ValueError("工作区路径不存在或不是目录")
+    if ".dlqq" in canonical.lower().split(os.sep):
+        raise ValueError("不能把 .dlqq 目录作为工作区")
+    reg = load_workspace_registry()
+    for w in reg.get("workspaces") or []:
+        if os.path.normcase(_canonical_path(w.get("path"))) == os.path.normcase(canonical):
+            return w
+    w = _new_workspace(canonical, title)
+    w["id"] = workspace_id(canonical)
+    reg.setdefault("workspaces", []).append(w)
+    save_workspace_registry(reg)
+    return w
+
+
+def pick_workspace_folder():
+    """在 WebUI 所在桌面弹出原生目录选择框，返回绝对路径。"""
+    if os.name != "nt":
+        raise ValueError("当前系统不支持原生目录选择")
+    script = (
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$d=New-Object System.Windows.Forms.FolderBrowserDialog;"
+        "$d.Description='选择 Agent 工作区目录';"
+        "$d.ShowNewFolderButton=$true;"
+        "if($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK)"
+        "{[Console]::Out.Write($d.SelectedPath)}"
+    )
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    proc = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-STA", "-Command", script],
+        capture_output=True, timeout=300, creationflags=flags)
+    if proc.returncode != 0:
+        err = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(err or "目录选择窗口打开失败")
+    path = proc.stdout.decode("utf-8", errors="replace").strip()
+    if not path:
+        return None
+    if not os.path.isdir(path):
+        raise ValueError("选择的目录不存在")
+    return _canonical_path(path)
+
+
+def rename_workspace(wid, title):
+    reg = load_workspace_registry()
+    for w in reg.get("workspaces") or []:
+        if w.get("id") == wid:
+            w["title"] = str(title or "").strip()[:80] or os.path.basename(w.get("path") or "")
+            w["updated_at"] = time.time()
+            save_workspace_registry(reg)
+            return w
+    return None
+
+
+def delete_workspace(wid):
+    reg = load_workspace_registry()
+    default = default_workspace(reg)
+    if not default or wid == default.get("id"):
+        return False
+    before = len(reg.get("workspaces") or [])
+    reg["workspaces"] = [w for w in reg.get("workspaces") or []
+                         if w.get("id") != wid]
+    if len(reg["workspaces"]) == before:
+        return False
+    reg.get("last_agent_session", {}).pop(wid, None)
+    if reg.get("last_agent_workspace") == wid:
+        reg["last_agent_workspace"] = default_workspace(reg).get("id")
+    save_workspace_registry(reg)
+    return True
+
+
+def load_workspace():
+    """兼容旧接口：返回默认工作区及最近会话。"""
+    reg = load_workspace_registry()
+    w = dict(default_workspace(reg))
+    w["last_session"] = {
+        "chat": reg.get("last_chat_session") or "",
+        "agent": (reg.get("last_agent_session") or {}).get(w.get("id")) or "",
+    }
+    return w
+
+
+def save_workspace(data):
+    """兼容旧调用；现代码统一写 workspaces 注册表。"""
+    if isinstance(data, dict) and isinstance(data.get("workspaces"), list):
+        save_workspace_registry(data)
+        return
+    if isinstance(data, dict) and data.get("path"):
+        w = _new_workspace(data["path"], data.get("title") or "")
+        w["id"] = data.get("id") or w["id"]
+        save_workspace_registry({"workspaces": [w],
+                                 "last_chat_session": "",
+                                 "last_agent_session": {},
+                                 "last_agent_workspace": w["id"]})
 
 
 def _session_id(value):
@@ -144,8 +365,11 @@ def session_title(history, body_title=""):
     return "新会话"
 
 
-def list_sessions():
+def list_sessions(kind=None, workspace=None):
     ws, d = ensure_session_dir()
+    reg = load_workspace_registry()
+    default_id = (default_workspace(reg) or {}).get("id")
+    legacy_id = legacy_workspace_id()
     out = []
     try:
         names = [n for n in os.listdir(d)
@@ -156,9 +380,16 @@ def list_sessions():
         try:
             with open(os.path.join(d, name), "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if data.get("workspace_id") != ws:
+            item_kind = data.get("kind") or "chat"
+            if kind and item_kind != kind:
                 continue
-            out.append({"id": data.get("id"), "kind": data.get("kind"),
+            if item_kind == "agent" and workspace:
+                wid = data.get("workspace_id")
+                legacy_ok = (wid == legacy_id and workspace == default_id)
+                if wid != workspace and not legacy_ok:
+                    continue
+            out.append({"id": data.get("id"), "kind": item_kind,
+                        "workspace_id": data.get("workspace_id") or "",
                         "title": data.get("title") or "新会话",
                         "updated_at": data.get("updated_at") or 0,
                         "model": data.get("model") or ""})
@@ -173,10 +404,7 @@ def load_session(sid):
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if data.get("workspace_id") != workspace_id():
-            return None
-        return data
+            return json.load(f)
     except (OSError, ValueError):
         return None
 
@@ -191,9 +419,18 @@ def save_session(body):
     now = time.time()
     if not sid:
         sid = uuid.uuid4().hex
+    if kind == "agent":
+        reg = load_workspace_registry()
+        wid = str(body.get("workspace_id") or "").strip()
+        if not wid and old:
+            wid = str(old.get("workspace_id") or "")
+        if not find_workspace(wid):
+            wid = default_workspace(reg).get("id")
+    else:
+        wid = ""
     data = {
         "id": sid,
-        "workspace_id": workspace_id(),
+        "workspace_id": wid,
         "kind": kind,
         "title": session_title(history, body.get("title")),
         "created_at": (old or {}).get("created_at") or now,
@@ -209,14 +446,17 @@ def save_session(body):
     with SESSION_LOCK:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        ws = load_workspace()
-        last = ws.get("last_session")
-        if not isinstance(last, dict):
-            last = {}
-        last[kind] = sid
-        ws["last_session"] = last
-        ws["updated_at"] = now
-        save_workspace(ws)
+        reg = load_workspace_registry()
+        if kind == "chat":
+            reg["last_chat_session"] = sid
+        else:
+            last = reg.get("last_agent_session")
+            if not isinstance(last, dict):
+                last = {}
+            last[wid] = sid
+            reg["last_agent_session"] = last
+            reg["last_agent_workspace"] = wid
+        save_workspace_registry(reg)
     return data
 
 
@@ -235,6 +475,61 @@ def delete_session(sid):
             except OSError:
                 return False
     return True
+
+
+def rename_session(sid, title):
+    path = _session_path(sid)
+    if not path or not os.path.isfile(path):
+        return None
+    with SESSION_LOCK:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return None
+        data["title"] = str(title or "").strip()[:80] or "新会话"
+        data["updated_at"] = time.time()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            return None
+    return data
+
+
+def move_session(sid, workspace_id):
+    """把 Agent 会话移动到另一个工作区；下一次 tools/call 自动使用新路径。"""
+    data = load_session(sid)
+    if not data or (data.get("kind") or "chat") != "agent":
+        return None
+    target = find_workspace(workspace_id)
+    if not target:
+        return None
+    old_wid = str(data.get("workspace_id") or "")
+    if old_wid == target["id"]:
+        return data
+    data["workspace_id"] = target["id"]
+    data["updated_at"] = time.time()
+    path = _session_path(sid)
+    with SESSION_LOCK:
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            return None
+        reg = load_workspace_registry()
+        last = reg.get("last_agent_session")
+        if not isinstance(last, dict):
+            last = {}
+        if last.get(old_wid) == sid:
+            last.pop(old_wid, None)
+        last[target["id"]] = sid
+        reg["last_agent_session"] = last
+        reg["last_agent_workspace"] = target["id"]
+        save_workspace_registry(reg)
+    return data
+
+
 
 
 def load_ollama_url():
@@ -1643,16 +1938,28 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/configs":
             self._json({"ok": True, "configs": list_configs()})
         elif path == "/api/sessions":
-            workspace = load_workspace()
+            reg = load_workspace_registry()
             sid = (qs.get("id") or [""])[0]
             if sid:
                 data = load_session(sid)
                 if not data:
                     return self._err(404, "会话不存在")
-                return self._json({"ok": True, "workspace": workspace,
+                return self._json({"ok": True, "workspaces": reg.get("workspaces") or [],
+                                   "workspace": default_workspace(reg),
                                    "session": data})
-            self._json({"ok": True, "workspace": workspace,
-                        "sessions": list_sessions()})
+            kind = (qs.get("kind") or [""])[0] or None
+            workspace = (qs.get("workspace") or [""])[0] or None
+            self._json({"ok": True, "workspaces": reg.get("workspaces") or [],
+                        "workspace": default_workspace(reg),
+                        "last_agent_workspace": reg.get("last_agent_workspace") or "",
+                        "last_agent_session": reg.get("last_agent_session") or {},
+                        "last_chat_session": reg.get("last_chat_session") or "",
+                        "sessions": list_sessions(kind, workspace)})
+        elif path == "/api/workspaces":
+            reg = load_workspace_registry()
+            self._json({"ok": True, "workspaces": reg.get("workspaces") or [],
+                        "default": default_workspace(reg),
+                        "last_agent_workspace": reg.get("last_agent_workspace") or ""})
         elif path == "/api/workspace":
             self._json({"ok": True, "workspace": load_workspace()})
         elif path == "/api/models":
@@ -1817,10 +2124,50 @@ class Handler(BaseHTTPRequestHandler):
                 if not data:
                     return self._err(400, "会话数据不合法")
                 self._json({"ok": True, "session": data,
-                            "sessions": list_sessions()})
+                            "sessions": list_sessions(),
+                            "workspaces": load_workspace_registry().get("workspaces") or []})
             elif path == "/api/sessions/delete":
                 ok = delete_session(body.get("id") or "")
                 self._json({"ok": ok, "sessions": list_sessions()})
+            elif path == "/api/sessions/rename":
+                data = rename_session(body.get("id") or "", body.get("title") or "")
+                if not data:
+                    return self._err(404, "会话不存在")
+                self._json({"ok": True, "session": data})
+            elif path == "/api/sessions/move":
+                data = move_session(body.get("id") or "", body.get("workspace_id") or "")
+                if not data:
+                    return self._err(400, "会话或工作区不存在，且只有 Agent 会话可以移动")
+                self._json({"ok": True, "session": data,
+                            "sessions": list_sessions()})
+            elif path == "/api/workspaces/pick":
+                try:
+                    picked = pick_workspace_folder()
+                except Exception as e:
+                    return self._err(500, f"{type(e).__name__}: {e}")
+                self._json({"ok": True, "path": picked or ""})
+            elif path == "/api/workspaces":
+                action = str(body.get("action") or "add").lower()
+                if action == "rename":
+                    w = rename_workspace(body.get("id") or "", body.get("title") or "")
+                    if not w:
+                        return self._err(404, "工作区不存在")
+                    reg = load_workspace_registry()
+                    return self._json({"ok": True, "workspace": w,
+                                       "workspaces": reg.get("workspaces") or []})
+                if action == "delete":
+                    ok = delete_workspace(body.get("id") or "")
+                    reg = load_workspace_registry()
+                    return self._json({"ok": ok,
+                                       "workspaces": reg.get("workspaces") or [],
+                                       "default": default_workspace(reg)})
+                try:
+                    w = add_workspace(body.get("path") or "", body.get("title") or "")
+                except ValueError as e:
+                    return self._err(400, str(e))
+                reg = load_workspace_registry()
+                self._json({"ok": True, "workspace": w,
+                            "workspaces": reg.get("workspaces") or []})
             elif path == "/api/agent/chat":
                 self._agent_chat(body)
             elif path == "/api/sign":
@@ -2481,6 +2828,21 @@ class Handler(BaseHTTPRequestHandler):
                 tools = mcp_client.openai_tools(all_tools)
                 allowed_names = {t.get("function", {}).get("name")
                                  for t in tools if isinstance(t, dict)}
+            session_id = _session_id(body.get("session_id")) or _session_id(body.get("id"))
+            session = load_session(session_id) if session_id else None
+            reg = load_workspace_registry()
+            wid = ""
+            if session:
+                # 会话一旦保存，工作区以会话归属为准，避免页面切换后把工具 cwd 带错。
+                wid = str(session.get("workspace_id") or "")
+            if not wid:
+                wid = str(body.get("workspace_id") or "").strip()
+            workspace = find_workspace(wid) or default_workspace(reg)
+            agent_meta = {
+                "dsh/sessionId": session_id or ("adhoc-" + uuid.uuid4().hex),
+                "dsh/agentId": "dlqq-llm-agent",
+                "dsh/workspace": workspace.get("path") or _default_workspace_dir(),
+            }
             self._sse("meta", {"model": model_label,
                                "server": server["name"] if server else "",
                                "tools": len(tools), "thinking": thinking,
@@ -2618,7 +2980,7 @@ class Handler(BaseHTTPRequestHandler):
                                         (entry_now and entry_now.get("state") in
                                          ("reconnecting", "failed"))):
                                     client = ensure_mcp_client(server)
-                                result = client.call_tool(name, args)
+                                result = client.call_tool(name, args, meta=agent_meta)
                                 text = mcp_client.tool_result_text(result)
                                 is_error = bool(result.get("isError")) if isinstance(result, dict) else False
                             except Exception as e:

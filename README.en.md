@@ -733,7 +733,7 @@ properties\             four training configs
 res\                    corpora (not in git)
 model\                  training output (model\<name>\ standard HF directory + checkpoint-<step>\ + .sha256)
                         config.json / model.safetensors / chars.json / meta.json
-.cache\                 training cache/logs/config backups/MCP and API configs/sessions (directory tracked, contents ignored)
+.cache\                 training cache/logs/config backups/MCP and API configs/workspace registry/sessions (directory tracked, contents ignored)
 .ai_res\                AI scratch area (not in git, never used for training)
 THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
@@ -903,6 +903,11 @@ servers stay resident. For each message:
 user message → model tool_calls → MCP tools/call → tool result → model continues
 ```
 
+Each tool call sends the current Agent workspace's **absolute path** as
+`params._meta["dsh/workspace"]`; the session and agent ids are sent as
+`dsh/sessionId` and `dsh/agentId`. An MCP server can initialize and isolate the session workspace
+from that path on its first request.
+
 Execution is shown as a flat Agent timeline rather than nested bubbles: the turn header shows
 status and elapsed time, reasoning / tool-call rows are collapsed by default while answers
 remain visible; clicking the header expands the history, and each arguments/result block expands
@@ -912,22 +917,39 @@ soon as the tool name is known, the row shows "preparing / calling"; it changes 
 full, with no hard truncation. Only tools selected for this request are executed; if the model
 calls an unselected or unknown tool, the result is "tool does not exist" and MCP is not called.
 With a thinking level selected, reasoning and tool calls are interleaved above the answer in
-their actual order. Embedding models
-and local character-level models are not listed in Agent; local character-level models do not
-support the thinking level. The bridge continues to forward client-provided `tools` to the model
-as before; it does not execute MCP tools inside the bridge.
+their actual order. Embedding models and local character-level models are not listed in Agent;
+local character-level models do not support the thinking level. The bridge continues to forward
+client-provided `tools` to the model as before; it does not execute MCP tools inside the bridge.
 
 For large files, select only the relevant file tools (for example `dlqq_create_file` /
 `dlqq_append_file` / `dlqq_overwrite_file`) and do not ask the model to emit the whole file in one
 go. A very large tool list consumes context and makes the model more likely to invent a tool name
 or produce a truncated `tool_call`.
 
-### Session persistence and images
+### Workspaces, sessions, and images
 
-Chat / Agent have a session selector at the top. Sessions are saved, switched, and deleted there;
-each turn auto-saves to `.cache/session-<id>.json`, with workspace metadata in
-`.cache/workspace.json`. Restoring a session restores its history, model, MCP server, selected
-tools, and thinking level; interrupted model/tool turns are not replayed automatically.
+Chat and Agent use a left navigation pane with conversation content on the right:
+
+- **Chat** has only a session list and no workspace concept;
+- **Agent** is a "workspace → session" tree: each workspace lists its own sessions, and one
+  workspace can contain multiple saved sessions;
+- session rows support rename, delete, and **move to another workspace**; after moving, the next
+  MCP tool call automatically uses the new workspace path;
+- the left sidebar can be collapsed and resized by dragging its right edge; width and collapsed
+  state are stored in browser local storage;
+- a new Agent session uses its owning workspace; when none is specified it uses the default
+  workspace at `<project root>\.runtime\default_workspace`.
+
+Each turn auto-saves to `.cache/session-<id>.json`, and a session stores its `workspace_id`.
+Agent workspaces live in `.cache/workspaces.json`. Hovering a workspace row lets you rename it,
+delete it, or create a session directly in it. When adding a workspace you can type an absolute
+path or press **Browse…** to open the native directory picker.
+
+Every Agent MCP tool call uses the **session's owning workspace** absolute path as
+`params._meta["dsh/workspace"]`, not the temporary page selection, so switching workspaces cannot
+send the wrong cwd. Session rows support rename and delete. Restoring a session restores its
+history, model, MCP server, selected tools, and thinking level; interrupted model/tool turns are
+not replayed automatically.
 
 When a model declares `input_modalities` containing `image`, the composer shows an **Images**
 button for up to four images of 6 MB each. Images are sent as OpenAI-compatible `image_url`

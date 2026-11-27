@@ -111,7 +111,7 @@ web/                    前端（被 webui.py 托管，不需要单独服务器�
 properties/             四个训练配置（要开源，注释写给外人看）
 model/                  本地权重（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\）
 res/                    语料目录（不进版本库）
-.cache/                 训练缓存/日志/配置备份/MCP 与 API 配置、检测结果、会话（内容忽略；Windows 下自动隐藏）
+.cache/                 训练缓存/日志/配置备份/MCP 与 API 配置、检测结果、工作区注册表、会话（内容忽略；Windows 下自动隐藏）
 THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
 
@@ -178,10 +178,15 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/openai/detect` | 启动时检测全部已保存 API 的 `/models`，结果写入 `.cache/openai_status.json` |
 | POST | `/api/openai/test` | 只检测当前选中的 API（草稿也可）；已保存配置同时更新状态并返回模型/思考能力 |
 | POST | `/api/openai/model` | 保存单个模型的手工能力覆盖（上下文、输出、工具、输入类型、思考档位） |
-| GET | `/api/sessions` | 工作区信息和会话列表；`?id=` 返回单个会话 |
-| POST | `/api/sessions` | 保存会话（历史、模型、MCP、工具、思考等级） |
+| GET | `/api/sessions` | 会话列表；`?id=` 返回单个会话，`?kind=chat\|agent&workspace=` 过滤 |
+| POST | `/api/sessions` | 保存会话（历史、模型、MCP、工具、思考等级、Agent 工作区） |
 | POST | `/api/sessions/delete` | 删除会话 |
-| GET | `/api/workspace` | 当前工作区 ID、标题和最近会话 |
+| POST | `/api/sessions/rename` | 会话改名 |
+| POST | `/api/sessions/move` | 把 Agent 会话移动到另一个工作区 |
+| GET | `/api/workspaces` | Agent 工作区注册表（路径、标题、默认工作区） |
+| POST | `/api/workspaces` | `action=add` 添加绝对路径工作区；`rename` 改名；`delete` 删除 |
+| POST | `/api/workspaces/pick` | 弹出本机原生目录选择窗口，返回绝对路径 |
+| GET | `/api/workspace` | 兼容旧接口：默认工作区 ID、标题和最近会话 |
 | POST | `/api/mcp/restart` | 手动重连指定 MCP 服务器并刷新工具列表 |
 | GET | `/api/agent/configs` | Agent 可用的工具模型 + MCP 服务器 + 检测结果 |
 | GET | `/api/agent/tools?server=<id>` | 获取某个 MCP 服务器的工具（供 Agent 多选） |
@@ -298,13 +303,23 @@ Agent 允许 `tool_use` 为 `native` 或 `unknown` 的 API 模型，只隐藏明
 工具结果之后会补一条内部续跑 user 提示，避免 Ollama/Qwen 把纯 tool 轮次判成
 “no user query found in messages”。服务器定义保存在 `.cache/mcp_servers.json`；启动时检测
 全部服务器并写入 `.cache/mcp_status.json`。
+每次 `tools/call` 会把会话 ID、Agent ID 和**会话所属工作区**的绝对路径写入 MCP
+`params._meta`，键名分别为 `dsh/sessionId`、`dsh/agentId`、`dsh/workspace`；
+服务端可据此按会话隔离工作区。`mcp_client.MCPClient.call_tool(name, args, meta=...)`
+负责把 `_meta` 放进请求参数。
 
-**会话 / 工作区 / 图片**：Session 存在 `.cache/session-<id>.json`，工作区信息存在
-`.cache/workspace.json`；Chat / Agent 顶部可切换、删除会话，每轮结束自动保存，恢复时恢复
-历史、模型、MCP、工具和思考选择。未完成的模型/工具轮次不自动重放。模型
-`input_modalities` 含 `image` 时输入栏显示【图片】，最多 4 张、单张 6MB；图片以 OpenAI 兼容
-`image_url` 内容块发送，本地字符级模型拒绝。图片 token 按固定视觉 token 估算，不按 base64
-字符数计费。
+**会话 / 工作区 / 图片**：Session 存在 `.cache/session-<id>.json`；Agent 工作区注册表存在
+`.cache/workspaces.json`，默认工作区是 `<工程根目录>\.runtime\default_workspace`，可添加其他
+绝对路径；Agent 左侧是「工作区 → 会话」树，每个工作区下只显示自己的会话，一个工作区可保存
+多个会话。新建 Agent 会话默认使用当前工作区，未指定时使用默认工作区。会话保存时记录
+`workspace_id`；Agent 调用 MCP 工具时以**会话所属工作区**的绝对路径优先，而不是页面临时选择。
+工作区路径选择通过 `/api/workspaces/pick` 调用本机原生目录窗口。会话支持改名、删除和
+移动工作区（`/api/sessions/move`），移动后每次 MCP 调用仍读取会话当前 `workspace_id`；
+每轮结束自动保存；恢复时恢复历史、模型、MCP、工具和思考选择。Chat / Agent 侧边栏支持收起，
+并可拖动右边缘调整宽度，状态保存在浏览器 localStorage。未完成的模型/工具轮次不自动重放。
+模型 `input_modalities` 含 `image` 时输入栏显示【图片】，最多 4 张、单张 6MB；图片以 OpenAI
+兼容 `image_url` 内容块发送，本地字符级模型拒绝。图片 token 按固定视觉 token 估算，不按
+base64 字符数计费。
 
 **生成停止**：提示词用 `用户：` / `助手：`；生成到下一个 `用户：` 直接截断；词表缺这两个标记时
 自动切「续写模式」。
