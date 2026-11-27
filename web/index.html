@@ -107,6 +107,9 @@
                                     border:2px solid #0a0f16; border-radius:999px; }
   .msgs::-webkit-scrollbar-thumb:hover { background:linear-gradient(180deg, #526987, #7088a5); }
   .msgs::-webkit-scrollbar-button { display:none; width:0; height:0; }
+  .sessionbar { display:flex; align-items:center; gap:6px; margin:0 0 6px; flex-wrap:wrap; }
+  .sessionbar select { max-width:280px; }
+  .sessionbar .title { color:var(--muted); font-size:11px; }
   .log { scrollbar-width:thin; scrollbar-color:#43546d transparent; }
   .log::-webkit-scrollbar { width:8px; }
   .log::-webkit-scrollbar-track { background:#0a0f16; border-radius:999px; }
@@ -134,6 +137,17 @@
   .composerbar { display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:nowrap; min-width:0; }
   .composerbar select { max-width:200px; }
   .composerbar button { padding:5px 12px; }
+  .imagepreviews { display:flex; gap:6px; flex-wrap:wrap; margin-top:5px; }
+  .imagepreviews:empty { display:none; }
+  .imagepreviews .imgthumb { position:relative; width:54px; height:54px; border-radius:7px;
+                             overflow:hidden; border:1px solid #3b4a60; background:#0b1017; }
+  .imagepreviews .imgthumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .imagepreviews .imgthumb button { position:absolute; right:2px; top:2px; width:17px; height:17px;
+                                    padding:0; line-height:15px; font-size:12px; border-radius:50%;
+                                    background:rgba(10,15,22,.8); color:#fff; border:1px solid #536987; }
+  .msg .bubble .msgimages { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .msg .bubble .msgimages img { max-width:180px; max-height:160px; border-radius:7px;
+                                border:1px solid #2b3648; }
   .ctxmeter { display:flex; align-items:center; gap:8px; min-height:16px; margin-top:3px;
               color:var(--muted); font-size:11px; }
   .ctxmeter .ctxbar { width:140px; height:4px; overflow:hidden; border-radius:999px;
@@ -268,6 +282,42 @@
   #api #apiModels::-webkit-scrollbar-track { background:#0b1017; border-radius:999px; }
   #api #apiModels::-webkit-scrollbar-thumb { background:#43546d; border-radius:999px; }
   #api #apiTestState { flex:0 0 auto; max-height:120px; }
+  #api .modelcard { border:1px solid #2b3648; border-radius:10px; background:#0d1219;
+                    padding:8px 10px; margin:0 0 8px; }
+  #api .modelcard .name { color:#cfdcff; font:12px Consolas, monospace; }
+  #api .modelcard input[type="text"] { background:#0b1017; color:var(--fg);
+                                       border:1px solid #3b4a60; border-radius:7px;
+                                       padding:5px 8px; outline:none; }
+  #api .modelcard select { background:#0b1017; color:var(--fg);
+                           border:1px solid #3b4a60; border-radius:7px; padding:5px 8px; }
+  #api .modelcard input[type="number"] { background:#0b1017; color:var(--fg);
+                                         border:1px solid #3b4a60; border-radius:7px;
+                                         padding:5px 8px; }
+  #api .reasonrow { display:flex; align-items:center; gap:7px; margin:5px 0; }
+  #api .reasonrow select { width:130px; }
+  #api .reasonrow input { flex:1 1 180px; min-width:100px; }
+  #api .reasonrow button { padding:3px 8px; }
+  /* 模型设置卡片内的下拉/输入/删除按钮统一使用可见边框 */
+  #api .modelcard select,
+  #api .modelcard input[type="text"],
+  #api .modelcard button:not(.primary):not(.danger) {
+    border:1px solid #526987;
+    background-color:#0b1017;
+  }
+  #api .modelcard select:hover,
+  #api .modelcard input[type="text"]:hover,
+  #api .modelcard button:not(.primary):not(.danger):hover {
+    border-color:#708caf;
+  }
+  #api .modelcard select:focus,
+  #api .modelcard input[type="text"]:focus,
+  #api .modelcard button:not(.primary):not(.danger):focus {
+    outline:none;
+    border-color:var(--accent);
+    box-shadow:0 0 0 2px rgba(79,140,255,.18);
+  }
+  #api .sigrow { cursor:pointer; }
+  #api .sigrow.selected { background:#162134; border-radius:6px; }
   .mcp-tools .sigrow { align-items:flex-start; }
   .mcp-tools .sigrow .name { flex:0 0 auto; max-width:55%; white-space:nowrap;
                              word-break:normal; overflow-x:auto; }
@@ -371,6 +421,12 @@
 
   <section id="chat">
     <div class="chatmain">
+      <div class="sessionbar">
+        <label>会话</label>
+        <select id="chatSession"></select>
+        <button id="btnChatSessionDelete">删除会话</button>
+        <span class="title" id="chatSessionTitle"></span>
+      </div>
       <div class="msgs" id="chatBox"></div>
       <div class="composer">
         <textarea id="chatInput" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
@@ -379,12 +435,15 @@
           <label class="muted" id="chatThinkingWrap" style="display:none">
             思考 <select id="chatThinking"></select>
           </label>
+          <button id="btnChatImage" type="button">图片</button>
+          <input id="chatImageInput" type="file" accept="image/*" multiple style="display:none">
           <button id="btnNewChat">新对话</button>
           <span class="muted" id="chatState"></span>
           <div class="spacer"></div>
           <button class="danger" id="btnChatStop" disabled>停止</button>
           <button class="primary" id="btnSend">发送</button>
         </div>
+        <div class="imagepreviews" id="chatImages"></div>
         <div class="ctxmeter" id="chatContextMeter"></div>
       </div>
     </div>
@@ -419,10 +478,46 @@
         <div class="empty">启动时自动检测，或点【检测模型】</div>
       </div>
     </div>
+    <div class="modelcard" id="apiModelEdit" style="display:none">
+      <div class="row oneline">
+        <label>模型设置</label>
+        <span class="name" id="apiModelLabel"></span>
+        <div class="spacer"></div>
+        <button id="btnApiModelReset">恢复检测值</button>
+        <button class="primary" id="btnApiModelSave">保存模型设置</button>
+      </div>
+      <div class="row">
+        <label>上下文</label>
+        <input id="apiModelContext" placeholder="留空 = 供应商默认" style="width:140px">
+        <label>最大输出</label>
+        <input id="apiModelOutput" placeholder="留空 = 供应商默认" style="width:140px">
+      </div>
+      <div class="row">
+        <label>工具</label>
+        <select id="apiModelTool" style="width:130px">
+          <option value="unknown">未知</option>
+          <option value="native">支持</option>
+          <option value="none">不支持</option>
+        </select>
+        <label>输入</label>
+        <label class="muted"><input type="checkbox" id="apiModelText"> 文本</label>
+        <label class="muted"><input type="checkbox" id="apiModelImage"> 图片</label>
+      </div>
+      <div class="row oneline">
+        <label>思考</label>
+        <label class="muted"><input type="checkbox" id="apiModelReason"> 启用推理等级</label>
+        <button id="btnApiModelAddReason">添加档位</button>
+        <span class="muted" id="apiModelReasonState"></span>
+      </div>
+      <div id="apiModelReasonRows"></div>
+      <div class="muted" style="padding:0 2px 8px">
+        档位是界面名称，API 参数值会写入 reasoning_effort。Off 不发送参数。
+      </div>
+    </div>
     <div class="muted" style="padding:0 2px 8px">
       只保存环境变量名；需要鉴权的服务在启动 WebUI 前设置进程环境，例如
       <code>set OPENAI_API_KEY=...</code>，不会写入配置文件。本地 Ollama 等无需 Key 的服务可留空。
-      模型和工具/思考能力由 /models 自动检测，不在配置里填写。
+      模型能力优先自动检测；点击模型行可手工覆盖上下文、输出、工具、输入类型和思考档位。
     </div>
     <div class="siglist" id="apiTestState"></div>
   </section>
@@ -527,6 +622,12 @@
 
   <section id="agent">
     <div class="chatmain">
+      <div class="sessionbar">
+        <label>会话</label>
+        <select id="agentSession"></select>
+        <button id="btnAgentSessionDelete">删除会话</button>
+        <span class="title" id="agentSessionTitle"></span>
+      </div>
       <div class="msgs" id="agentBox">
         <div class="empty">选择支持工具调用的 Ollama 模型或 API 服务，以及 MCP 服务器</div>
       </div>
@@ -553,12 +654,15 @@
             思考 <select id="agentThinking"></select>
           </label>
           <button id="btnAgentTools">工具 0</button>
+          <button id="btnAgentImage" type="button">图片</button>
+          <input id="agentImageInput" type="file" accept="image/*" multiple style="display:none">
           <button id="btnAgentNew">新对话</button>
           <span class="muted" id="agentState"></span>
           <div class="spacer"></div>
           <button id="btnAgentStop" disabled>停止</button>
           <button class="primary" id="btnAgentSend">发送</button>
         </div>
+        <div class="imagepreviews" id="agentImages"></div>
         <div class="ctxmeter" id="agentContextMeter"></div>
       </div>
     </div>
@@ -570,6 +674,7 @@
       <select id="mcpSelect" style="min-width:220px"></select>
       <button id="btnMcpNew">新建</button>
       <button id="btnMcpDetect">检测全部</button>
+      <button id="btnMcpRestart">重连</button>
       <button class="primary" id="btnMcpSave">保存</button>
       <button class="danger" id="btnMcpDelete">删除</button>
       <span class="muted" id="mcpState"></span>
@@ -784,8 +889,16 @@ let MCP_SERVERS = [];                // MCP 服务器配置
 let MCP_STATUS = {};                 // 启动时/手动检测结果
 let MCP_EDIT_ID = '';
 let MCP_TOOLS = [];
+let SESSIONS = [];
+let CURRENT_CHAT_SESSION = '';
+let CURRENT_AGENT_SESSION = '';
+let SESSION_LOADING = false;
+let CHAT_IMAGES = [];
+let AGENT_IMAGES = [];
 let OPENAI_APIS = [];                // OpenAI 兼容 API 配置
 let API_EDIT_ID = '';
+let API_MODEL_SELECTED = null;
+let API_MODEL_OVERRIDES = {};
 let AGENT_MODELS = [];
 let AGENT_TOOLS = [];
 let AGENT_SELECTED_TOOLS = new Set();
@@ -798,6 +911,34 @@ function cleanDesc(desc) {
   if (!d) return '';
   if (/^[=\-#*~\s]+$/.test(d)) return '';
   return d;
+}
+
+function contentParts(content) {
+  if (!Array.isArray(content)) return { text: String(content || ''), images: [] };
+  const texts = [];
+  const images = [];
+  content.forEach(part => {
+    if (!part || typeof part !== 'object') return;
+    if (part.type === 'text') texts.push(part.text || '');
+    if (part.type === 'image_url') {
+      const url = part.image_url && part.image_url.url;
+      if (url) images.push(url);
+    }
+  });
+  return { text: texts.join('\n'), images };
+}
+
+function appendMessageImages(node, images) {
+  if (!images || !images.length) return;
+  const box = el('div', 'msgimages');
+  images.forEach(url => {
+    const img = el('img');
+    img.src = url;
+    img.alt = '图片';
+    img.loading = 'lazy';
+    box.appendChild(img);
+  });
+  node.appendChild(box);
 }
 // 把下拉切到某个配置（配置决定模型、语料与采样参数，不需要别的下拉）
 function applyConfigSelection(name) {
@@ -888,21 +1029,230 @@ function mcpReadForm() {
   };
 }
 
+function mcpStatusText(st) {
+  if (!st || !st.state) return st && st.ok ? '已连接' : '未检测';
+  return { connected: '已连接', reconnecting: '重连中',
+           failed: '重连失败', stopped: '已停止' }[st.state] || st.state;
+}
+
 function mcpApplyStatus(id) {
   const st = MCP_STATUS[id] || {};
   if (st.ok) {
     MCP_TOOLS = st.tools || [];
     mcpRenderTools(MCP_TOOLS);
-    $('#mcpTestState').textContent = `已连接 · ${MCP_TOOLS.length} 个工具`;
+    $('#mcpTestState').textContent = `${mcpStatusText(st)} · ${MCP_TOOLS.length} 个工具`;
   } else if (st.error) {
     MCP_TOOLS = [];
     mcpRenderTools([]);
-    $('#mcpTestState').textContent = '失败：' + st.error;
+    $('#mcpTestState').textContent = `${mcpStatusText(st)}：${st.error}`;
   } else {
     MCP_TOOLS = [];
     mcpRenderTools([]);
-    $('#mcpTestState').textContent = '未检测';
+    const label = mcpStatusText(st);
+    $('#mcpTestState').textContent = label === '未检测' ? '未检测' : label;
   }
+}
+
+function fillSessionSelect(kind, preferred) {
+  const sel = $('#' + kind + 'Session');
+  if (!sel) return;
+  const list = SESSIONS.filter(s => s.kind === kind);
+  sel.innerHTML = '<option value="">（未保存会话）</option>' + list.map(s =>
+    `<option value="${s.id}">${esc(s.title || '新会话')}</option>`).join('');
+  const current = preferred !== undefined ? preferred
+    : (kind === 'chat' ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION);
+  sel.value = list.some(s => s.id === current) ? current : '';
+}
+
+async function loadSessions() {
+  try {
+    const r = await api('sessions');
+    SESSIONS = r.sessions || [];
+    fillSessionSelect('chat');
+    fillSessionSelect('agent');
+    const last = (r.workspace && r.workspace.last_session) || {};
+    if (!CURRENT_CHAT_SESSION && last.chat) await openSession('chat', last.chat);
+    if (!CURRENT_AGENT_SESSION && last.agent) await openSession('agent', last.agent);
+  } catch (e) {
+    /* 旧后端没有会话接口时不阻塞页面 */
+  }
+}
+
+async function openSession(kind, id) {
+  if (!id) return;
+  if ((kind === 'chat' && chatAbort) || (kind === 'agent' && AGENT_ABORT)) {
+    toast('请先停止当前生成再切换会话');
+    fillSessionSelect(kind, kind === 'chat' ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION);
+    return;
+  }
+  SESSION_LOADING = true;
+  try {
+    const r = await api('sessions?id=' + encodeURIComponent(id));
+    if (!r.ok || !r.session) return;
+    const data = r.session;
+    if (kind === 'chat') {
+      CURRENT_CHAT_SESSION = data.id || '';
+      HISTORY.length = 0;
+      (data.history || []).forEach(m => {
+        if (!m || (m.role !== 'user' && m.role !== 'assistant')) return;
+        HISTORY.push({ role: m.role, content: m.content || '' });
+        renderMsg(m.role, m.content || '');
+      });
+      fillSessionSelect('chat', data.id);
+      $('#chatSessionTitle').textContent = data.title || '';
+      if (data.config && [...$('#chatConfig').options].some(o => o.value === data.config)) {
+        $('#chatConfig').value = data.config;
+        updateChatBackend();
+      }
+      updateChatContextMeter();
+    } else {
+      CURRENT_AGENT_SESSION = data.id || '';
+      AGENT_HISTORY = [];
+      $('#agentBox').innerHTML = '';
+      (data.history || []).forEach(m => {
+        if (!m || (m.role !== 'user' && m.role !== 'assistant')) return;
+        AGENT_HISTORY.push({ role: m.role, content: m.content || '' });
+        if (m.role === 'assistant') {
+          const out = agentMsg('assistant', '');
+          const a = agentEnsureAnswer(out);
+          a.raw = m.content || '';
+          a.body.textContent = a.raw;
+          out.turn.classList.remove('running');
+          out.title.textContent = '已完成';
+        } else {
+          agentMsg('user', m.content || '');
+        }
+      });
+      fillSessionSelect('agent', data.id);
+      $('#agentSessionTitle').textContent = data.title || '';
+      if (data.model) $('#agentModel').value = data.model;
+      if (data.server) $('#agentMcp').value = data.server;
+      if (data.thinking) $('#agentThinking').value = data.thinking;
+      updateAgentThinking();
+      if (data.server) await loadAgentTools(data.server);
+      if (Array.isArray(data.tools) && data.tools.length) {
+        AGENT_SELECTED_TOOLS = new Set(data.tools);
+        renderAgentTools();
+      }
+    }
+  } finally {
+    SESSION_LOADING = false;
+  }
+}
+
+async function saveCurrentSession(kind) {
+  if (SESSION_LOADING) return;
+  const history = kind === 'chat' ? HISTORY : AGENT_HISTORY;
+  if (!history.length) return;
+  const id = kind === 'chat' ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION;
+  const body = {
+    id,
+    kind,
+    history,
+    config: kind === 'chat' ? $('#chatConfig').value : '',
+    model: kind === 'agent' ? $('#agentModel').value : '',
+    server: kind === 'agent' ? $('#agentMcp').value : '',
+    tools: kind === 'agent' ? [...AGENT_SELECTED_TOOLS] : [],
+    thinking: kind === 'agent' ? ($('#agentThinking') || {}).value || 'off'
+                               : ($('#chatThinking') || {}).value || 'off',
+  };
+  try {
+    const r = await api('sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok || !r.session) return;
+    if (kind === 'chat') CURRENT_CHAT_SESSION = r.session.id;
+    else CURRENT_AGENT_SESSION = r.session.id;
+    SESSIONS = r.sessions || SESSIONS;
+    fillSessionSelect(kind, r.session.id);
+    $('#' + kind + 'SessionTitle').textContent = r.session.title || '';
+  } catch (e) {
+    /* 会话保存失败不阻塞对话 */
+  }
+}
+
+async function deleteCurrentSession(kind) {
+  const id = kind === 'chat' ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION;
+  if (!id) return toast('当前会话还没有保存');
+  if (!confirm('删除当前会话？')) return;
+  const r = await api('sessions/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  if (!r.ok) return toast('删除失败');
+  SESSIONS = r.sessions || [];
+  if (kind === 'chat') CURRENT_CHAT_SESSION = ''; else CURRENT_AGENT_SESSION = '';
+  fillSessionSelect(kind, '');
+  $('#' + kind + 'SessionTitle').textContent = '';
+  toast('会话已删除');
+}
+
+function modelHasImages(kind) {
+  if (kind === 'chat') {
+    const c = CHAT_CONFIGS.find(x => x.name === $('#chatConfig').value) || {};
+    return (c.input_modalities || ['text']).includes('image');
+  }
+  const m = AGENT_MODELS.find(x => x.name === $('#agentModel').value) || {};
+  return (m.input_modalities || ['text']).includes('image');
+}
+
+function userMessageContent(text, kind) {
+  const images = kind === 'chat' ? CHAT_IMAGES : AGENT_IMAGES;
+  if (!images.length) return text;
+  const content = [];
+  if (text) content.push({ type: 'text', text });
+  images.forEach(url => content.push({ type: 'image_url',
+                                       image_url: { url } }));
+  return content;
+}
+
+function renderImagePreviews(kind) {
+  const box = $('#' + kind + 'Images');
+  const images = kind === 'chat' ? CHAT_IMAGES : AGENT_IMAGES;
+  box.innerHTML = '';
+  images.forEach((url, i) => {
+    const thumb = el('div', 'imgthumb');
+    const img = el('img');
+    img.src = url;
+    img.alt = '待发送图片';
+    thumb.appendChild(img);
+    const del = el('button', '', '×');
+    del.type = 'button';
+    del.title = '移除图片';
+    del.onclick = () => {
+      images.splice(i, 1);
+      renderImagePreviews(kind);
+    };
+    thumb.appendChild(del);
+    box.appendChild(thumb);
+  });
+}
+
+function addImages(kind, files) {
+  if (!modelHasImages(kind)) {
+    toast('当前模型未声明图片输入');
+    return;
+  }
+  const images = kind === 'chat' ? CHAT_IMAGES : AGENT_IMAGES;
+  [...(files || [])].slice(0, Math.max(0, 4 - images.length)).forEach(file => {
+    if (!file.type || !file.type.startsWith('image/')) return;
+    if (file.size > 6 * 1024 * 1024) {
+      toast('图片不能超过 6MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      images.push(String(reader.result || ''));
+      renderImagePreviews(kind);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function clearImages(kind) {
+  if (kind === 'chat') CHAT_IMAGES = []; else AGENT_IMAGES = [];
+  renderImagePreviews(kind);
 }
 
 function mcpFillForm(item) {
@@ -954,6 +1304,27 @@ async function detectMcpServers() {
   const cur = MCP_SERVERS.find(s => s.id === MCP_EDIT_ID) || null;
   mcpFillForm(cur);
   await loadAgentConfigs();
+}
+
+async function restartMcpServer() {
+  if (!MCP_EDIT_ID) return toast('先选择一个已保存的 MCP 服务器');
+  $('#mcpTestState').textContent = '重连中…';
+  try {
+    const r = await api('mcp/restart', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: MCP_EDIT_ID }),
+    });
+    if (!r.ok) {
+      $('#mcpTestState').textContent = '重连失败：' + (r.error || '未知错误');
+      return;
+    }
+    MCP_STATUS[MCP_EDIT_ID] = { ok: true, state: 'connected',
+                                tools: r.tools || [], error: '' };
+    mcpApplyStatus(MCP_EDIT_ID);
+    await loadAgentConfigs();
+  } catch (e) {
+    $('#mcpTestState').textContent = '重连失败：' + e.message;
+  }
 }
 
 async function saveMcpConfig() {
@@ -1028,6 +1399,10 @@ function contextLabel(n, isDefault) {
   return text + (isDefault ? '（默认）' : '');
 }
 
+function modelCapacityLabel(n, isDefault) {
+  return isDefault ? '未知（供应商默认）' : contextLabel(n, false);
+}
+
 function renderApiModels(models, ok, error) {
   const box = $('#apiModels');
   box.innerHTML = '';
@@ -1045,33 +1420,188 @@ function renderApiModels(models, ok, error) {
     const name = el('span', 'name', m.name || '');
     const tool = el('span', 'muted',
       m.kind === 'embedding' ? '类型：嵌入' :
-      ('类型：对话 · ' + (m.supports_tools ? '工具：支持' : '工具：不支持')));
+      ('类型：对话 · 工具：' + (m.tool_use === 'native' ? '支持' :
+        (m.tool_use === 'none' ? '不支持' : '未知'))));
+    const input = (m.input_modalities || ['text']).includes('image')
+      ? '输入：文本+图片' : '输入：文本';
     const think = m.thinking || {};
     let thinkText;
     if (m.kind === 'embedding') {
       thinkText = '思考：不适用';
+    } else if (m.reasoning_efforts && Object.keys(m.reasoning_efforts).length) {
+      thinkText = '思考：' + Object.keys(m.reasoning_efforts).map(thinkingLabel).join('/');
     } else if (think.supported === false) {
       thinkText = '思考：不支持';
     } else if (think.values && think.values.length) {
       thinkText = '思考：' + think.values.map(thinkingLabel).join('/');
     } else if (think.supported === true) {
-      thinkText = '思考：支持 · 关闭/低/中/高';
+      thinkText = '思考：未配置档位';
     } else {
-      thinkText = '思考：未声明 · 关闭/低/中/高';
+      thinkText = '思考：未知';
     }
     const thinkEl = el('span', 'muted', thinkText);
     const ctxEl = el('span', 'muted',
-      '上下文：' + contextLabel(m.context, m.context_default));
+      '上下文：' + modelCapacityLabel(m.context, m.context_default));
+    const outEl = el('span', 'muted',
+      '输出：' + modelCapacityLabel(m.output, m.output_default));
     row.appendChild(name);
     row.appendChild(tool);
+    row.appendChild(el('span', 'muted', input));
     row.appendChild(thinkEl);
     row.appendChild(ctxEl);
+    row.appendChild(outEl);
+    if (API_MODEL_SELECTED === m.name) row.classList.add('selected');
+    row.title = '点击编辑模型能力';
+    row.onclick = () => selectApiModel(m);
     box.appendChild(row);
   });
 }
 
+function modelEffortMap(m) {
+  if (m && m.reasoning_efforts && typeof m.reasoning_efforts === 'object') {
+    return { ...m.reasoning_efforts };
+  }
+  const info = (m && m.thinking) || {};
+  if (Array.isArray(info.values) && info.values.length) {
+    const out = {};
+    info.values.forEach(v => { out[v] = v === 'off' ? null : v; });
+    return out;
+  }
+  return null;
+}
+
+function selectApiModel(m) {
+  const card = $('#apiModelEdit');
+  const item = OPENAI_APIS.find(a => a.id === API_EDIT_ID);
+  if (API_MODEL_SELECTED === m.name && card.style.display !== 'none') {
+    API_MODEL_SELECTED = null;
+    card.style.display = 'none';
+    renderApiModels((item || {}).models || []);
+    return;
+  }
+  API_MODEL_SELECTED = m.name;
+  card.style.display = '';
+  $('#apiModelLabel').textContent = m.name;
+  const ov = (API_MODEL_OVERRIDES || {})[m.name] || {};
+  const context = ov.context != null ? ov.context : (m.context_default ? '' : m.context);
+  const output = ov.output != null ? ov.output : (m.output_default ? '' : m.output);
+  $('#apiModelContext').value = context;
+  $('#apiModelContext').placeholder = m.context_default ? '供应商默认' : contextLabel(m.context, false);
+  $('#apiModelOutput').value = output;
+  $('#apiModelOutput').placeholder = m.output_default ? '供应商默认' : contextLabel(m.output, false);
+  $('#apiModelTool').value = ov.tool_use || m.tool_use || 'unknown';
+  const inputs = ov.input_modalities || m.input_modalities || ['text'];
+  $('#apiModelText').checked = inputs.includes('text');
+  $('#apiModelImage').checked = inputs.includes('image');
+  const efforts = ov.reasoning_efforts && typeof ov.reasoning_efforts === 'object'
+    ? ov.reasoning_efforts : modelEffortMap(m);
+  $('#apiModelReason').checked = !!efforts;
+  renderReasonRows(efforts);
+  renderApiModels((OPENAI_APIS.find(a => a.id === API_EDIT_ID) || {}).models || []);
+}
+
+function reasonLevelOptions(selected) {
+  const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+  return levels.map(v => `<option value="${v}"${v === selected ? ' selected' : ''}>${v}</option>`).join('');
+}
+
+function addReasonRow(level, value) {
+  const box = $('#apiModelReasonRows');
+  const row = el('div', 'reasonrow');
+  const sel = el('select', '', '');
+  sel.innerHTML = reasonLevelOptions(level || 'low');
+  const input = el('input', '', '');
+  input.type = 'text';
+  input.placeholder = 'API 参数值';
+  input.value = value == null ? (level === 'off' ? '' : (level || 'low')) : value;
+  input.disabled = (level || 'low') === 'off';
+  sel.onchange = () => {
+    input.disabled = sel.value === 'off';
+    if (!input.value || input.value === level) input.value = sel.value === 'off' ? '' : sel.value;
+  };
+  const del = el('button', '', '删除');
+  del.onclick = () => row.remove();
+  row.appendChild(sel);
+  row.appendChild(input);
+  row.appendChild(del);
+  box.appendChild(row);
+  $('#apiModelReasonState').textContent = '已配置';
+}
+
+function renderReasonRows(efforts) {
+  const box = $('#apiModelReasonRows');
+  box.innerHTML = '';
+  if (!efforts) {
+    $('#apiModelReasonState').textContent = '未启用';
+    return;
+  }
+  Object.entries(efforts).forEach(([level, value]) => addReasonRow(level, value));
+  if (!box.children.length) addReasonRow('off', null);
+  $('#apiModelReasonState').textContent = '已启用';
+}
+
+function readReasonRows() {
+  const out = {};
+  $('#apiModelReasonRows').querySelectorAll('.reasonrow').forEach(row => {
+    const level = row.querySelector('select').value;
+    const input = row.querySelector('input');
+    if (!level) return;
+    out[level] = input.value.trim() ? input.value.trim() : null;
+  });
+  return out;
+}
+
+async function saveApiModel() {
+  if (!API_EDIT_ID || !API_MODEL_SELECTED) return toast('先选择一个模型');
+  const efforts = $('#apiModelReason').checked ? readReasonRows() : {};
+  const modalities = [];
+  if ($('#apiModelText').checked) modalities.push('text');
+  if ($('#apiModelImage').checked) modalities.push('image');
+  const override = {
+    context: $('#apiModelContext').value.trim() || null,
+    output: $('#apiModelOutput').value.trim() || null,
+    tool_use: $('#apiModelTool').value,
+    input_modalities: modalities,
+    reasoning_efforts: $('#apiModelReason').checked ? efforts : null,
+  };
+  if (!override.input_modalities.length) return toast('至少选择一种输入类型');
+  const r = await api('openai/model', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_id: API_EDIT_ID, model: API_MODEL_SELECTED, override }),
+  });
+  if (!r.ok) return toast('保存失败：' + (r.error || '未知错误'));
+  API_MODEL_OVERRIDES = (r.overrides || {});
+  const item = OPENAI_APIS.find(a => a.id === API_EDIT_ID);
+  if (item) item.models = r.models || item.models;
+  renderApiModels(item ? item.models : []);
+  await loadChatConfigs();
+  await loadAgentConfigs();
+  toast('模型设置已保存');
+}
+
+async function resetApiModel() {
+  if (!API_EDIT_ID || !API_MODEL_SELECTED) return toast('先选择一个模型');
+  const r = await api('openai/model', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_id: API_EDIT_ID, model: API_MODEL_SELECTED, override: {} }),
+  });
+  if (!r.ok) return toast('恢复失败：' + (r.error || '未知错误'));
+  API_MODEL_OVERRIDES = (r.overrides || {});
+  const item = OPENAI_APIS.find(a => a.id === API_EDIT_ID);
+  if (item) item.models = r.models || item.models;
+  const model = (item ? item.models : []).find(m => m.name === API_MODEL_SELECTED);
+  if (model) selectApiModel(model);
+  await loadChatConfigs();
+  await loadAgentConfigs();
+  toast('已恢复检测值');
+}
+
 function apiFillForm(item) {
   API_EDIT_ID = item ? (item.id || '') : '';
+  API_MODEL_SELECTED = null;
+  API_MODEL_OVERRIDES = (item && item.model_overrides) || {};
+  const card = $('#apiModelEdit');
+  if (card) card.style.display = 'none';
   $('#apiName').value = item ? (item.name || '') : '';
   $('#apiBaseURL').value = item ? (item.base_url || '') : '';
   $('#apiKeyEnv').value = item ? (item.api_key_env || '') : '';
@@ -1189,6 +1719,8 @@ async function detectCurrentApi() {
 }
 
 function agentMsg(role, text) {
+  const parts = contentParts(text);
+  text = parts.text;
   const box = $('#agentBox');
   const empty = box.querySelector('.empty');
   if (empty) empty.remove();
@@ -1203,6 +1735,7 @@ function agentMsg(role, text) {
   if (role === 'user') {
     bubble = el('div', 'bubble');
     body = el('div', 'body', text || '');
+    appendMessageImages(body, parts.images);
     bubble.appendChild(body);
     wrap.appendChild(bubble);
   } else {
@@ -1394,8 +1927,9 @@ function updateAgentThinking() {
   const wrap = $('#agentThinkingWrap');
   if (!wrap) return;
   const m = AGENT_MODELS.find(x => x.name === $('#agentModel').value);
-  const info = m && m.thinking;
-  const show = !!(info && info.supported !== false);
+  const info = m ? { ...(m.thinking || {}),
+                     reasoning_efforts: m.reasoning_efforts || null } : null;
+  const show = thinkingAvailable(info);
   wrap.style.display = show ? '' : 'none';
   if (show) fillThinkingSelect($('#agentThinking'), info);
   updateAgentContextMeter();
@@ -1429,6 +1963,11 @@ function agentNewChat() {
   AGENT_ABORT = null;
   AGENT_HISTORY = [];
   AGENT_CONTEXT_DATA = null;
+  AGENT_IMAGES = [];
+  renderImagePreviews('agent');
+  CURRENT_AGENT_SESSION = '';
+  fillSessionSelect('agent', '');
+  $('#agentSessionTitle').textContent = '';
   $('#agentBox').innerHTML = '<div class="empty">选择支持工具调用的模型和 MCP 服务器</div>';
   $('#agentState').textContent = '';
   updateAgentContextMeter();
@@ -1439,13 +1978,18 @@ async function agentSend() {
   const text = $('#agentInput').value.trim();
   const model = $('#agentModel').value;
   const server = $('#agentMcp').value;
-  if (!text) return;
+  if (!text && !AGENT_IMAGES.length) return;
   if (!model) return toast('请先选择模型');
+  if (AGENT_IMAGES.length && !modelHasImages('agent')) {
+    return toast('当前模型未声明图片输入');
+  }
   AGENT_CONTEXT_DATA = null;
   $('#agentInput').value = '';
   $('#agentInput').style.height = 'auto';
-  AGENT_HISTORY.push({ role: 'user', content: text });
-  agentMsg('user', text);
+  const userContent = userMessageContent(text, 'agent');
+  AGENT_HISTORY.push({ role: 'user', content: userContent });
+  agentMsg('user', userContent);
+  clearImages('agent');
   updateAgentContextMeter();
   const out = agentMsg('assistant', '');
   out.turn.classList.add('running');
@@ -1617,6 +2161,7 @@ async function agentSend() {
     $('#agentState').textContent = acc ? '完成' : '未完成';
     AGENT_ABORT = null;
     updateAgentContextMeter();
+    await saveCurrentSession('agent');
   }
 }
 
@@ -1629,8 +2174,15 @@ function selectedServiceConfig(name) {
 
 function thinkingLabel(value) {
   const labels = { off: '关闭', on: '开启', low: '低', medium: '中',
-                   high: '高', minimal: '最低' };
+                   high: '高', minimal: '最低', max: '最高', xhigh: '超高' };
   return labels[value] || value;
+}
+
+function thinkingAvailable(info) {
+  if (!info || info.supported === false) return false;
+  if (info.reasoning_efforts && Object.keys(info.reasoning_efforts).length) return true;
+  if (Array.isArray(info.values) && info.values.length) return true;
+  return info.supported === true;
 }
 
 function fillThinkingSelect(select, info) {
@@ -1640,8 +2192,16 @@ function fillThinkingSelect(select, info) {
     select.innerHTML = '';
     return;
   }
-  let values = Array.isArray(info.values) ? info.values.map(String) : [];
-  if (!values.length) values = ['off', 'low', 'medium', 'high'];
+  let values = info.reasoning_efforts && typeof info.reasoning_efforts === 'object'
+    ? Object.keys(info.reasoning_efforts)
+    : (Array.isArray(info.values) ? info.values.map(String) : []);
+  if (!values.length) {
+    if (info.supported === true) values = ['off', 'low', 'medium', 'high'];
+    else {
+      select.innerHTML = '';
+      return;
+    }
+  }
   values = [...new Set(values.filter(Boolean))];
   select.innerHTML = values.map(v =>
     `<option value="${v}">${thinkingLabel(v)}</option>`).join('');
@@ -1660,7 +2220,10 @@ function estimateMessagesTokens(messages) {
   let n = 0;
   (messages || []).forEach(m => {
     const c = m && m.content;
-    if (Array.isArray(c)) c.forEach(part => { n += estimateTextTokens(part.text || ''); });
+    if (Array.isArray(c)) c.forEach(part => {
+      if (part && part.type === 'image_url') n += 1200;
+      else n += estimateTextTokens((part && part.text) || '');
+    });
     else n += estimateTextTokens(c || '');
   });
   return n;
@@ -1723,8 +2286,9 @@ function updateChatBackend() {
   const remote = !!(c && (c.backend === 'ollama' || c.backend === 'openai'));
   const think = $('#chatThinkingWrap');
   if (think) {
-    const info = remote && c ? c.thinking : null;
-    const show = !!(info && info.supported !== false);
+    const info = remote && c ? { ...(c.thinking || {}),
+                                 reasoning_efforts: c.reasoning_efforts || null } : null;
+    const show = thinkingAvailable(info);
     think.style.display = show ? '' : 'none';
     if (show) fillThinkingSelect($('#chatThinking'), info);
   }
@@ -2017,12 +2581,30 @@ $('#btnApiNew').onclick = () => {
 $('#btnApiSave').onclick = saveApiConfig;
 $('#btnApiDelete').onclick = deleteApiConfig;
 $('#btnApiDetect').onclick = detectCurrentApi;
+$('#btnApiModelSave').onclick = saveApiModel;
+$('#btnApiModelReset').onclick = resetApiModel;
+$('#apiModelReason').onchange = () => {
+  if ($('#apiModelReason').checked) {
+    if (!$('#apiModelReasonRows').children.length) {
+      renderReasonRows({ off: null, low: 'low', medium: 'medium', high: 'high' });
+    }
+  } else {
+    renderReasonRows(null);
+  }
+};
+$('#btnApiModelAddReason').onclick = () => {
+  const used = [...$('#apiModelReasonRows').querySelectorAll('select')].map(s => s.value);
+  const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+  const level = levels.find(v => !used.includes(v)) || 'low';
+  addReasonRow(level, level === 'off' ? null : level);
+};
 $('#btnMcpNew').onclick = () => {
   $('#mcpSelect').value = '';
   mcpFillForm(null);
   $('#mcpState').textContent = '新配置未保存';
 };
 $('#btnMcpDetect').onclick = detectMcpServers;
+$('#btnMcpRestart').onclick = restartMcpServer;
 $('#btnMcpSave').onclick = saveMcpConfig;
 $('#btnMcpDelete').onclick = deleteMcpConfig;
 $('#btnMcpTest').onclick = testMcpConfig;
@@ -2030,6 +2612,14 @@ $('#mcpTransport').addEventListener('change', mcpTransportChanged);
 $('#btnAgentNew').onclick = agentNewChat;
 $('#btnAgentSend').onclick = agentSend;
 $('#btnAgentStop').onclick = () => { if (AGENT_ABORT) AGENT_ABORT.abort(); };
+$('#btnChatImage').onclick = () => $('#chatImageInput').click();
+$('#chatImageInput').onchange = e => { addImages('chat', e.target.files); e.target.value = ''; };
+$('#btnAgentImage').onclick = () => $('#agentImageInput').click();
+$('#agentImageInput').onchange = e => { addImages('agent', e.target.files); e.target.value = ''; };
+$('#chatSession').onchange = () => openSession('chat', $('#chatSession').value);
+$('#agentSession').onchange = () => openSession('agent', $('#agentSession').value);
+$('#btnChatSessionDelete').onclick = () => deleteCurrentSession('chat');
+$('#btnAgentSessionDelete').onclick = () => deleteCurrentSession('agent');
 $('#btnAgentTools').onclick = () => {
   const panel = $('#agentToolPanel');
   const open = panel.style.display === 'none';
@@ -2207,6 +2797,8 @@ function emptyHint() {
   }
 }
 function renderMsg(role, text) {
+  const parts = contentParts(text);
+  text = parts.text;
   const empty = $('#chatBox').querySelector('.empty');
   if (empty) empty.remove();
   const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot'));
@@ -2224,6 +2816,7 @@ function renderMsg(role, text) {
   }
   const body = el('div', 'body', text || '');
   body.dataset.raw = text || '';
+  appendMessageImages(body, parts.images);
   const meta = el('div', 'meta');
   meta.appendChild(el('span', '', new Date().toLocaleTimeString('zh-CN', { hour12: false })));
   if (role !== 'user') {
@@ -2270,7 +2863,7 @@ function promptText() {
 
 async function send() {
   const text = $('#chatInput').value.trim();
-  if (!text || chatAbort) return;
+  if ((!text && !CHAT_IMAGES.length) || chatAbort) return;
   const cfgName = $('#chatConfig').value;
   if (!cfgName) { toast('先选一个配置'); return; }
   const selected = CHAT_CONFIGS.find(x => x.name === cfgName) || {};
@@ -2279,8 +2872,13 @@ async function send() {
       !(await ensurePy('chat'))) return;
   $('#chatInput').value = '';
   $('#chatInput').style.height = 'auto';
-  HISTORY.push({ role: 'user', content: text });
-  renderMsg('user', text);
+  if (CHAT_IMAGES.length && selected.backend !== 'ollama' && selected.backend !== 'openai') {
+    return toast('本地字符级模型不支持图片');
+  }
+  const userContent = userMessageContent(text, 'chat');
+  HISTORY.push({ role: 'user', content: userContent });
+  renderMsg('user', userContent);
+  clearImages('chat');
   updateChatContextMeter();
   const { body, bubble, think } = renderMsg('assistant', '');
   bubble.classList.add('typing');
@@ -2359,11 +2957,12 @@ async function send() {
     chatAbort = null;
     $('#chatState').textContent = '';
     updateChatContextMeter();
+    await saveCurrentSession('chat');
   }
 }
 
 $('#btnSend').onclick = send;
-$('#btnNewChat').onclick = () => { HISTORY.length = 0; CHAT_CONTEXT_DATA = null; $('#chatBox').innerHTML = ''; emptyHint(); updateChatContextMeter(); };
+$('#btnNewChat').onclick = () => { HISTORY.length = 0; CHAT_CONTEXT_DATA = null; CHAT_IMAGES = []; renderImagePreviews('chat'); CURRENT_CHAT_SESSION = ''; $('#chatBox').innerHTML = ''; emptyHint(); fillSessionSelect('chat', ''); $('#chatSessionTitle').textContent = ''; updateChatContextMeter(); };
 $('#chatInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
@@ -2672,6 +3271,7 @@ async function startupDetect() {
   await loadApiConfigs();
   await loadMcpConfigs();
   await loadModels();
+  await loadSessions();
   renderSignList();           // 签名页：列出所有标准模型目录及其签名状态
   await syncState();          // 先进来同步一次：训练/服务还在跑就把按钮和状态点亮
   await backfillTrainLog();   // 再把之前的训练日志补回来

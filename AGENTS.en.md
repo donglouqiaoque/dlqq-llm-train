@@ -95,6 +95,9 @@
     time and name it from that result; never guess or estimate the filename. The user performs the
     commit and AI never runs `git add`, `commit`, or `push`; describe only this repository's changes,
     and do not put content unrelated to this repository or ignored by git into the commit message.
+21. **Commit messages describe only the change itself**: never include process notes such as
+    "git add / commit / push was not run", "the user will commit", verification or test results,
+    or tool-execution details; describe only the actual code, config and documentation changes.
 
 ## 2. Layout (current architecture)
 
@@ -126,7 +129,7 @@ web/                    frontend, served by webui.py (no separate web server)
 properties/             four training configs (open-sourced, comments written for outsiders)
 model/                  local weights (`model\<name>\` standard HF directory + `checkpoint-<step>\`)
 res/                    corpora (not in git)
-.cache/                 training cache/logs/config backups/MCP and API configs and status (contents ignored; hidden on Windows)
+.cache/                 training cache/logs/config backups/MCP and API configs, status, sessions (contents ignored; hidden on Windows)
 THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
 
@@ -198,6 +201,12 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | POST | `/api/openai/configs` | save API configs to `.cache/openai_apis.json` and detect models immediately |
 | POST | `/api/openai/detect` | detect `/models` for every saved API at startup; result saved to `.cache/openai_status.json` |
 | POST | `/api/openai/test` | detect only the selected API (draft allowed); saved configs also update status and return model/thinking capability |
+| POST | `/api/openai/model` | save one model's manual capability overrides (context, output, tools, input types, reasoning levels) |
+| GET | `/api/sessions` | workspace info and session list; `?id=` returns one session |
+| POST | `/api/sessions` | save a session (history, model, MCP, tools, thinking) |
+| POST | `/api/sessions/delete` | delete a session |
+| GET | `/api/workspace` | current workspace id, title, and last sessions |
+| POST | `/api/mcp/restart` | manually reconnect one MCP server and refresh its tools |
 | GET | `/api/agent/configs` | tool-capable models, MCP servers and detection results for Agent |
 | GET | `/api/agent/tools?server=<id>` | list a server's tools for Agent multi-select |
 | POST | `/api/agent/chat` | Agent tool loop; SSE: `context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
@@ -283,20 +292,36 @@ model uses `api:<config-id>/<model>` as its id with kind `chat` / `embedding`; C
 only and Service lists both. The bridge proxies `/v1/chat/completions` and `/v1/embeddings`.
 Ollama chat requests use a 600-second timeout; other providers use 300 seconds, so long local
 reasoning is not cut off as a 300-second failure.
-Thinking capability follows the optional `/models` fields: explicit levels are used as-is; old
-true/false interfaces get off/on; supported without levels gets four defaults; explicitly
-unsupported hides the control; completely unknown also gets four defaults with off selected. The
-context limit is read from `/models` fields such as `context_length` / `context_window` /
-`max_model_len`, falling back to 1M; API requests trim history against that context after
-reserving output space. Agent's `max_tokens` defaults to 256K (a model output field wins, bounded by
-context); it is a per-response output cap, not the context limit. Chat and Agent show an estimated
-context occupancy below the composer.
+Model capability uses automatic detection plus manual overrides:
+
+- Context and maximum output: when detection is missing the UI shows "unknown (provider default)"
+  while a conservative internal budget is used;
+- Tool capability: `tool_use` is `native` / `none` / `unknown`, never guessed from the model name;
+  Agent allows `native` and `unknown`, hiding only explicit `none`;
+- Input types: `input_modalities` contains at least `text`, optionally `image`;
+- Thinking: `reasoning_efforts` maps a level to its actual API value; `off` is `null`;
+  unknown models get no fabricated four-level list.
+
+Clicking a model row on the API tab overrides these fields in
+`.cache/openai_model_overrides.json`; later detection does not overwrite manual values. Context is
+read from `/models` fields such as `context_length` / `context_window` / `max_model_len`. API
+requests compact history after reserving output space: old history is summarized first, falling
+back to tool-group-safe trimming; `tool_calls` / `tool_result` stay paired. Agent's `max_tokens`
+defaults to 256K (a model output field wins, bounded by context); it is a per-response output cap,
+not the context limit. Chat and Agent show an estimated context occupancy below the composer;
+images use a fixed visual-token estimate rather than base64 character count.
 
 **MCP / Agent**: `mcp_client.py` uses only the standard library and supports STDIO (one JSON per
 line) and Streamable HTTP (JSON-RPC POST + Mcp-Session-Id). Configured MCP clients are created at
 WebUI startup and stay resident; a STDIO process lives as long as the WebUI, is restarted only when
-its config changes, and is closed when the WebUI exits. Agent accepts API models detected as
-tool-capable; with no tools selected it behaves as plain chat, sends no
+its config changes, and is closed when the WebUI exits. A background monitor checks STDIO every
+2 seconds and HTTP with `tools/list` every 30 seconds; after a disconnect it reconnects with a
+500 ms → 30 s exponential backoff, at most 10 consecutive attempts, resetting after a stable
+connection. Reconnection refreshes the tool list; after the attempt limit the connection is marked
+`failed` and automatic retry stops, with a manual **Reconnect** button on the MCP tab. An already
+dispatched non-idempotent tool call is never replayed automatically.
+Agent accepts API models whose `tool_use` is `native` or `unknown`, hiding only explicit `none`;
+with no tools selected it behaves as plain chat, sends no
 `tools` and executes no tool calls while MCP processes stay resident. With tools it loops over
 `tool_calls → tools/call → tool result` until the model stops requesting tools; the fixed
 8-round cap is removed and the user can stop at any time;
@@ -307,12 +332,20 @@ Tool arguments and results are shown in full and sent back to the model in full 
 truncation; only tools selected for this request are executed, and an unselected or unknown tool
 returns "tool does not exist" without calling MCP.
 Agent requests may include a `tools` name list for multi-select filtering;
-`thinking=off/low/medium/high` forwards `think` / `reasoning_effort` and shows the reasoning;
-API levels come from detection metadata, with four defaults when absent. Local character-level
+`thinking` supports `off/low/medium/high` and maps through `reasoning_efforts` to the actual API
+value; `off` sends no parameter, unknown models do not fabricate levels. Local character-level
 models do not support that control. After tool results, an internal continuation user
 turn is added so Ollama/Qwen does not reject a pure tool turn with
 "no user query found in messages". Server definitions live in `.cache/mcp_servers.json`; all
 servers are detected at startup and the result is written to `.cache/mcp_status.json`.
+
+**Sessions / workspaces / images**: sessions live in `.cache/session-<id>.json`, workspace
+metadata in `.cache/workspace.json`. Chat / Agent have a session selector and auto-save each turn;
+restoring a session restores history, model, MCP, tools, and thinking. Interrupted model/tool
+turns are not replayed. When a model's `input_modalities` contains `image`, the composer shows an
+**Images** button (at most 4 images, 6 MB each); images are sent as OpenAI-compatible `image_url`
+blocks and local character-level models reject them. Image tokens use a fixed visual estimate,
+not base64 character count.
 
 **Stopping**: prompts use `用户：` / `助手：`; generation stops at the next `用户：`. If the vocabulary
 lacks those markers, the session falls back to plain continuation mode.

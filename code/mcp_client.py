@@ -91,6 +91,11 @@ class MCPClient:
             "arguments": arguments or {},
         }, timeout=max(self.timeout, 120))
 
+    def ping(self, timeout=5):
+        """轻量健康检查；HTTP 客户端没有进程可 poll 时使用。"""
+        self._request("tools/list", {}, timeout=timeout)
+        return True
+
     def close(self):
         self._closed = True
 

@@ -658,7 +658,7 @@ properties\             四个训练配置
 res\                    语料目录（不进版本库）
 model\                  训练产物（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\ + .sha256）
                         每个目录含 config.json / model.safetensors / chars.json / meta.json
-.cache\                 训练缓存/日志/配置备份/MCP 与 API 配置（目录纳入版本控制，内容忽略）
+.cache\                 训练缓存/日志/配置备份/MCP 与 API 配置、会话（目录纳入版本控制，内容忽略）
 .ai_res\                AI 临时目录（不进版本库，不参与训练）
 THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
@@ -800,8 +800,11 @@ http://127.0.0.1:<端口>/mcp
 WebUI 启动时也会自动检测已保存的 MCP 服务器，结果保存到 `.cache\mcp_status.json`；
 MCP 页的【检测全部】可手动重新检测。已配置的 STDIO MCP 进程会随 WebUI 启动并常驻，
 不会在每次对话结束时退出；修改对应配置时重启该进程，WebUI 退出时统一销毁。
+MCP 连接带自动恢复：STDIO 进程退出或 HTTP 连接失效后按 500ms 起步、最长 30s 指数退避重连，
+默认最多连续尝试 10 次；重连期间工具保留但调用返回明确错误，重连成功后重新拉取工具列表；
+超过次数后标记失败并停止自动重连，可在 MCP 页手动【重连】。已发出的非幂等工具不会自动重放。
 
-「Agent」页只列出检测到支持工具调用的 API 模型，以及已保存的 MCP 服务器。模型、MCP 服务器、
+「Agent」页列出工具能力为“支持”或“未知”的 API 模型，以及已保存的 MCP 服务器。模型、MCP 服务器、
 【工具】多选和【思考】等级都放在聊天框上方；工具面板支持
 按工具名或说明搜索，全选/清空作用于当前筛选结果。不选任何工具时，Agent 按普通对话处理：
 不向模型传工具列表，也不执行工具调用；已启动的 MCP 服务器保持常驻。发送任务后：
@@ -823,6 +826,16 @@ embedding 模型和本地字符级模型不会出现在 Agent 模型列表中；
 `dlqq_overwrite_file`），不要让模型一次生成过长的内容；工具选得过多会占用上下文，模型也
 更容易编造不存在的工具名或生成被截断的 tool_call。
 
+### 会话保存与图片输入
+
+Chat / Agent 顶部有会话下拉，可以保存、切换和删除会话；每轮结束后自动保存到
+`.cache/session-<id>.json`，工作区信息在 `.cache/workspace.json`。恢复时会恢复历史消息、
+模型选择、MCP 服务器、工具选择和思考等级；未完成的模型/工具轮次不会自动重放。
+
+模型声明 `input_modalities` 包含 `image` 时，输入栏会出现【图片】按钮，可选择多张图片
+（单张 6MB 以内、最多 4 张）。图片以 OpenAI 兼容的 `image_url` 内容块发送；本地字符级模型
+不支持图片。旧图片在上下文压缩时按占位符或摘要处理，不重复按 base64 字符数计费。
+
 ### 接入 OpenAI 兼容 API（可选）
 
 「API」页可以保存多个 OpenAI 兼容服务配置：
@@ -833,9 +846,10 @@ Base URL（例如 https://api.openai.com/v1）
 API Key 环境变量名
 ```
 
-不再手工填写模型名，也不手工勾选工具能力。WebUI 启动时会和 Python / MCP 一样
-自动请求各服务的 `/models`，把模型列表、类型、工具和思考能力写入检测结果。`GET /models`
-不消耗生成 Token，但会产生一次 HTTP 请求和可能的速率计数。
+不再手工填写模型名；模型能力优先从 `/models` 自动检测。检测不到的上下文、最大输出、
+工具能力会显示为“未知”，不会伪装成固定值。点击 API 页的模型行可以手工覆盖上下文、
+最大输出、工具能力、输入类型和思考档位；手工值保存在 `.cache\openai_model_overrides.json`，
+后续自动检测不会覆盖。`GET /models` 不消耗生成 Token，但会产生一次 HTTP 请求和可能的速率计数。
 
 配置保存在 `.cache\openai_apis.json`；检测结果保存在 `.cache\openai_status.json`。
 **只保存环境变量名，不保存 Key 本身**；实际 Key 请在启动 WebUI 前设置到进程环境，例如：
@@ -846,17 +860,20 @@ set OPENAI_API_KEY=sk-...
 start.bat
 ```
 
-配置后，Chat 下拉会按 `DeepSeek/deepseek-flash（API）` 的形式显示每个模型；检测到支持
-工具调用的模型也会出现在 Agent。服务页会列出全部 API 模型（对话 / 嵌入），桥接服务会代理
+配置后，Chat 下拉会按 `DeepSeek/deepseek-flash（API）` 的形式显示每个模型；工具能力为
+“支持”或“未知”的模型会出现在 Agent，明确“不支持”的模型不会出现。服务页会列出全部 API
+模型（对话 / 嵌入），桥接服务会代理
 `/v1/chat/completions` 和 `/v1/embeddings`，embedding 请求会写入服务页的「向量」日志。
 API 页只有一个【检测模型】按钮，只重新请求当前选中 API 的 `/models`；启动时仍然自动检测
-全部已保存 API。模型列表会同时显示类型、工具能力、思考档位和上下文上限。
+全部已保存 API。模型列表会同时显示类型、工具能力、输入类型、思考档位和上下文上限。
 Ollama 配置的聊天请求超时为 600 秒，其他 API 供应商为 300 秒，避免本地大模型思考时间较长
 被误判为断线。
 上下文优先读取 `/models` 的 `context_length` / `context_window` / `max_model_len` /
-`top_provider.context_length` 等字段，读不到时按 1M 默认；请求历史会按检测到的上下文
-预留输出空间后裁剪。注意 Agent 的“输出达到 max_tokens 上限”是单轮输出上限，不是上下文上限。
-Chat 和 Agent 输入框下方会显示估算的上下文占用和百分比（按字符数近似），并同时显示输出上限。
+`top_provider.context_length` 等字段；读不到时内部按保守 budget 运行，但界面显示“未知（供应商默认）”。
+请求历史会按上下文预留输出空间后压缩：先摘要旧历史，失败时再退回确定性裁剪，并保持
+`tool_calls` / `tool_result` 成对。注意 Agent 的“输出达到 max_tokens 上限”是单轮输出上限，
+不是上下文上限。Chat 和 Agent 输入框下方会显示估算的上下文占用和百分比（按字符数近似，
+图片按固定视觉 token 估算），并同时显示输出上限。
 
 ---
 

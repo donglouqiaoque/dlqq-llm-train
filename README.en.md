@@ -733,7 +733,7 @@ properties\             four training configs
 res\                    corpora (not in git)
 model\                  training output (model\<name>\ standard HF directory + checkpoint-<step>\ + .sha256)
                         config.json / model.safetensors / chars.json / meta.json
-.cache\                 training cache/logs/config backups/MCP and API configs (directory tracked, contents ignored)
+.cache\                 training cache/logs/config backups/MCP and API configs/sessions (directory tracked, contents ignored)
 .ai_res\                AI scratch area (not in git, never used for training)
 THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
@@ -885,9 +885,15 @@ to verify the connection and inspect tool names. The WebUI also detects saved MC
 startup and stores the result in `.cache\mcp_status.json`; **Detect all** in the MCP tab re-runs it.
 Configured STDIO MCP processes start with the WebUI and stay resident instead of exiting after each
 conversation; a config change restarts that process, and WebUI exit closes them all.
+MCP connections recover automatically: after a STDIO process exit or an HTTP connection loss,
+the WebUI reconnects with a 500 ms initial delay and 30 s maximum exponential backoff, at most
+10 consecutive attempts. During an outage tools stay listed but calls return a clear error;
+after reconnecting the tool list is fetched again. After the attempt limit the connection is
+marked failed and automatic retry stops; use **Reconnect** on the MCP tab to retry manually.
+Non-idempotent tool calls that were already dispatched are never replayed automatically.
 
-The **Agent** tab only lists API models detected as tool-capable and saved MCP servers. Model,
-MCP server, the **Tools** multi-select and
+The **Agent** tab only lists API models whose tool capability is not explicitly unsupported, plus
+saved MCP servers. Model, MCP server, the **Tools** multi-select and
 **Thinking** level live above the composer. The tool panel can search by tool name or
 description; Select all / Clear apply to the current filter results. With no tools selected,
 Agent behaves as plain chat: no tool list is sent and no tool call is executed; running MCP
@@ -916,6 +922,18 @@ For large files, select only the relevant file tools (for example `dlqq_create_f
 go. A very large tool list consumes context and makes the model more likely to invent a tool name
 or produce a truncated `tool_call`.
 
+### Session persistence and images
+
+Chat / Agent have a session selector at the top. Sessions are saved, switched, and deleted there;
+each turn auto-saves to `.cache/session-<id>.json`, with workspace metadata in
+`.cache/workspace.json`. Restoring a session restores its history, model, MCP server, selected
+tools, and thinking level; interrupted model/tool turns are not replayed automatically.
+
+When a model declares `input_modalities` containing `image`, the composer shows an **Images**
+button for up to four images of 6 MB each. Images are sent as OpenAI-compatible `image_url`
+content blocks; local character-level models reject images. Old images are represented by
+placeholders or summaries during context compaction and are not charged again as base64 text.
+
 ### Connect an OpenAI-compatible API (optional)
 
 The **API** tab stores multiple OpenAI-compatible service definitions:
@@ -926,10 +944,12 @@ Base URL (for example https://api.openai.com/v1)
 API Key environment variable name
 ```
 
-Model names are no longer entered manually, and tool support is no longer a manual checkbox. At
-startup the WebUI probes each service's `/models` just like Python / MCP detection, then
-stores the model list, type, tool and thinking capability. `GET /models` does not consume
-completion tokens, but it is still an HTTP request and may count toward rate limits.
+Model names are no longer entered manually; capabilities are detected from `/models` first.
+Unknown context, output, and tool support are shown as **unknown**, not as fixed values. Click a
+model row on the API tab to override its context, maximum output, tool capability, input types,
+and reasoning levels; overrides are stored in `.cache/openai_model_overrides.json` and are not
+overwritten by later detection. `GET /models` does not consume completion tokens, but it is still
+an HTTP request and may count toward rate limits.
 
 Definitions live in `.cache\openai_apis.json`; detection results live in
 `.cache\openai_status.json`. **Only the environment variable name is stored, not the Key.** Set the
@@ -941,18 +961,22 @@ set OPENAI_API_KEY=sk-...
 start.bat
 ```
 
-Configured services appear in Chat as `DeepSeek/deepseek-flash (API)`; models detected as
-tool-capable also appear in Agent. The Service page lists every API model (chat / embedding), and
-the bridge proxies `/v1/chat/completions` and `/v1/embeddings`; embedding requests are written to
-the Service page's Vectors log. **Detect models** in the API tab only re-requests the selected
-API's `/models`; startup still detects every saved API. The model list shows type, tool support,
-thinking support, levels and the context limit. Ollama chat requests use a 600-second timeout while
-other providers use 300 seconds. Context is read from `/models` fields such as
-`context_length`, `context_window`, `max_model_len` and `top_provider.context_length`, falling
-back to 1M; request history is trimmed against the detected context after reserving output space.
-Note that Agent's "max_tokens output limit" error is the per-response output cap, not the context
-window. Chat and Agent show an estimated context occupancy and percentage below the composer
-(character-based approximation), together with the output cap.
+Configured services appear in Chat as `DeepSeek/deepseek-flash (API)`; models whose tool capability
+is supported or unknown appear in Agent, while explicitly unsupported models do not. The Service
+page lists every API model (chat / embedding), and the bridge proxies `/v1/chat/completions` and
+`/v1/embeddings`; embedding requests are written to the Service page's Vectors log.
+**Detect models** in the API tab only re-requests the selected API's `/models`; startup still
+detects every saved API. The model list shows type, tool support, input types, reasoning levels,
+and the context limit. Ollama chat requests use a 600-second timeout while other providers use
+300 seconds. Context is read from `/models` fields such as `context_length`, `context_window`,
+`max_model_len` and `top_provider.context_length`; when unavailable the UI shows
+`unknown (provider default)` while a conservative internal budget is used. Request history is
+compacted against the context after reserving output space: old history is summarized first and
+falls back to deterministic trimming, keeping `tool_calls` / `tool_result` paired. Note that
+Agent's "max_tokens output limit" error is the per-response output cap, not the context window.
+Chat and Agent show an estimated context occupancy and percentage below the composer
+(character-based approximation; images use a fixed visual-token estimate), together with the
+output cap.
 
 ---
 

@@ -19,6 +19,7 @@ import atexit
 import codecs
 import concurrent.futures
 import ctypes
+import hashlib
 import json
 import os
 import queue
@@ -30,6 +31,7 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 import urllib.error
 import urllib.request
 import webbrowser
@@ -55,16 +57,184 @@ OLLAMA_URL_FILE = os.path.join(CACHE_DIR, "ollama_url.txt")
 MCP_CONFIG_FILE = os.path.join(CACHE_DIR, "mcp_servers.json")
 MCP_STATUS_FILE = os.path.join(CACHE_DIR, "mcp_status.json")
 MCP_LOCK = threading.Lock()
+MCP_STATUS_LOCK = threading.RLock()
 MCP_CLIENTS = {}
 MCP_CLIENTS_LOCK = threading.RLock()
+MCP_RECONNECT_BASE = 0.5
+MCP_RECONNECT_MAX = 30.0
+MCP_RECONNECT_ATTEMPTS = 10
+MCP_HEALTH_INTERVAL = 30.0
+MCP_MONITOR_STOP = threading.Event()
+MCP_MONITOR_THREAD = None
+MCP_RECONNECTING = set()
 OPENAI_CONFIG_FILE = os.path.join(CACHE_DIR, "openai_apis.json")
 OPENAI_STATUS_FILE = os.path.join(CACHE_DIR, "openai_status.json")
+OPENAI_MODEL_OVERRIDES_FILE = os.path.join(CACHE_DIR, "openai_model_overrides.json")
+WORKSPACE_FILE = os.path.join(CACHE_DIR, "workspace.json")
+SESSIONS_DIR = CACHE_DIR
+SESSION_LOCK = threading.RLock()
 STATE = {"token": "", "started": time.time(), "train": None, "server": None}
 
 
 def ensure_cache_dir():
     os.makedirs(CACHE_DIR, exist_ok=True)
     common.hide_dir(CACHE_DIR)
+
+
+def workspace_id():
+    return hashlib.sha256(os.path.abspath(ROOT).encode("utf-8")).hexdigest()[:16]
+
+
+def ensure_session_dir():
+    ensure_cache_dir()
+    ws = workspace_id()
+    return ws, CACHE_DIR
+
+
+def load_workspace():
+    ws, d = ensure_session_dir()
+    try:
+        with open(WORKSPACE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and data.get("id") == ws:
+            return data
+    except (OSError, ValueError):
+        pass
+    data = {"id": ws, "title": os.path.basename(os.path.abspath(ROOT)),
+            "path": os.path.abspath(ROOT), "last_session": {}}
+    save_workspace(data)
+    return data
+
+
+def save_workspace(data):
+    ensure_session_dir()
+    with SESSION_LOCK:
+        with open(WORKSPACE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _session_id(value):
+    text = str(value or "").strip()
+    if re.fullmatch(r"[0-9a-f]{32}", text):
+        return text
+    return ""
+
+
+def _session_path(sid):
+    ws, d = ensure_session_dir()
+    clean = _session_id(sid)
+    if not clean:
+        return None
+    return os.path.join(d, "session-" + clean + ".json")
+
+
+def session_title(history, body_title=""):
+    title = str(body_title or "").strip()
+    if title:
+        return title[:80]
+    for msg in history or []:
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            content = msg.get("content")
+            if isinstance(content, list):
+                content = " ".join(str(x.get("text") or "") for x in content
+                                   if isinstance(x, dict))
+            text = str(content or "").strip().replace("\n", " ")
+            if text:
+                return text[:40]
+    return "新会话"
+
+
+def list_sessions():
+    ws, d = ensure_session_dir()
+    out = []
+    try:
+        names = [n for n in os.listdir(d)
+                 if n.startswith("session-") and n.endswith(".json")]
+    except OSError:
+        return out
+    for name in names:
+        try:
+            with open(os.path.join(d, name), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("workspace_id") != ws:
+                continue
+            out.append({"id": data.get("id"), "kind": data.get("kind"),
+                        "title": data.get("title") or "新会话",
+                        "updated_at": data.get("updated_at") or 0,
+                        "model": data.get("model") or ""})
+        except (OSError, ValueError):
+            continue
+    return sorted(out, key=lambda x: x.get("updated_at") or 0, reverse=True)
+
+
+def load_session(sid):
+    path = _session_path(sid)
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("workspace_id") != workspace_id():
+            return None
+        return data
+    except (OSError, ValueError):
+        return None
+
+
+def save_session(body):
+    sid = _session_id(body.get("id"))
+    history = body.get("history")
+    if not isinstance(history, list):
+        return None
+    kind = "agent" if body.get("kind") == "agent" else "chat"
+    old = load_session(sid) if sid else None
+    now = time.time()
+    if not sid:
+        sid = uuid.uuid4().hex
+    data = {
+        "id": sid,
+        "workspace_id": workspace_id(),
+        "kind": kind,
+        "title": session_title(history, body.get("title")),
+        "created_at": (old or {}).get("created_at") or now,
+        "updated_at": now,
+        "history": history,
+        "config": str(body.get("config") or ""),
+        "model": str(body.get("model") or ""),
+        "server": str(body.get("server") or ""),
+        "tools": body.get("tools") if isinstance(body.get("tools"), list) else [],
+        "thinking": str(body.get("thinking") or "off"),
+    }
+    path = _session_path(sid)
+    with SESSION_LOCK:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        ws = load_workspace()
+        last = ws.get("last_session")
+        if not isinstance(last, dict):
+            last = {}
+        last[kind] = sid
+        ws["last_session"] = last
+        ws["updated_at"] = now
+        save_workspace(ws)
+    return data
+
+
+def delete_session(sid):
+    path = _session_path(sid)
+    if not path or not os.path.isfile(path):
+        return False
+    with SESSION_LOCK:
+        try:
+            os.remove(path)
+        except OSError:
+            # 某些隐藏缓存目录不允许删除文件；清空后 list/load 会忽略它。
+            try:
+                with open(path, "w", encoding="utf-8"):
+                    pass
+            except OSError:
+                return False
+    return True
 
 
 def load_ollama_url():
@@ -156,13 +326,15 @@ def stop_mcp_client(server_id):
             pass
 
 
-def start_mcp_client(server):
+def start_mcp_client(server, force=False):
     """返回常驻 MCP 客户端；配置变化或进程退出时重启。"""
     sid = server["id"]
     sig = _mcp_signature(server)
     with MCP_CLIENTS_LOCK:
         entry = MCP_CLIENTS.get(sid)
-        if entry and entry["signature"] == sig and entry["client"].alive():
+        if (not force and entry and entry["signature"] == sig and
+                entry["client"].alive()):
+            entry["state"] = "connected"
             return entry["client"]
         if entry:
             try:
@@ -172,8 +344,154 @@ def start_mcp_client(server):
             MCP_CLIENTS.pop(sid, None)
         client = mcp_client.client_for(server, timeout=30)
         MCP_CLIENTS[sid] = {"client": client, "signature": sig,
-                            "config": server}
+                            "config": server, "state": "connected",
+                            "attempts": 0, "next_retry": 0.0,
+                            "last_health": time.time(), "last_error": ""}
         return client
+
+
+def ensure_mcp_client(server):
+    """Agent 取客户端时，已标记断连的连接要强制重建。"""
+    with MCP_CLIENTS_LOCK:
+        entry = MCP_CLIENTS.get(server["id"])
+        bad = bool(entry and entry.get("state") in ("reconnecting", "failed"))
+    return start_mcp_client(server, force=bad)
+
+
+def mcp_entry(sid):
+    with MCP_CLIENTS_LOCK:
+        return MCP_CLIENTS.get(sid)
+
+
+def mcp_update_status(sid, **changes):
+    with MCP_STATUS_LOCK:
+        status = load_mcp_status()
+        entry = status.get(sid)
+        if not isinstance(entry, dict):
+            entry = {}
+        entry.update(changes)
+        status[sid] = entry
+        save_mcp_status(status)
+
+
+def mcp_mark_unhealthy(sid, error=""):
+    with MCP_CLIENTS_LOCK:
+        entry = MCP_CLIENTS.get(sid)
+        if not entry:
+            return
+        if entry.get("state") == "failed":
+            return
+        entry["state"] = "reconnecting"
+        entry["last_error"] = str(error or "")
+        attempts = int(entry.get("attempts") or 0)
+        entry["attempts"] = attempts
+        delay = min(MCP_RECONNECT_MAX,
+                    MCP_RECONNECT_BASE * (2 ** min(attempts, 6)))
+        entry["next_retry"] = time.time() + delay
+    mcp_update_status(sid, state="reconnecting", attempts=entry["attempts"],
+                      last_error=entry["last_error"])
+
+
+def mcp_reconnect_worker(sid, server, claimed=False):
+    with MCP_CLIENTS_LOCK:
+        if sid in MCP_RECONNECTING and not claimed:
+            return
+        MCP_RECONNECTING.add(sid)
+    try:
+        client = start_mcp_client(server, force=True)
+        with MCP_CLIENTS_LOCK:
+            entry = MCP_CLIENTS.get(sid)
+            if entry:
+                entry["state"] = "connected"
+                entry["attempts"] = 0
+                entry["next_retry"] = 0.0
+                entry["last_error"] = ""
+                entry["last_health"] = time.time()
+        mcp_update_status(sid, state="connected", attempts=0,
+                          last_error="")
+        try:
+            tools = client.list_tools()
+            mcp_update_status(sid, ok=True, tools=[
+                {"name": t.get("name"), "description": t.get("description") or ""}
+                for t in tools if isinstance(t, dict)
+            ], error="")
+        except Exception:
+            pass
+    except Exception as e:
+        with MCP_CLIENTS_LOCK:
+            entry = MCP_CLIENTS.get(sid)
+            if not entry:
+                entry = {"attempts": 0}
+                MCP_CLIENTS[sid] = entry
+            attempts = int(entry.get("attempts") or 0) + 1
+            entry["attempts"] = attempts
+            entry["last_error"] = f"{type(e).__name__}: {e}"
+            if attempts >= MCP_RECONNECT_ATTEMPTS:
+                entry["state"] = "failed"
+                entry["next_retry"] = 0.0
+            else:
+                entry["state"] = "reconnecting"
+                entry["next_retry"] = time.time() + min(
+                    MCP_RECONNECT_MAX, MCP_RECONNECT_BASE * (2 ** min(attempts, 6)))
+        mcp_update_status(sid, state=entry.get("state") or "reconnecting",
+                          attempts=entry.get("attempts") or 0,
+                          last_error=entry.get("last_error") or "",
+                          error=entry.get("last_error") or "")
+    finally:
+        with MCP_CLIENTS_LOCK:
+            MCP_RECONNECTING.discard(sid)
+
+
+def mcp_supervise_loop():
+    while not MCP_MONITOR_STOP.wait(2.0):
+        try:
+            servers = {s["id"]: s for s in load_mcp_servers()}
+        except Exception:
+            continue
+        for sid, server in servers.items():
+            with MCP_CLIENTS_LOCK:
+                entry = MCP_CLIENTS.get(sid)
+            if not entry:
+                with MCP_CLIENTS_LOCK:
+                    if sid in MCP_RECONNECTING:
+                        continue
+                    MCP_RECONNECTING.add(sid)
+                threading.Thread(target=mcp_reconnect_worker,
+                                 args=(sid, server, True), daemon=True).start()
+                continue
+            state = entry.get("state") or "connected"
+            if state == "failed":
+                continue
+            client = entry.get("client")
+            healthy = bool(client and client.alive())
+            if healthy and state == "connected" and client.__class__.__name__ == "HttpMCPClient":
+                now = time.time()
+                if now - float(entry.get("last_health") or 0) >= MCP_HEALTH_INTERVAL:
+                    try:
+                        client.ping(timeout=5)
+                        entry["last_health"] = now
+                    except Exception as e:
+                        healthy = False
+                        mcp_mark_unhealthy(sid, f"{type(e).__name__}: {e}")
+            if not healthy:
+                mcp_mark_unhealthy(sid, "MCP 连接已断开")
+            if entry.get("state") in ("reconnecting", "disconnected"):
+                if time.time() >= float(entry.get("next_retry") or 0):
+                    with MCP_CLIENTS_LOCK:
+                        if sid in MCP_RECONNECTING:
+                            continue
+                        MCP_RECONNECTING.add(sid)
+                    threading.Thread(target=mcp_reconnect_worker,
+                                     args=(sid, server, True), daemon=True).start()
+
+
+def mcp_monitor_start():
+    global MCP_MONITOR_THREAD
+    MCP_MONITOR_STOP.clear()
+    if MCP_MONITOR_THREAD and MCP_MONITOR_THREAD.is_alive():
+        return
+    MCP_MONITOR_THREAD = threading.Thread(target=mcp_supervise_loop, daemon=True)
+    MCP_MONITOR_THREAD.start()
 
 
 def mcp_start_all():
@@ -201,6 +519,7 @@ def mcp_reconcile():
 
 
 def mcp_stop_all():
+    MCP_MONITOR_STOP.set()
     with MCP_CLIENTS_LOCK:
         entries = list(MCP_CLIENTS.values())
         MCP_CLIENTS.clear()
@@ -244,7 +563,7 @@ def _mcp_status_one(server, timeout=20):
     try:
         client = start_mcp_client(server)
         tools = client.list_tools()
-        return {"ok": True, "tools": [
+        return {"ok": True, "state": "connected", "tools": [
             {"name": t.get("name"), "description": t.get("description") or ""}
             for t in tools if isinstance(t, dict) and t.get("name")
         ], "error": ""}
@@ -271,16 +590,22 @@ def agent_models():
         for model in openai_models_for(api):
             if model.get("kind") == "embedding":
                 continue
-            if not model.get("supports_tools"):
+            if model.get("tool_use") == "none":
                 continue
             out.append({"name": openai_model_name(api, model["name"]),
                         "model": model["name"], "label": f"{api['name']}/{model['name']}",
                         "backend": "openai", "api_id": api["id"],
-                        "capabilities": ["chat", "tools"],
+                        "capabilities": ["chat"] +
+                            (["tools"] if model.get("tool_use") == "native" else []),
+                        "tool_use": model.get("tool_use") or "unknown",
+                        "input_modalities": model.get("input_modalities") or ["text"],
                         "context": model.get("context") or 1000000,
                         "context_default": bool(model.get("context_default", True)),
+                        "context_source": model.get("context_source") or "unknown",
                         "output": model.get("output") or 256000,
                         "output_default": bool(model.get("output_default", True)),
+                        "output_source": model.get("output_source") or "unknown",
+                        "reasoning_efforts": model.get("reasoning_efforts"),
                         "thinking": model.get("thinking") or
                                     {"supported": None, "values": None,
                                      "default": "off", "mode": "unknown"}})
@@ -696,6 +1021,73 @@ def save_openai_status(status):
         pass
 
 
+def load_model_overrides():
+    try:
+        with open(OPENAI_MODEL_OVERRIDES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_model_overrides(data):
+    ensure_cache_dir()
+    with MCP_LOCK:
+        with open(OPENAI_MODEL_OVERRIDES_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _override_int(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        n = int(value)
+        return n if n > 0 else None
+    text = str(value or "").strip().lower().replace(",", "")
+    mult = 1
+    if text.endswith("k"):
+        mult, text = 1000, text[:-1]
+    elif text.endswith("m"):
+        mult, text = 1000000, text[:-1]
+    try:
+        n = int(float(text) * mult)
+        return n if n > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def apply_model_overrides(api, models):
+    """把用户对模型的手工值合入检测结果，手工值不再被自动检测覆盖。"""
+    overrides = load_model_overrides().get(api.get("id") or "", {})
+    out = []
+    for raw in models:
+        model = dict(raw)
+        ov = overrides.get(model.get("name") or "")
+        if isinstance(ov, dict):
+            for key in ("context", "output"):
+                if key in ov:
+                    n = _override_int(ov.get(key))
+                    if n:
+                        model[key] = n
+                        model[key + "_default"] = False
+                        model[key + "_source"] = "manual"
+            if ov.get("tool_use") in ("native", "none", "unknown"):
+                model["tool_use"] = ov["tool_use"]
+                model["supports_tools"] = ov["tool_use"] == "native"
+            if isinstance(ov.get("input_modalities"), list):
+                vals = [str(x) for x in ov["input_modalities"]
+                        if str(x) in ("text", "image")]
+                if vals:
+                    model["input_modalities"] = list(dict.fromkeys(vals))
+            if isinstance(ov.get("reasoning_efforts"), dict):
+                model["reasoning_efforts"] = {
+                    str(k): (None if v is None else str(v))
+                    for k, v in ov["reasoning_efforts"].items()
+                }
+        out.append(model)
+    return out
+
+
 def is_ollama_api(api):
     try:
         raw = ollama.base_url(api.get("base_url"))
@@ -721,17 +1113,31 @@ def augment_ollama_models(api, models):
         if caps:
             is_embed = "embedding" in caps
             model["kind"] = "embedding" if is_embed else "chat"
-            model["supports_tools"] = False if is_embed else ("tools" in caps)
+            model["tool_use"] = "none" if is_embed else (
+                "native" if "tools" in caps else "none")
+            model["supports_tools"] = model["tool_use"] == "native"
+            model["input_modalities"] = ["text"] if is_embed else (
+                ["text", "image"] if "vision" in caps else ["text"])
             if is_embed:
                 model["thinking"] = {"supported": False, "values": None,
                                      "default": None, "mode": "unsupported"}
+                model["reasoning_efforts"] = None
             else:
                 info = ollama.model_thinking(name, base)
                 if info:
                     model["thinking"] = info
+                    values = info.get("values")
+                    if values:
+                        model["reasoning_efforts"] = {
+                            level: (None if level == "off" else level)
+                            for level in values
+                        }
+                    else:
+                        model["reasoning_efforts"] = None
                 elif "thinking" not in caps:
                     model["thinking"] = {"supported": False, "values": None,
                                          "default": None, "mode": "unsupported"}
+                    model["reasoning_efforts"] = None
         context = ollama.model_context(name, base)
         if context:
             model["context"] = context
@@ -746,7 +1152,10 @@ def detect_openai_apis():
         try:
             models = openai_client.list_model_infos(api)
             models = augment_ollama_models(api, models)
-            status[api["id"]] = {"ok": True, "models": models, "error": ""}
+            detected = [dict(m) for m in models]
+            models = apply_model_overrides(api, models)
+            status[api["id"]] = {"ok": True, "models": models,
+                                 "detected": detected, "error": ""}
         except Exception as e:
             status[api["id"]] = {"ok": False, "models": [],
                                  "error": f"{type(e).__name__}: {e}"}
@@ -766,9 +1175,11 @@ def public_openai_api(api):
     out = dict(api)
     out["key_set"] = openai_client.key_status(api)
     st = find_openai_status(api["id"])
-    out["models"] = st.get("models") or []
+    base = st.get("detected") or st.get("models") or []
+    out["models"] = apply_model_overrides(api, base)
     out["ok"] = bool(st.get("ok"))
     out["error"] = st.get("error") or ""
+    out["model_overrides"] = load_model_overrides().get(api["id"]) or {}
     return out
 
 
@@ -789,7 +1200,8 @@ def parse_openai_model(model):
 
 def openai_models_for(api):
     st = find_openai_status(api["id"])
-    return st.get("models") or []
+    base = st.get("detected") or st.get("models") or []
+    return apply_model_overrides(api, base)
 
 
 def _thinking_level(value):
@@ -801,7 +1213,7 @@ def _thinking_level(value):
         return "off"
     if text in ("true", "on", "yes", "1"):
         return "medium"
-    if text in ("low", "medium", "high", "minimal"):
+    if text in ("low", "medium", "high", "minimal", "max", "xhigh"):
         return text
     return "off"
 
@@ -809,7 +1221,10 @@ def _thinking_level(value):
 def openai_model_thinking(api, model):
     for item in openai_models_for(api):
         if item.get("name") == model:
-            return item.get("thinking") or {}
+            info = dict(item.get("thinking") or {})
+            if item.get("reasoning_efforts"):
+                info["reasoning_efforts"] = item.get("reasoning_efforts")
+            return info
     return {}
 
 
@@ -840,48 +1255,208 @@ def openai_output_budget(api, model):
     return min(output, max(1024, context // 2))
 
 
+def _context_strip_images(value):
+    """上下文估算不把 base64 图片按字符数重复计算。"""
+    if isinstance(value, list):
+        out = []
+        for item in value:
+            if isinstance(item, dict) and item.get("type") == "image_url":
+                out.append({"type": "image_url", "image_url": {"url": "<image>"}})
+            else:
+                out.append(_context_strip_images(item))
+        return out
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if key == "url" and isinstance(item, str) and item.startswith("data:"):
+                out[key] = "<image>"
+            else:
+                out[key] = _context_strip_images(item)
+        return out
+    return value
+
+
 def context_tokens(messages, tools=None):
-    """按 4 字符/token 估算实际请求压力，包含工具 schema。"""
+    """按 4 字符/token 估算实际请求压力；图片按固定视觉 token 计。"""
     try:
-        text = json.dumps(messages or [], ensure_ascii=False)
+        clean = _context_strip_images(messages or [])
+        text = json.dumps(clean, ensure_ascii=False)
         if tools:
             text += json.dumps(tools, ensure_ascii=False)
-        return max(1, (len(text) + 3) // 4)
+        images = 0
+        stack = [messages or []]
+        while stack:
+            value = stack.pop()
+            if isinstance(value, list):
+                stack.extend(value)
+            elif isinstance(value, dict):
+                if value.get("type") == "image_url":
+                    images += 1
+                else:
+                    stack.extend(value.values())
+        return max(1, (len(text) + 3) // 4 + images * 1200)
     except (TypeError, ValueError):
         return 1
 
 
 def _trim_for_context(messages, context, reserve=256000):
-    """按保守字符数裁剪历史；保留 system 和最近消息，避免超上下文。"""
+    """按保守字符数裁剪历史；以工具调用组为单位，保留 system 和最近消息。"""
     budget = max(1024, int(context) - reserve)
     if not messages:
         return messages
-    def size(msg):
-        text = msg.get("content") if isinstance(msg, dict) else ""
-        if isinstance(text, list):
-            text = "".join(str(x.get("text") or "") for x in text
-                           if isinstance(x, dict))
-        return len(str(text or ""))
-    total = sum(size(m) for m in messages)
-    if total <= budget:
-        return messages
-    system = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
-    rest = [m for m in messages if not (isinstance(m, dict) and m.get("role") == "system")]
+    groups = _message_groups(messages)
+    system = [g for g in groups if g and isinstance(g[0], dict)
+              and g[0].get("role") == "system"]
+    rest = [g for g in groups if g not in system]
     kept = []
-    used = sum(size(m) for m in system)
-    for msg in reversed(rest):
-        n = size(msg)
+    used = sum(context_tokens([m for m in g]) for g in system)
+    for group in reversed(rest):
+        n = context_tokens([m for m in group])
         if used + n > budget and kept:
             break
-        kept.append(msg)
+        kept.append(group)
         used += n
-    return system + list(reversed(kept))
+    return [m for g in system + list(reversed(kept)) for m in g]
+
+
+def _message_content_text(msg):
+    content = msg.get("content") if isinstance(msg, dict) else ""
+    if isinstance(content, list):
+        content = "\n".join(str(x.get("text") or "") for x in content
+                            if isinstance(x, dict))
+    text = str(content or "")
+    calls = msg.get("tool_calls") if isinstance(msg, dict) else None
+    if calls:
+        text += "\n[tool_calls] " + json.dumps(calls, ensure_ascii=False)
+    return text
+
+
+def _message_groups(messages):
+    """把 assistant tool_calls 与对应 tool 结果分成不可拆分的组。"""
+    groups = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        group = [msg]
+        if (isinstance(msg, dict) and msg.get("role") == "assistant"
+                and isinstance(msg.get("tool_calls"), list) and msg["tool_calls"]):
+            ids = {str(c.get("id") or "") for c in msg["tool_calls"]
+                   if isinstance(c, dict)}
+            j = i + 1
+            while j < len(messages):
+                nxt = messages[j]
+                if isinstance(nxt, dict) and nxt.get("role") == "tool":
+                    group.append(nxt)
+                    j += 1
+                else:
+                    break
+            i = j
+        else:
+            i += 1
+        groups.append(group)
+    return groups
+
+
+def _group_text(group):
+    parts = []
+    for msg in group:
+        role = msg.get("role") if isinstance(msg, dict) else "unknown"
+        parts.append(f"[{role}]\n{_message_content_text(msg)}")
+    return "\n\n".join(parts)
+
+
+def _summary_history(api, upstream, old_messages, max_output=4096):
+    """调用当前模型生成历史摘要；失败由调用方回退。"""
+    if not api or not old_messages:
+        return ""
+    text = "\n\n".join(_group_text(g) for g in old_messages)
+    # 摘要输入本身必须有界，避免“为了压缩而再次超限”。
+    if len(text) > 32000:
+        text = text[:32000] + "\n\n[更早内容已省略]"
+    prompt = (
+        "你是上下文压缩器。将下面的历史压缩成不超过 1200 字的结构化摘要。\n"
+        "必须保留：用户目标、约束、已完成事项、关键文件路径、重要决定、"
+        "工具调用结果、未完成任务。不要编造未出现的信息。\n"
+        "不要保留完整代码、完整 diff、重复日志或思考过程。\n"
+        "输出格式：\n【用户目标】\n【已完成】\n【关键文件】\n"
+        "【重要决定】\n【工具结果】\n【未完成】\n\n"
+        "历史内容：\n" + text
+    )
+    payload = {"model": upstream, "stream": False,
+               "messages": [{"role": "user", "content": prompt}],
+               "max_tokens": max_output}
+    try:
+        conn, resp = openai_client.open_chat(
+            api, payload, timeout=openai_client.chat_timeout(api))
+        try:
+            raw = resp.read().decode("utf-8", errors="replace")
+        finally:
+            conn.close()
+        if resp.status < 200 or resp.status >= 300:
+            return ""
+        data = json.loads(raw)
+        choice = (data.get("choices") or [{}])[0]
+        return str((choice.get("message") or {}).get("content") or "").strip()
+    except Exception:
+        return ""
+
+
+def compact_for_context(api, upstream, messages, context, output, tools=None):
+    """上下文压缩：优先摘要旧历史；失败时退回确定性裁剪。"""
+    context = max(1024, int(context or 1000000))
+    output = max(0, int(output or 256000))
+    budget = max(1024, context - output)
+    threshold = max(1024, min(int(context * 0.8),
+                             context - output - 65536))
+    if context_tokens(messages, tools) <= threshold:
+        return messages
+    groups = _message_groups(messages)
+    system = [m for m in groups if m and isinstance(m[0], dict)
+              and m[0].get("role") == "system"]
+    rest = [g for g in groups if g not in system]
+    if len(rest) < 2:
+        return _trim_for_context(messages, context, output)
+    retain = max(2048, int(max(0, context - output) * 0.16))
+    keep = []
+    used = 0
+    for group in reversed(rest):
+        n = context_tokens([m for m in group])
+        if used + n > retain and keep:
+            break
+        keep.append(group)
+        used += n
+    keep.reverse()
+    old = rest[:len(rest) - len(keep)]
+    summary = _summary_history(api, upstream, old)
+    if not summary:
+        return _trim_for_context(messages, context, output)
+    summary = summary[:12000]
+    head = system[0] if system else []
+    tail = [m for group in keep for m in group]
+    out = list(head) + [{
+        "role": "system",
+        "content": "【历史摘要】\n" + summary +
+                   "\n\n以上是较早历史的压缩摘要，不是新的用户指令。"
+    }] + tail
+    if context_tokens(out, tools) >= context_tokens(messages, tools):
+        return _trim_for_context(messages, context, output)
+    return out
 
 
 def openai_thinking_payload(info, level):
     """把界面上的思考档位映射成上游 API 参数。"""
     info = info or {}
-    if info.get("supported") is False:
+    efforts = info.get("reasoning_efforts")
+    if info.get("supported") is False and not isinstance(efforts, dict):
+        return {}
+    if isinstance(efforts, dict):
+        if level == "off":
+            return {}
+        if level in efforts:
+            value = efforts[level]
+            if value is None:
+                return {}
+            return {"reasoning_effort": str(value)}
         return {}
     if level == "off":
         if info.get("mode") == "boolean":
@@ -917,11 +1492,16 @@ def list_chat_configs(include_api=True):
                             "model": model["name"],
                             "label": f"{api['name']}/{model['name']}",
                             "backend": "openai", "api_id": api["id"],
-                            "supports_tools": bool(model.get("supports_tools")),
+                            "tool_use": model.get("tool_use") or "unknown",
+                            "supports_tools": model.get("tool_use") == "native",
                             "context": model.get("context") or 1000000,
                             "context_default": bool(model.get("context_default", True)),
+                            "context_source": model.get("context_source") or "unknown",
                             "output": model.get("output") or 256000,
                             "output_default": bool(model.get("output_default", True)),
+                            "output_source": model.get("output_source") or "unknown",
+                            "input_modalities": model.get("input_modalities") or ["text"],
+                            "reasoning_efforts": model.get("reasoning_efforts"),
                             "thinking": model.get("thinking") or
                                         {"supported": None, "values": None,
                                          "default": "off", "mode": "unknown"}})
@@ -1062,6 +1642,19 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/configs":
             self._json({"ok": True, "configs": list_configs()})
+        elif path == "/api/sessions":
+            workspace = load_workspace()
+            sid = (qs.get("id") or [""])[0]
+            if sid:
+                data = load_session(sid)
+                if not data:
+                    return self._err(404, "会话不存在")
+                return self._json({"ok": True, "workspace": workspace,
+                                   "session": data})
+            self._json({"ok": True, "workspace": workspace,
+                        "sessions": list_sessions()})
+        elif path == "/api/workspace":
+            self._json({"ok": True, "workspace": load_workspace()})
         elif path == "/api/models":
             self._json({"ok": True, "models": list_models()})
         elif path == "/api/chat/configs":
@@ -1201,6 +1794,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/mcp/detect":
                 status = detect_mcp_servers()
                 self._json({"ok": True, "status": status})
+            elif path == "/api/mcp/restart":
+                self._mcp_restart(body)
             elif path == "/api/openai/configs":
                 try:
                     apis = save_openai_apis(body.get("apis") or [])
@@ -1215,6 +1810,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "status": status})
             elif path == "/api/openai/test":
                 self._openai_test(body)
+            elif path == "/api/openai/model":
+                self._openai_model_save(body)
+            elif path == "/api/sessions":
+                data = save_session(body)
+                if not data:
+                    return self._err(400, "会话数据不合法")
+                self._json({"ok": True, "session": data,
+                            "sessions": list_sessions()})
+            elif path == "/api/sessions/delete":
+                ok = delete_session(body.get("id") or "")
+                self._json({"ok": ok, "sessions": list_sessions()})
             elif path == "/api/agent/chat":
                 self._agent_chat(body)
             elif path == "/api/sign":
@@ -1562,8 +2168,9 @@ class Handler(BaseHTTPRequestHandler):
                 payload[key] = body[key]
         output_budget = openai_output_budget(api, model)
         payload.setdefault("max_tokens", output_budget)
-        payload["messages"] = _trim_for_context(
-            msgs, openai_model_context(api, model), output_budget)
+        payload["messages"] = compact_for_context(
+            api, model, msgs, openai_model_context(api, model),
+            output_budget, body.get("tools"))
         if "thinking" in body:
             level = _thinking_level(body.get("thinking"))
             payload.update(openai_thinking_payload(
@@ -1707,6 +2314,30 @@ class Handler(BaseHTTPRequestHandler):
             for t in tools if isinstance(t, dict)
         ]})
 
+    def _mcp_restart(self, body):
+        sid = str(body.get("id") or "").strip()
+        server = find_mcp_server(sid)
+        if not server:
+            return self._err(404, "MCP 服务器不存在")
+        stop_mcp_client(sid)
+        try:
+            client = start_mcp_client(server)
+            tools = client.list_tools()
+        except Exception as e:
+            mcp_update_status(sid, ok=False, state="failed",
+                              attempts=MCP_RECONNECT_ATTEMPTS,
+                              last_error=f"{type(e).__name__}: {e}",
+                              error=f"{type(e).__name__}: {e}")
+            return self._err(502, f"MCP 重启失败：{type(e).__name__}: {e}")
+        mcp_update_status(sid, ok=True, state="connected", attempts=0,
+                          last_error="", error="", tools=[
+            {"name": t.get("name"), "description": t.get("description") or ""}
+            for t in tools if isinstance(t, dict) and t.get("name")])
+        self._json({"ok": True, "state": "connected", "tools": [
+            {"name": t.get("name"), "description": t.get("description") or ""}
+            for t in tools if isinstance(t, dict)
+        ]})
+
     def _openai_test(self, body):
         try:
             cfg = openai_client.normalize_api(body.get("api") or {})
@@ -1715,15 +2346,82 @@ class Handler(BaseHTTPRequestHandler):
         try:
             models = openai_client.list_model_infos(cfg)
             models = augment_ollama_models(cfg, models)
+            detected = [dict(m) for m in models]
+            models = apply_model_overrides(cfg, models)
         except Exception as e:
             return self._err(502, f"API 连接失败：{type(e).__name__}: {e}")
         saved = find_openai_api(cfg.get("id") or "")
         if saved:
             status = load_openai_status()
-            status[cfg["id"]] = {"ok": True, "models": models, "error": ""}
+            status[cfg["id"]] = {"ok": True, "models": models,
+                                 "detected": detected, "error": ""}
             save_openai_status(status)
         self._json({"ok": True, "name": cfg["name"], "models": models,
                     "saved": bool(saved)})
+
+    def _openai_model_save(self, body):
+        api_id = str(body.get("api_id") or "").strip()
+        model_name = str(body.get("model") or "").strip()
+        if not api_id or not model_name:
+            return self._err(400, "缺少 api_id 或 model")
+        if not find_openai_api(api_id):
+            return self._err(404, "API 配置不存在")
+        raw = body.get("override")
+        if not isinstance(raw, dict):
+            raw = {}
+        ov = {}
+        for key in ("context", "output"):
+            if key in raw:
+                if raw.get(key) in (None, ""):
+                    continue
+                n = _override_int(raw.get(key))
+                if not n:
+                    return self._err(400, f"{key} 必须是正整数")
+                ov[key] = n
+        if raw.get("tool_use") in ("native", "none", "unknown"):
+            ov["tool_use"] = raw["tool_use"]
+        modalities = raw.get("input_modalities")
+        if isinstance(modalities, list):
+            vals = [str(x) for x in modalities if str(x) in ("text", "image")]
+            if vals:
+                ov["input_modalities"] = list(dict.fromkeys(vals))
+        efforts = raw.get("reasoning_efforts")
+        if isinstance(efforts, dict):
+            clean = {}
+            for level, value in efforts.items():
+                level = str(level or "").strip().lower()
+                if not level:
+                    continue
+                if value is None or value == "":
+                    clean[level] = None
+                else:
+                    clean[level] = str(value).strip()
+            if clean:
+                ov["reasoning_efforts"] = clean
+
+        data = load_model_overrides()
+        per_api = data.get(api_id)
+        if not isinstance(per_api, dict):
+            per_api = {}
+        if ov:
+            per_api[model_name] = ov
+        else:
+            per_api.pop(model_name, None)
+        if per_api:
+            data[api_id] = per_api
+        else:
+            data.pop(api_id, None)
+        save_model_overrides(data)
+
+        status = load_openai_status()
+        entry = status.get(api_id) or {}
+        base = entry.get("detected") or entry.get("models") or []
+        models = apply_model_overrides({"id": api_id}, base)
+        if entry:
+            status[api_id] = dict(entry, models=models)
+            save_openai_status(status)
+        self._json({"ok": True, "models": models,
+                    "overrides": data.get(api_id) or {}})
 
     def _agent_chat(self, body):
         model = str(body.get("model") or "").strip()
@@ -1737,9 +2435,9 @@ class Handler(BaseHTTPRequestHandler):
             if not api:
                 return self._err(400, "API 服务不存在，请先在 API 页保存")
             allowed = {m.get("name") for m in openai_models_for(api)
-                       if m.get("supports_tools")}
+                       if m.get("tool_use") != "none"}
             if upstream not in allowed:
-                return self._err(400, "这个 API 模型没有检测到工具调用能力")
+                return self._err(400, "这个 API 模型明确不支持工具调用")
             try:
                 openai_client.api_key(api)
             except Exception as e:
@@ -1776,7 +2474,7 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(selected, list) and selected:
                 selected_names = {str(x) for x in selected}
             if server and selected_names:
-                client = start_mcp_client(server)
+                client = ensure_mcp_client(server)
                 all_tools = client.list_tools()
                 all_tools = [t for t in all_tools
                              if isinstance(t, dict) and t.get("name") in selected_names]
@@ -1800,7 +2498,7 @@ class Handler(BaseHTTPRequestHandler):
             user_query = ""
             for item in reversed(msgs):
                 if isinstance(item, dict) and item.get("role") == "user":
-                    user_query = str(item.get("content") or "")
+                    user_query = _message_content_text(item)
                     break
             while True:
                 output_budget = (openai_output_budget(api, upstream)
@@ -1810,9 +2508,18 @@ class Handler(BaseHTTPRequestHandler):
                 if tools:
                     payload["tools"] = tools
                 if backend == "openai":
-                    payload["messages"] = _trim_for_context(
-                        messages, openai_model_context(api, upstream),
+                    compacted = compact_for_context(
+                        api, upstream, messages,
+                        openai_model_context(api, upstream),
+                        output_budget, payload.get("tools"))
+                    payload["messages"] = compacted
+                    messages = compacted
+                elif context_tokens(messages, payload.get("tools")) > max(
+                        1024, (ollama.model_context(tag) or 1000000) - output_budget):
+                    messages = _trim_for_context(
+                        messages, ollama.model_context(tag) or 1000000,
                         output_budget)
+                    payload["messages"] = messages
                 context_total = (openai_model_context(api, upstream)
                                  if backend == "openai" else
                                  (ollama.model_context(tag) or 1000000))
@@ -1906,12 +2613,21 @@ class Handler(BaseHTTPRequestHandler):
                             is_error = True
                         else:
                             try:
+                                entry_now = mcp_entry(server["id"]) if server else None
+                                if (not client.alive() or
+                                        (entry_now and entry_now.get("state") in
+                                         ("reconnecting", "failed"))):
+                                    client = ensure_mcp_client(server)
                                 result = client.call_tool(name, args)
                                 text = mcp_client.tool_result_text(result)
                                 is_error = bool(result.get("isError")) if isinstance(result, dict) else False
                             except Exception as e:
                                 text = f"MCP 工具调用失败：{type(e).__name__}: {e}"
                                 is_error = True
+                                if server and ((client is None or not client.alive()) or any(
+                                        word in str(e) for word in
+                                        ("超时", "未运行", "无法连接", "断开"))):
+                                    mcp_mark_unhealthy(server.get("id"), text)
                         self._sse("tool_result", {"name": name, "text": text,
                                                    "index": indexes[i],
                                                    "is_error": is_error})
@@ -2525,6 +3241,7 @@ def main():
     ensure_cache_dir()
     os.makedirs(LOG_DIR, exist_ok=True)
     mcp_start_all()
+    mcp_monitor_start()
 
     httpd, port = bind_port(a.host, want)
     url = f"http://{a.host}:{port}/?t={STATE['token']}"

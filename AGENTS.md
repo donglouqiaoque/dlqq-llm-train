@@ -77,6 +77,9 @@
     `.ai_res/git_log/<YYYY-MM-DD_HH-MM-SS>.txt`。命名前必须先查询当前实际时间，并按查询结果
     命名，禁止凭直觉或估算写文件名。提交信息由用户提交；AI 不执行 `git add` / `commit` /
     `push`；只写本仓库的改动，和本仓库无关或 git 忽略的内容不要写进 git 提交信息。
+21. **git 提交信息只写本次改动本身**：不得加入“未执行 git add / commit / push”
+    “提交信息由用户提交”、验证或测试结论、工具执行过程等与改动无关的说明文字；
+    提交信息只描述代码、配置和文档的实际变化。
 
 ## 二、目录结构（当前架构）
 
@@ -108,7 +111,7 @@ web/                    前端（被 webui.py 托管，不需要单独服务器�
 properties/             四个训练配置（要开源，注释写给外人看）
 model/                  本地权重（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\）
 res/                    语料目录（不进版本库）
-.cache/                 训练缓存/日志/配置备份/MCP 与 API 配置和检测结果（内容忽略；Windows 下自动隐藏）
+.cache/                 训练缓存/日志/配置备份/MCP 与 API 配置、检测结果、会话（内容忽略；Windows 下自动隐藏）
 THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
 
@@ -174,6 +177,12 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/openai/configs` | 保存 API 配置到 `.cache/openai_apis.json`，并立即检测模型 |
 | POST | `/api/openai/detect` | 启动时检测全部已保存 API 的 `/models`，结果写入 `.cache/openai_status.json` |
 | POST | `/api/openai/test` | 只检测当前选中的 API（草稿也可）；已保存配置同时更新状态并返回模型/思考能力 |
+| POST | `/api/openai/model` | 保存单个模型的手工能力覆盖（上下文、输出、工具、输入类型、思考档位） |
+| GET | `/api/sessions` | 工作区信息和会话列表；`?id=` 返回单个会话 |
+| POST | `/api/sessions` | 保存会话（历史、模型、MCP、工具、思考等级） |
+| POST | `/api/sessions/delete` | 删除会话 |
+| GET | `/api/workspace` | 当前工作区 ID、标题和最近会话 |
+| POST | `/api/mcp/restart` | 手动重连指定 MCP 服务器并刷新工具列表 |
 | GET | `/api/agent/configs` | Agent 可用的工具模型 + MCP 服务器 + 检测结果 |
 | GET | `/api/agent/tools?server=<id>` | 获取某个 MCP 服务器的工具（供 Agent 多选） |
 | POST | `/api/agent/chat` | Agent 工具循环，SSE：`context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
@@ -251,18 +260,32 @@ Ollama 配置还会用 `/api/show` 补齐类型、工具、思考和上下文。
 `api:<配置id>/<模型>` 作为 id，类型分为 `chat` / `embedding`；Chat/Agent 只用 chat，
 服务页两者都列。API 模型由桥接服务代理 `/v1/chat/completions` 和 `/v1/embeddings`。
 Ollama 配置的聊天超时为 600 秒，其他供应商为 300 秒；Ollama 长时间思考不应被 300 秒误断开。
-思考能力按 `/models` 的可选字段解析：明确支持且有档位用实际档位；旧接口只有 true/false
-时只给 off/on；支持但无档位用默认四档；明确不支持则隐藏；完全未知时也按默认四档并默认
-选中 off。上下文上限也从 `/models` 的 `context_length` / `context_window` / `max_model_len`
-等字段读取，读不到按 1M 默认；API 请求会按上下文预留输出空间后裁剪历史。
+
+模型能力采用“自动检测 + 手工覆盖”：
+
+- 上下文、最大输出：检测不到时界面显示“未知（供应商默认）”，内部使用保守预算；
+- 工具能力：`tool_use` 为 `native` / `none` / `unknown`，不再按模型名猜；
+  Agent 允许 `native` 和 `unknown`，只隐藏明确 `none`；
+- 输入类型：`input_modalities` 至少 `text`，可增加 `image`；
+- 思考：`reasoning_efforts` 是“档位 → API 参数值”的映射，`off` 为 `null`；
+  未知模型不再伪造四档。
+
+API 页点击模型行可手工覆盖上述字段，保存在 `.cache/openai_model_overrides.json`，
+自动检测不会覆盖手工值。上下文上限从 `/models` 的 `context_length` / `context_window` /
+`max_model_len` 等字段读取。API 请求会按上下文预留输出空间后压缩历史：先摘要旧历史，
+失败时退回按工具调用组裁剪；`tool_calls` / `tool_result` 必须成对保留。
 Agent 的 `max_tokens` 默认 256K（有模型输出字段时用模型值，并受上下文限制），它不是上下文上限；
-单轮输出上限和上下文窗口分开计算。Chat / Agent 输入框下方显示按字符数估算的上下文占用率。
+单轮输出上限和上下文窗口分开计算。Chat / Agent 输入框下方显示按字符数估算的上下文占用率；
+图片按固定视觉 token 估算，不按 base64 字符数计费。
 
 **MCP / Agent**：`mcp_client.py` 只用标准库实现 STDIO（一行一个 JSON）和 Streamable HTTP
 （JSON-RPC POST + Mcp-Session-Id）。已配置的 MCP 客户端在 WebUI 启动时创建并常驻，STDIO 进程
-生命周期跟随 WebUI；修改配置时只重启对应服务器，WebUI 退出时统一关闭。`Agent` 允许检测到
-支持工具调用的 API 模型；不选工具时按普通对话处理，
-不发送 `tools`、不执行工具调用，MCP 进程仍保持常驻。带工具时按
+生命周期跟随 WebUI；修改配置时只重启对应服务器，WebUI 退出时统一关闭。后台监控每 2 秒检查
+STDIO 进程，HTTP 每 30 秒做一次 tools/list 健康检查；断连后按 500ms → 30s 指数退避，
+最多连续 10 次，稳定连接后重置计数。重连成功后重新拉取工具列表，超过次数标记 `failed`
+并停止自动重连，可在 MCP 页手动【重连】。已发出的非幂等工具不会自动重放。
+Agent 允许 `tool_use` 为 `native` 或 `unknown` 的 API 模型，只隐藏明确 `none` 的模型；
+不选工具时按普通对话处理，不发送 `tools`、不执行工具调用，MCP 进程仍保持常驻。带工具时按
 `tool_calls → tools/call → tool result` 循环，直到模型不再返回工具调用；
 不再使用固定 8 轮上限，用户可随时停止；
 每轮使用 SSE，最终回答逐 token 推给前端；顶部显示运行状态和用时，默认折叠
@@ -270,11 +293,18 @@ Agent 的 `max_tokens` 默认 256K（有模型输出字段时用模型值，并�
 思考、工具调用、回答按模型实际输出顺序作为平级时间线行展示。工具参数和结果完整显示并
 完整回填给模型，不做硬截断；只执行本次勾选的工具，模型返回未勾选或不存在的工具时回填
 “工具不存在”，不调用 MCP。
-`thinking=off/low/medium/high` 时透传 `think` / `reasoning_effort` 并显示思考过程，
-API 的等级来自检测元数据，缺省时按默认四档回退；本地字符级模型不支持该控件。
+`thinking` 支持 `off/low/medium/high` 等档位，按 `reasoning_efforts` 映射到实际 API 参数值；
+`off` 不发送参数；未知模型不伪造档位；本地字符级模型不支持该控件。
 工具结果之后会补一条内部续跑 user 提示，避免 Ollama/Qwen 把纯 tool 轮次判成
 “no user query found in messages”。服务器定义保存在 `.cache/mcp_servers.json`；启动时检测
 全部服务器并写入 `.cache/mcp_status.json`。
+
+**会话 / 工作区 / 图片**：Session 存在 `.cache/session-<id>.json`，工作区信息存在
+`.cache/workspace.json`；Chat / Agent 顶部可切换、删除会话，每轮结束自动保存，恢复时恢复
+历史、模型、MCP、工具和思考选择。未完成的模型/工具轮次不自动重放。模型
+`input_modalities` 含 `image` 时输入栏显示【图片】，最多 4 张、单张 6MB；图片以 OpenAI 兼容
+`image_url` 内容块发送，本地字符级模型拒绝。图片 token 按固定视觉 token 估算，不按 base64
+字符数计费。
 
 **生成停止**：提示词用 `用户：` / `助手：`；生成到下一个 `用户：` 直接截断；词表缺这两个标记时
 自动切「续写模式」。

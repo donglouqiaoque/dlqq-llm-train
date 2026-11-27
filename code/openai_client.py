@@ -413,35 +413,82 @@ def _thinking_info(item):
 
 
 def _looks_tool_capable(model):
-    """模型列表没有能力字段时，按模型名做保守判断。"""
-    name = str(model or "").lower()
-    if _looks_non_chat(name):
-        return False
-    known = ("deepseek", "gpt-", "gpt4", "gpt5", "o1", "o3", "o4",
-             "qwen", "claude", "gemini", "grok", "llama", "mistral",
-             "mixtral", "glm", "kimi", "yi-", "minimax", "doubao",
-             "ernie", "command", "function")
-    return any(x in name for x in known)
+    """兼容旧调用；新逻辑不再按模型名猜工具能力。"""
+    return None
 
 
-def _model_supports_tools(item):
+def _tool_use(item):
+    """返回 native / none / unknown，不按模型名猜测。"""
     if not isinstance(item, dict):
-        return False
+        return "unknown"
     for key in ("supports_tools", "tools", "function_calling"):
         value = item.get(key)
         if isinstance(value, bool):
-            return value
+            return "native" if value else "none"
     caps = item.get("capabilities")
-    if isinstance(caps, list):
+    if isinstance(caps, list) and caps:
         lowered = {str(x).lower() for x in caps}
         if lowered & {"tools", "tool_calling", "function_calling", "functions"}:
-            return True
+            return "native"
+        return "unknown"
     params = item.get("supported_parameters")
-    if isinstance(params, list):
+    if isinstance(params, list) and params:
         lowered = {str(x).lower() for x in params}
         if lowered & {"tools", "tool_choice", "functions", "function_calling"}:
-            return True
-    return _looks_tool_capable(item.get("id"))
+            return "native"
+        return "unknown"
+    return "unknown"
+
+
+def _model_supports_tools(item):
+    return _tool_use(item) == "native"
+
+
+def _input_modalities(item):
+    if not isinstance(item, dict):
+        return ["text"]
+    for key in ("input_modalities", "input", "modalities"):
+        values = item.get(key)
+        if isinstance(values, list):
+            out = []
+            for value in values:
+                text = str(value or "").strip().lower()
+                if text in ("text", "image") and text not in out:
+                    out.append(text)
+            if out:
+                return out
+    return ["text"]
+
+
+def _reasoning_efforts(item, thinking=None):
+    """把能力字段整理成 档位 -> API 参数值；没有声明时返回 None。"""
+    if isinstance(item, dict):
+        raw = item.get("reasoning_efforts")
+        if isinstance(raw, dict):
+            out = {}
+            for level, value in raw.items():
+                key = _level_text(level)
+                if not key:
+                    continue
+                if value is None:
+                    out[key] = None
+                elif isinstance(value, bool):
+                    out[key] = level if value else None
+                elif str(value).strip():
+                    out[key] = str(value).strip()
+            if out:
+                return out
+        if isinstance(raw, list):
+            values = _level_list(raw)
+            if values:
+                return {level: (None if level == "off" else level)
+                        for level in values}
+    if isinstance(thinking, dict):
+        values = thinking.get("values")
+        if isinstance(values, list) and values:
+            return {level: (None if level == "off" else level)
+                    for level in values}
+    return None
 
 
 def list_model_infos(api, timeout=20):
@@ -466,14 +513,21 @@ def list_model_infos(api, timeout=20):
                 continue
             context, context_default = _context_length(item)
             output, output_default = _output_limit(item)
+            thinking = _thinking_info(item)
+            tool_use = _tool_use(item)
             out.append({"name": name,
                         "kind": "embedding" if _looks_non_chat(name) else "chat",
                         "context": context,
                         "context_default": context_default,
+                        "context_source": "unknown" if context_default else "detected",
                         "output": output,
                         "output_default": output_default,
-                        "supports_tools": bool(_model_supports_tools(item)),
-                        "thinking": _thinking_info(item)})
+                        "output_source": "unknown" if output_default else "detected",
+                        "tool_use": tool_use,
+                        "supports_tools": tool_use == "native",
+                        "input_modalities": _input_modalities(item),
+                        "reasoning_efforts": _reasoning_efforts(item, thinking),
+                        "thinking": thinking})
         return out
     finally:
         conn.close()
