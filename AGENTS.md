@@ -80,6 +80,14 @@
 21. **git 提交信息只写本次改动本身**：不得加入“未执行 git add / commit / push”
     “提交信息由用户提交”、验证或测试结论、工具执行过程等与改动无关的说明文字；
     提交信息只描述代码、配置和文档的实际变化。
+22. **第三方版本与许可证声明必须跟着实际文件走**：修改 `.runtime/python`、`web/vendor/`、
+    `THIRD-PARTY-NOTICES.txt` 或任何随包第三方组件的版本时，必须同时核对并更新版本号、
+    许可证标识（如 MIT / Apache-2.0 / MPL-2.0 / OFL-1.1 / PSF-2.0）、本地许可证文件路径和
+    版权声明，并同步 `web/index.html` 的「版权鸣谢」表与 README / AGENTS 中的相关说明。
+    Python 版本以 `.runtime/python/VERSION.txt` 和 `python --version` 为准，
+    前端版本以 bundle header 或官方包元数据为准，版权文字以随包 LICENSE 原文为准；
+    禁止凭记忆写版本，禁止保留过期版本号或错误版权。训练依赖由用户安装且不随包分发，
+    不写入随包声明；新增随包第三方组件必须同步补通知。
 
 ## 二、目录结构（当前架构）
 
@@ -111,7 +119,7 @@ web/                    前端（被 webui.py 托管，不需要单独服务器�
 properties/             四个训练配置（要开源，注释写给外人看）
 model/                  本地权重（model\<名字>\ 标准 HF 目录 + checkpoint-<step>\）
 res/                    语料目录（不进版本库）
-.cache/                 训练缓存/日志/配置备份/MCP 与 API 配置、检测结果、工作区注册表、会话（内容忽略；Windows 下自动隐藏）
+.cache/                 训练缓存/日志/配置备份/MCP 与 API 配置、检测结果、工作区注册表、会话、输入区附件（内容忽略；Windows 下自动隐藏）
 THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单（人工维护）
 ```
 
@@ -178,11 +186,12 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/openai/detect` | 启动时检测全部已保存 API 的 `/models`，结果写入 `.cache/openai_status.json` |
 | POST | `/api/openai/test` | 只检测当前选中的 API（草稿也可）；已保存配置同时更新状态并返回模型/思考能力 |
 | POST | `/api/openai/model` | 保存单个模型的手工能力覆盖（上下文、输出、工具、输入类型、思考档位） |
-| GET | `/api/sessions` | 会话列表；`?id=` 返回单个会话；`?id=&history_page=1&history_limit=20&history_before=<n>` 只返回最近一段历史及 `history_total` / `history_start` / `history_has_more` / 用户轮次 `history_outline`；`?kind=chat\|agent&workspace=` 过滤 |
-| POST | `/api/sessions` | 保存会话（历史、模型、MCP、工具、思考等级、Agent 工作区）；带 `history_start` 时与旧历史前缀合并，支持懒加载分页 |
-| POST | `/api/sessions/delete` | 删除会话 |
+| GET | `/api/sessions` | 会话列表；`?id=` 返回单个会话；`?id=&history_page=1&history_turns=5&history_before=<n>` 只返回最近 5 个用户轮次及 `history_total` / `history_start` / `history_has_more` / 用户轮次 `history_outline`（也兼容旧的 `history_limit=<消息条数>`）；`?kind=chat\|agent&workspace=` 过滤 |
+| POST | `/api/sessions` | 保存会话（历史、模型、MCP 总开关与多服务器选择、工具、思考等级、Agent 工作区）；带 `history_start` 时与旧历史前缀合并，支持懒加载分页；`mcp_servers` 是启用服务器 id 列表，`mcp_tools` 按服务器保存工具勾选；assistant 历史项可带仅 UI 使用的 `steps`（上下文注入/思考/工具/回答分段），发送模型前会被剥离 |
+| POST | `/api/sessions/delete` | 删除会话（同时清理该会话的附件缓存目录） |
 | POST | `/api/sessions/rename` | 会话改名 |
 | POST | `/api/sessions/move` | 把 Agent 会话移动到另一个工作区 |
+| POST | `/api/attachments` | 输入区粘贴/选择的 `.txt` / `.md` 文本写入 `.cache/attachments/<会话 ID>/<uuid>.<ext>`，返回缓存文件的绝对路径、名称和大小；单文件上限 1MB |
 | GET | `/api/workspaces` | Agent 工作区注册表（路径、标题、默认工作区） |
 | POST | `/api/workspaces` | `action=add` 添加绝对路径工作区；`rename` 改名；`delete` 删除 |
 | POST | `/api/workspaces/pick` | 弹出本机原生目录选择窗口，返回绝对路径 |
@@ -190,7 +199,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/mcp/restart` | 手动重连指定 MCP 服务器并刷新工具列表 |
 | GET | `/api/agent/configs` | Agent 可用的工具模型 + MCP 服务器 + 检测结果 |
 | GET | `/api/agent/tools?server=<id>` | 获取某个 MCP 服务器的工具（供 Agent 多选） |
-| POST | `/api/agent/chat` | Agent 工具循环，SSE：`context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error`；API 模型的 `done.usage`/`done.session_usage` 带本轮和会话累计统计，`compact=true` 时手动压缩 |
+| POST | `/api/agent/chat` | Agent 工具循环，SSE：`meta` / `inject` / `context` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error`；API 模型的 `done.usage`/`done.session_usage` 带本轮和会话累计统计，`compact=true` 时手动压缩；`servers` 为本次启用的多台 MCP 服务器 id 列表（旧前端只传 `server`），`mcp_enabled=false` 时不发送任何服务器和 `tools`；`meta.servers` / `meta.tool_errors` 返回服务器名和加载失败信息；`inject.items` 只在本轮真正追加 AGENTS.md / runtime-context / 时钟快照时发送，描述新增的上下文内容和“首次注入/已更新/新快照”标签 |
 | GET | `/api/corpora` | `res\` 下的语料目录（文件数、体积） |
 | GET | `/api/train/status` `train/log` | 训练状态与增量日志 |
 | GET | `/api/server/status` | 桥接服务状态与端口 |
@@ -273,6 +282,7 @@ Ollama 配置的聊天超时为 600 秒，其他供应商为 300 秒；Ollama �
   Agent 允许 `native` 和 `unknown`，只隐藏明确 `none`；
 - 输入类型：`input_modalities` 至少 `text`，可增加 `image`；
 - 思考：`reasoning_efforts` 是“档位 → API 参数值”的映射，`off` 为 `null`；
+  界面另提供 `default`（Default，不传任何思考参数），与显式 `off` 区分；
   未知模型不再伪造四档。
 
 API 页点击模型行可手工覆盖上述字段，保存在 `.cache/openai_model_overrides.json`，
@@ -281,10 +291,14 @@ API 页点击模型行可手工覆盖上述字段，保存在 `.cache/openai_mod
 80% 阈值和 16% 近期保留预算，把旧历史替换为检查点摘要；摘要请求复用原 system prompt、
 tools 和旧消息前缀，压缩指令追加在末尾，尽量复用 provider 热前缀。压缩前会修剪超大工具
 结果；摘要失败时退回按工具调用组裁剪，`tool_calls` / `tool_result` 必须成对保留。上下文
-溢出错误会强制压缩并重试一次。Agent 输入框支持 `/compact` 手动压缩当前会话。
+溢出错误会强制压缩并重试一次。Agent 输入框支持 `/compact`，也可从输入框【＋】→「压缩上下文」
+执行同样的手动压缩。
 Agent 的 `max_tokens` 默认 256K（有模型输出字段时用模型值，并受上下文限制），它不是上下文上限；
-单轮输出上限和上下文窗口分开计算。Chat / Agent 输入框下方显示按字符数估算的上下文占用率；
-图片按固定视觉 token 估算，不按 base64 字符数计费。API 模型完成一轮后显示 provider 上报的
+单轮输出上限和上下文窗口分开计算。Chat / Agent 输入框下方的状态栏显示按字符数估算的上下文
+占用率圆环、缓存命中率，以及本轮和会话的输入/输出 token；点击任一项弹出详情，输出上限不再
+默认平铺。图片按固定视觉 token 估算，不按 base64 字符数计费。流式回答按约 100ms 节流解析
+Markdown（先不跑 KaTeX，公式显示为 `$...$` 原文），结束后再做一次完整渲染。API 模型完成一轮后
+显示 provider 上报的
 本轮和会话累计 token（输入、输出、缓存命中/未命中）及命中率，公式为
 缓存读 /（未缓存输入 + 缓存读 + 缓存写）；兼容 DeepSeek
 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` 和 OpenAI
@@ -300,17 +314,42 @@ STDIO 进程，HTTP 每 30 秒做一次 tools/list 健康检查；断连后按 5
 最多连续 10 次，稳定连接后重置计数。重连成功后重新拉取工具列表，超过次数标记 `failed`
 并停止自动重连，可在 MCP 页手动【重连】。已发出的非幂等工具不会自动重放。
 Agent 允许 `tool_use` 为 `native` 或 `unknown` 的 API 模型，只隐藏明确 `none` 的模型；
-不选工具时按普通对话处理，不发送 `tools`、不执行工具调用，MCP 进程仍保持常驻。带工具时按
+MCP 是多服务器模型：会话里 `mcp_enabled` 是总开关，`mcp_servers` 保存启用服务器 id 列表，
+`mcp_tools` 按服务器保存工具勾选；前端浮层可同时启用 A、关闭 B，并用「工具来源」下拉
+选择当前编辑哪台服务器的工具。发送时把启用服务器列表和合并后的工具名发给 `/api/agent/chat`，
+后端从各服务器拉取工具并在调用时按工具名路由回对应服务器；多台服务器工具重名时保留
+先启用的那台。总开关关闭或某台服务器关闭时，其工具不发送、不执行，MCP 进程仍保持常驻；
+开启但一个工具都没勾选时同样不发送 `tools`，两种状态分开保存。切换服务器/工具后立即保存；
+即使会话还没有消息，也会保存一个空会话（标题“新会话”）用于刷新后恢复 MCP 设置。
+首次进入 Agent 时先建立草稿会话，并按已加载的 MCP 配置同步总开关和工具数量；
+MCP 按钮必须一开始就显示正确状态，不能依赖点开 MCP 浮层后才刷新。
+带工具时按
 `tool_calls → tools/call → tool result` 循环，直到模型不再返回工具调用；
 不再使用固定 8 轮上限，用户可随时停止；
-每轮使用 SSE，最终回答逐 token 推给前端；顶部显示运行状态和用时，默认折叠
-思考/工具调用历史，回答始终显示；点击顶部展开历史，单条参数/结果再自行展开。
-思考、工具调用、回答按模型实际输出顺序作为平级时间线行展示。工具参数和结果完整显示并
-完整回填给模型，不做硬截断；只执行本次勾选的工具，模型返回未勾选或不存在的工具时回填
+每轮使用 SSE，最终回答逐 token 推给前端；顶部显示运行状态和用时，当前步骤状态
+（如“正在调用 …”“… 已完成，继续生成…”）紧跟“运行中 · N 秒”后面；完成/停止/失败后清空，
+输入区不再单独显示“完成”状态。默认折叠上下文注入/思考/工具调用历史，回答和会导致会话中断的
+报错始终显示；点击顶部展开历史，单条参数/结果再自行展开。
+上下文注入、思考、工具调用/结果和回答分段写入会话 `history` 条目的 UI-only `steps` 字段，
+刷新或重开会话时由前端重建；发送模型前 `_strip_ui_messages` 会剥离 `steps`，模型上下文仍只
+使用 `model_history`，不做任何改变。
+只有本轮真正追加了 `AGENTS.md` / runtime-context / 时钟快照时，才发送 `inject` 事件并在
+时间线显示「上下文注入」行：首次请求显示 baseline，后续只在内容变化/时钟刷新时显示新快照；
+没有变化时完全不显示。`system` 提示词和 `tools` 是每次请求都携带的请求参数，不作为
+“重新注入”展示。展开可看实际追加内容，标签区分“首次注入 / 已更新 / 新快照”。
+思考、工具调用、回答按模型实际输出顺序作为平级时间线行展示。
+思考行折叠时在“思考”后显示内容的最后一句话，展开后隐藏该摘要并显示完整思考。
+工具结果按 `dlqq-mcp-server` 的返回类型美化：文件读取为行号代码、目录树、搜索结果卡片、
+文本编辑 diff、JSON/键值、命令输出等；每张工具卡片仍保留原始返回。工具参数和结果完整回填
+给模型，不做硬截断；只执行本次勾选的工具，模型返回未勾选或不存在的工具时回填
 “工具不存在”，不调用 MCP。每条思考、回答和工具调用均显示浏览器所在系统本地时区的
 `YYYY-MM-DD HH:mm:ss.SSS` 时间戳。
-`thinking` 支持 `off/low/medium/high` 等档位，按 `reasoning_efforts` 映射到实际 API 参数值；
-`off` 不发送参数；未知模型不伪造档位；本地字符级模型不支持该控件。
+`thinking` 支持 `default/off/low/medium/high` 等档位，按 `reasoning_efforts` 映射到实际 API
+参数值；`default` 表示不发送任何思考参数，`off` 才是显式关闭；未知模型不伪造档位，
+本地字符级模型不支持该控件。DeepSeek 默认开启思考。对 DeepSeek（按 API base_url/name 识别）
+选择 `off` 时必须显式发送 `thinking: {"type": "disabled"}`，选择非 off/default 档位时发送
+`thinking: enabled` 加映射后的 `reasoning_effort`；`default` 不发送 thinking，
+让 DeepSeek 使用自身默认（开启）思考。不能只省略 `reasoning_effort` 来表示关闭。
 工具结果之后会补一条内部续跑 user 提示，避免 Ollama/Qwen 把纯 tool 轮次判成
 “no user query found in messages”。服务器定义保存在 `.cache/mcp_servers.json`；启动时检测
 全部服务器并写入 `.cache/mcp_status.json`。
@@ -319,14 +358,19 @@ Agent 允许 `tool_use` 为 `native` 或 `unknown` 的 API 模型，只隐藏明
 服务端可据此按会话隔离工作区。`mcp_client.MCPClient.call_tool(name, args, meta=...)`
 负责把 `_meta` 放进请求参数。
 
-**会话 / 工作区 / 图片**：Session 存在 `.cache/session-<id>.json`；Agent 工作区注册表存在
+**会话 / 工作区 / 输入区**：Session 存在 `.cache/session-<id>.json`；Agent 工作区注册表存在
 `.cache/workspaces.json`，默认工作区是 `<工程根目录>\.runtime\default_workspace`，可添加其他
 绝对路径；Agent 左侧是「工作区 → 会话」树，每个工作区下只显示自己的会话，一个工作区可保存
 多个会话。新建 Agent 会话默认使用当前工作区，未指定时使用默认工作区。会话保存时记录
 `workspace_id`；同时保存完整的 `model_history`（含 system、tool_calls、tool 结果和最终回答），
-下一轮请求以它为前缀追加新用户消息，避免丢失工具消息导致 prompt cache 中断。首次请求把
-工作区绝对路径、系统时间/时区和根目录 `AGENTS.md` / `CLAUDE.md` 作为追加的 user 上下文；
-之后每 10 分钟最多追加一次时钟快照。system prompt 包含按名称稳定排序的工具指导。
+下一轮请求以它为前缀追加新用户消息，避免丢失工具消息导致 prompt cache 中断。首次请求注入
+工作区指令 baseline（根目录 `AGENTS.md` / `CLAUDE.md`，有上限）和 runtime-context 快照
+（工作区绝对路径、进程 CWD、时区时钟）；后续按 DSH 方式比较后追加：指令内容或 runtime 事实
+变化时才追加一条替换旧快照的 user 消息，未变化不重复注入；工具读取/修改文件后重新发现
+工作区根到该文件之间的嵌套 `AGENTS.md` / `CLAUDE.md`。时钟快照按 step 检查，每 10 分钟最多
+追加一次（工具续跑步骤也可以追加）。会话 JSON 记录 `context_snapshot`、
+`instruction_snapshot` 和 `instruction_paths`，前端保存会话时不能覆盖这些字段。
+system prompt 包含按名称稳定排序的工具指导。
 Agent 调用 MCP 工具时以**会话所属工作区**的绝对路径优先，而不是页面临时选择。
 工作区路径选择通过 `/api/workspaces/pick` 调用本机原生目录窗口。会话支持改名、删除和
 移动工作区（`/api/sessions/move`），移动后每次 MCP 调用仍读取会话当前 `workspace_id`；
@@ -334,12 +378,27 @@ Agent 调用 MCP 工具时以**会话所属工作区**的绝对路径优先，�
 并可拖动右边缘调整宽度，状态保存在浏览器 localStorage。未完成的模型/工具轮次不自动重放。
 Chat / Agent 的多个会话可并行执行：前端按会话保存独立的 DOM、历史、usage、上下文和
 AbortController，切换会话不中止后台流；同一会话只允许一个生成任务，停止按钮只停止当前会话。
-会话打开时默认滚到最新消息，只加载最近 20 条；滚动到顶部按 `history_before` 懒加载更早页面，
-保存时用 `history_start` 合并旧前缀。右侧用户轮次刻度条可跳转，目标未加载时先补页。
+会话打开时默认滚到最新消息，只加载最近 5 个**用户轮次**（不是 20 条消息）；只有用户主动
+向上滚动且 `scrollTop` 变小并接近顶部时才按 `history_before` 补更早一页。程序化滚动
+（打开会话、补页后保持位置、轮次跳转）用 `programmaticScroll` 锁住，不会自动补页；
+初始页不足一屏时保留【加载更早消息】按钮。保存时用 `history_start` 合并旧前缀。
+右侧是 DSH 风格居中紧凑轮次刻度：固定间距、内部滚动、当前轮高亮，可跳转，目标未加载时先补页。
 用户消息在发送时写入 `ts`（本地完整时间），会话 JSON 持久化；发给模型前由后端剥离界面字段。
-模型 `input_modalities` 含 `image` 时输入栏显示【图片】，最多 4 张、单张 6MB；图片以 OpenAI
+输入区不设“新对话”按钮，统一由侧边栏或收起后的侧栏【＋】新建会话。输入框左侧【＋】菜单提供
+图片、`.txt`/`.md` 文本文件和指令；模型与思考等级合并为一个按钮；MCP 只占一个按钮和浮层。
+文本文件先经 `POST /api/attachments` 写入 `.cache/attachments/<会话 ID>/`，发送时把缓存绝对路径
+以 `[附件] ...` 行追加到用户消息末尾，会话删除时清理对应目录，并在上传时顺带清理超过 7 天的
+残留目录。附件路径只是字符串：Chat API 没有文件工具，Agent 的文件工具也可能因 `.cache` 不在
+工作区内而拒绝访问。输入框下方状态栏显示上下文圆环、缓存命中率和本轮/会话 token。
+模型 `input_modalities` 含 `image` 时【＋】菜单可选图片，最多 4 张、单张 6MB；也支持在
+Chat / Agent 输入框直接粘贴剪贴板图片（`paste` 事件的 `clipboardData.items` / `files`），
+与文件选择共用 `addImages` 校验、预览和 DataURL 发送链路。图片以 OpenAI
 兼容 `image_url` 内容块发送，本地字符级模型拒绝。图片 token 按固定视觉 token 估算，不按
-base64 字符数计费。
+base64 字符数计费。聊天消息里的图片和输入框待发送图片预览都支持点击放大：事件委托监听
+`.msgs img, .imagepreviews img`，打开 `#imageViewer` 遮罩层，点击遮罩、关闭按钮或按 Esc 关闭；
+用户图片缩略图、Markdown 图片和待发送预览都适用。
+输入区主按钮同一位置两态：空闲显示 `↑` 发送，生成中显示 `■` 停止；
+图片/文件读取中或提交中禁用。
 
 **生成停止**：提示词用 `用户：` / `助手：`；生成到下一个 `用户：` 直接截断；词表缺这两个标记时
 自动切「续写模式」。

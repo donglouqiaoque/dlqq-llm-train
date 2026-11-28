@@ -76,6 +76,13 @@ WORKSPACE_FILE = os.path.join(CACHE_DIR, "workspaces.json")
 LEGACY_WORKSPACE_FILE = os.path.join(CACHE_DIR, "workspace.json")
 SESSIONS_DIR = CACHE_DIR
 SESSION_LOCK = threading.RLock()
+# 输入区粘贴/选择的文本文件先落到 .cache，再把绝对路径追加到用户消息末尾。
+# 浏览器拿不到原始绝对路径，只能由服务端生成缓存路径；目录按会话隔离，方便删除时清理。
+ATTACHMENT_DIR = os.path.join(CACHE_DIR, "attachments")
+ATTACHMENT_EXTS = (".txt", ".md")
+ATTACHMENT_MAX_BYTES = 1024 * 1024
+ATTACHMENT_MAX_AGE = 7 * 24 * 3600
+ATTACHMENT_PRUNE_AT = 0.0
 STATE = {"token": "", "started": time.time(), "train": None, "server": None}
 
 
@@ -350,6 +357,87 @@ def _session_path(sid):
     return os.path.join(d, "session-" + clean + ".json")
 
 
+def _attachment_dir(sid):
+    clean = _session_id(sid)
+    if not clean:
+        return None
+    return os.path.join(ATTACHMENT_DIR, clean)
+
+
+def _remove_attachment_folder(folder):
+    if not folder:
+        return
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return
+    for name in names:
+        try:
+            os.remove(os.path.join(folder, name))
+        except OSError:
+            pass
+    try:
+        os.rmdir(folder)
+    except OSError:
+        pass
+
+
+def cleanup_attachments(sid):
+    """删除会话时一并清掉该会话的附件缓存；失败不影响会话删除。"""
+    _remove_attachment_folder(_attachment_dir(sid))
+
+
+def _prune_attachments_once():
+    """附件只是缓存：进程内每小时清一次超过 7 天的会话目录。"""
+    global ATTACHMENT_PRUNE_AT
+    now = time.time()
+    if now - ATTACHMENT_PRUNE_AT < 3600:
+        return
+    ATTACHMENT_PRUNE_AT = now
+    try:
+        names = os.listdir(ATTACHMENT_DIR)
+    except OSError:
+        return
+    for name in names:
+        folder = os.path.join(ATTACHMENT_DIR, name)
+        try:
+            if not os.path.isdir(folder):
+                continue
+            if now - os.path.getmtime(folder) < ATTACHMENT_MAX_AGE:
+                continue
+        except OSError:
+            continue
+        _remove_attachment_folder(folder)
+
+
+def save_attachment(session_id, name, content):
+    """把浏览器上传的文本写入 .cache/attachments/<会话>/<uuid>.<ext>。
+
+    文件名只用于展示和决定扩展名，不参与路径拼接；只接受 UTF-8 文本。
+    """
+    folder = _attachment_dir(session_id)
+    if not folder:
+        raise ValueError("会话 ID 不合法")
+    base = os.path.basename(str(name or "").replace("\\", "/")).strip()
+    ext = os.path.splitext(base)[1].lower()
+    if ext not in ATTACHMENT_EXTS:
+        raise ValueError("只支持 .txt / .md 文本文件")
+    text = content if isinstance(content, str) else ""
+    raw = text.encode("utf-8")
+    if len(raw) > ATTACHMENT_MAX_BYTES:
+        raise ValueError("文本文件不能超过 1MB")
+    ensure_cache_dir()
+    _prune_attachments_once()
+    os.makedirs(folder, exist_ok=True)
+    filename = uuid.uuid4().hex + ext
+    path = os.path.join(folder, filename)
+    # newline="" 保留原始换行，避免把用户文件里的 LF 改写成本机 CRLF。
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+    return {"path": os.path.abspath(path), "name": base or filename,
+            "size": len(raw), "ext": ext}
+
+
 def session_title(history, body_title=""):
     title = str(body_title or "").strip()
     if title:
@@ -360,7 +448,10 @@ def session_title(history, body_title=""):
             if isinstance(content, list):
                 content = " ".join(str(x.get("text") or "") for x in content
                                    if isinstance(x, dict))
-            text = str(content or "").strip().replace("\n", " ")
+            # 输入区附件会以 “[附件] 路径” 追加在用户消息末尾，标题只取真正的问题。
+            lines = [line for line in str(content or "").splitlines()
+                     if not line.strip().startswith("[附件]")]
+            text = " ".join(" ".join(lines).split())
             if text:
                 return text[:40]
     return "新会话"
@@ -426,8 +517,12 @@ def _history_preview(content, limit=80):
     return text[:limit]
 
 
-def session_history_page(data, before=None, limit=24):
-    """只返回最近一段历史，并附带用于跳转的全部用户轮次大纲。"""
+def session_history_page(data, before=None, limit=24, turns=None):
+    """只返回最近一段历史，并附带用于跳转的全部用户轮次大纲。
+
+    turns 指定时按「用户轮次」分页：取 end 之前最近 turns 个用户消息，
+    从其中最早的一条开始返回，保证一页包含完整问答而不是半截助手回答。
+    """
     history = data.get("history") if isinstance(data, dict) else None
     if not isinstance(history, list):
         history = []
@@ -440,7 +535,17 @@ def session_history_page(data, before=None, limit=24):
         end = total if before is None else max(0, min(total, int(before)))
     except (TypeError, ValueError):
         end = total
-    start = max(0, end - limit)
+    try:
+        want_turns = max(0, int(turns or 0))
+    except (TypeError, ValueError):
+        want_turns = 0
+    if want_turns > 0:
+        user_indexes = [i for i, msg in enumerate(history)
+                        if isinstance(msg, dict) and msg.get("role") == "user"]
+        candidates = [i for i in user_indexes if i < end]
+        start = 0 if len(candidates) <= want_turns else candidates[-want_turns]
+    else:
+        start = max(0, end - limit)
     outline = []
     for index, msg in enumerate(history):
         if not isinstance(msg, dict) or msg.get("role") != "user":
@@ -510,8 +615,9 @@ def save_session(body):
     if not sid:
         sid = uuid.uuid4().hex
     title = str(body.get("title") or "").strip()
-    if not title and old and old.get("title"):
+    if not title and old and old.get("title") and old.get("title") != "新会话":
         # 自动保存不能把用户手动改过的会话名覆盖回首条消息。
+        # “新会话”是空会话的默认名，首条消息到达后应允许重新从内容生成标题。
         title = old["title"]
     title = session_title(history, title)
     if kind == "agent":
@@ -523,6 +629,48 @@ def save_session(body):
             wid = default_workspace(reg).get("id")
     else:
         wid = ""
+    mcp_enabled = body.get("mcp_enabled")
+    if mcp_enabled is None:
+        mcp_enabled = (old or {}).get("mcp_enabled", True)
+    elif isinstance(mcp_enabled, str):
+        mcp_enabled = mcp_enabled.strip().lower() not in ("0", "false", "off", "no", "")
+    # 会话级 MCP 服务器集合：每台服务器单独启用/禁用，并保存各自的工具勾选。
+    if "mcp_servers" in body:
+        raw_mcp_servers = body.get("mcp_servers")
+    else:
+        raw_mcp_servers = (old or {}).get("mcp_servers") or []
+    mcp_servers = []
+    if isinstance(raw_mcp_servers, list):
+        for item in raw_mcp_servers:
+            sid_item = str(item or "").strip()
+            if sid_item and sid_item not in mcp_servers:
+                mcp_servers.append(sid_item)
+    if "mcp_tools" in body:
+        raw_mcp_tools = body.get("mcp_tools")
+    else:
+        raw_mcp_tools = (old or {}).get("mcp_tools") or {}
+    mcp_tools = {}
+    if isinstance(raw_mcp_tools, dict):
+        for sid_item, names in raw_mcp_tools.items():
+            sid_item = str(sid_item or "").strip()
+            if not sid_item or not isinstance(names, list):
+                continue
+            clean_names = []
+            for name in names:
+                name = str(name or "").strip()
+                if name and name not in clean_names:
+                    clean_names.append(name)
+            # 空数组也要保留：区分「启用但一个工具没选」和「没有保存过工具状态」。
+            mcp_tools[sid_item] = clean_names
+    server_value = str(body.get("server") or "").strip()
+    if not server_value and mcp_servers:
+        server_value = mcp_servers[0]
+    if "tools" in body and isinstance(body.get("tools"), list):
+        flat_tools = body.get("tools")
+    else:
+        flat_tools = []
+        for sid_item in mcp_servers:
+            flat_tools.extend(mcp_tools.get(sid_item) or [])
     data = {
         "id": sid,
         "workspace_id": wid,
@@ -533,14 +681,24 @@ def save_session(body):
         "history": history,
         "config": str(body.get("config") or ""),
         "model": str(body.get("model") or ""),
-        "server": str(body.get("server") or ""),
-        "tools": body.get("tools") if isinstance(body.get("tools"), list) else [],
-        "thinking": str(body.get("thinking") or "off"),
+        "server": server_value,
+        "tools": flat_tools,
+        "mcp_servers": mcp_servers,
+        "mcp_tools": mcp_tools,
+        "thinking": str(body.get("thinking") or "default"),
+        # 关闭 MCP 和「启用但一个工具都没选」是两种状态，必须单独保存。
+        "mcp_enabled": bool(mcp_enabled),
         "model_history": ((old or {}).get("model_history")
                           if kind == "agent" else None),
         "last_usage": (old or {}).get("last_usage"),
         "usage_totals": (old or {}).get("usage_totals"),
         "last_time_context": (old or {}).get("last_time_context"),
+        # DSH 风格上下文快照：前端保存会话时不能覆盖后端刚写入的基线/摘要。
+        "context_snapshot": (old or {}).get("context_snapshot"),
+        "instruction_snapshot": (old or {}).get("instruction_snapshot"),
+        # 工具触碰过的目录：下一轮仍要包含这些目录下的嵌套 AGENTS.md，
+        # 否则 digest 会来回变化，导致重复注入“指令已更新”。
+        "instruction_paths": (old or {}).get("instruction_paths"),
     }
     path = _session_path(sid)
     with SESSION_LOCK:
@@ -574,6 +732,7 @@ def delete_session(sid):
                     pass
             except OSError:
                 return False
+    cleanup_attachments(sid)
     return True
 
 
@@ -1619,17 +1778,22 @@ def openai_models_for(api):
 
 
 def _thinking_level(value):
-    """把旧布尔值或思考等级统一成 off/low/medium/high。"""
+    """把旧布尔值或思考等级统一成 default/off/low/medium/high。
+
+    `default` 表示不传思考参数，交给服务端默认行为；`off` 才是显式关闭。
+    """
     if isinstance(value, bool):
         return "medium" if value else "off"
     text = str(value or "").strip().lower()
-    if text in ("", "off", "false", "0", "none", "no"):
+    if text in ("", "default", "auto"):
+        return "default"
+    if text in ("off", "false", "0", "none", "no"):
         return "off"
     if text in ("true", "on", "yes", "1"):
         return "medium"
     if text in ("low", "medium", "high", "minimal", "max", "xhigh"):
         return text
-    return "off"
+    return "default"
 
 
 def openai_model_thinking(api, model):
@@ -1745,46 +1909,130 @@ def _agent_tool_guidance(tools):
             "不要反复用相同参数重试。")
 
 
-def _workspace_instructions(workspace_path, limit=32768):
-    """读取工作区根目录的 AGENTS.md / CLAUDE.md，作为首个请求的持久上下文。"""
+def _workspace_instruction_files(workspace_path, touched_paths=None):
+    """读取工作区根目录和工具触碰目录链上的 AGENTS.md / CLAUDE.md。
+
+    DSH 的 baseline 只包含首次请求可见的目录；之后读取/修改文件时，会把
+    cwd 到该文件之间的嵌套 AGENTS.md 作为增量指令重新投影。这里保持同样的
+    “根目录 baseline + 工具触碰目录增量”语义，避免会话中途看不到子目录规则。
+    """
+    files = []
     if not workspace_path:
-        return ""
-    found = []
-    for name in ("AGENTS.md", "CLAUDE.md"):
-        path = os.path.join(workspace_path, name)
+        return files
+    root = os.path.abspath(workspace_path)
+    root_key = os.path.normcase(root)
+    dirs = [root]
+    for raw in touched_paths or []:
         try:
-            if not os.path.isfile(path) or os.path.getsize(path) > 1024 * 1024:
-                continue
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                text = f.read().strip()
-        except OSError:
+            raw = str(raw or "").strip()
+            if not os.path.isabs(raw):
+                raw = os.path.join(root, raw)
+            target = os.path.abspath(raw)
+        except (OSError, ValueError):
             continue
-        if text and text not in found:
-            found.append(text)
-    if not found:
-        return ""
-    text = "\n\n".join(found)
-    if len(text) > limit:
-        text = text[:limit] + "\n\n[工作区指令已截断]"
-    return text
+        target_key = os.path.normcase(target)
+        if target_key != root_key and not target_key.startswith(root_key + os.sep):
+            continue
+        directory = target if os.path.isdir(target) else os.path.dirname(target)
+        chain = []
+        while directory:
+            directory_key = os.path.normcase(directory)
+            if directory_key != root_key and not directory_key.startswith(root_key + os.sep):
+                break
+            chain.append(directory)
+            parent = os.path.dirname(directory)
+            if parent == directory:
+                break
+            directory = parent
+        for item in reversed(chain):
+            if item not in dirs:
+                dirs.append(item)
+    # 目录链必须稳定排序，否则同一份指令的 digest 会在两次请求之间抖动。
+    dirs = [root] + sorted(d for d in dirs if d != root)
+    seen = set()
+    for directory in dirs:
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            path = os.path.join(directory, name)
+            try:
+                if not os.path.isfile(path) or os.path.getsize(path) > 1024 * 1024:
+                    continue
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read().strip()
+            except OSError:
+                continue
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            display = os.path.relpath(path, root).replace(os.sep, "/")
+            files.append({"name": display, "path": path, "content": text})
+    return files
 
 
-def _agent_runtime_message(workspace_path, include_time=True):
-    """运行时上下文用 user 快照追加，避免每步重写 system prompt 破坏前缀缓存。"""
-    now = datetime.datetime.now().astimezone()
-    lines = [
-        "<system-reminder>",
-        "以下是当前运行时上下文，不是新的用户指令。",
-        f"当前工作区绝对路径：{workspace_path or '未设置'}",
-    ]
-    if include_time:
-        lines.append(f"系统时间：{now.isoformat(timespec='milliseconds')}")
-        lines.append(f"系统时区：{now.tzname() or ''}")
-    instructions = _workspace_instructions(workspace_path)
-    if instructions:
-        lines.extend(["", "工作区指令：", instructions])
-    lines.append("</system-reminder>")
-    return {"role": "user", "content": "\n".join(lines)}
+def _instruction_digest(files):
+    """指纹只记录文件身份和内容摘要，用于判断工作区指令是否变化。"""
+    out = []
+    for item in files or []:
+        out.append({
+            "name": item.get("name") or "",
+            "path": item.get("path") or "",
+            "digest": hashlib.sha256(
+                str(item.get("content") or "").encode("utf-8")).hexdigest(),
+        })
+    return out
+
+
+def _render_instruction_message(files, update=False):
+    """把工作区指令渲染成 user 运行时上下文。
+
+    DSH 把 AGENTS.md 当作独立 agent-instructions 消息：首次请求注入 baseline，
+    之后只在文件变化时追加替换消息；这里保持同样的“baseline + 更新”语义。
+    """
+    if not files:
+        if not update:
+            return None
+        body = "当前工作区没有生效的 AGENTS.md / CLAUDE.md；之前的指令快照不再适用。"
+        intro = "Workspace instructions changed."
+    else:
+        parts = []
+        for item in files:
+            parts.append(f"文件：{item.get('name') or ''}\n{item.get('content') or ''}")
+        body = "\n\n".join(parts)
+        if len(body) > 32768:
+            body = body[:32768] + "\n\n[工作区指令已截断]"
+        intro = ("Workspace instructions changed. This replaces all earlier "
+                 "workspace instruction snapshots." if update else
+                 "Workspace instructions for this session:")
+    body = re.sub(r"</system-reminder\s*>", "<\\/system-reminder>", body,
+                  flags=re.IGNORECASE)
+    return {
+        "role": "user",
+        "content": f"<system-reminder>\n{intro}\n\n{body}\n</system-reminder>",
+    }
+
+
+def _runtime_context_sections(workspace_path, workspace_title=""):
+    """当前运行时事实；和 DSH 一样按 section 比较，变化才注入新快照。"""
+    title = str(workspace_title or "").strip()
+    lines = [f"当前工作区绝对路径：{workspace_path or '未设置'}"]
+    if title:
+        lines.append(f"工作区名称：{title}")
+    lines.append(f"WebUI 进程工作目录：{os.getcwd()}")
+    return [{"name": "working-directory", "text": "\n".join(lines)}]
+
+
+def _render_runtime_context_message(sections, update=False):
+    body = "\n\n".join(str(item.get("text") or "") for item in sections or [])
+    if not body:
+        return None
+    intro = ("The following information describes your current session. "
+             "It replaces earlier versions of this context, including any "
+             "retained in conversation summaries." if update else
+             "The following information describes your current session:")
+    # 防止内容里的 </system-reminder> 提前结束框架。
+    body = re.sub(r"</system-reminder\s*>", "<\\/system-reminder>", body,
+                  flags=re.IGNORECASE)
+    return {"role": "user",
+            "content": f"<system-reminder>\n{intro}\n\n{body}\n</system-reminder>"}
 
 
 def _agent_time_message(workspace_path):
@@ -1800,6 +2048,90 @@ def _agent_time_message(workspace_path):
             "</system-reminder>"
         ),
     }
+
+
+def _touched_paths_from_tool_args(args):
+    """从 MCP 工具参数里提取文件/目录路径，用于重新发现嵌套 AGENTS.md。"""
+    if not isinstance(args, dict):
+        return []
+    out = []
+    for key in ("file_path", "path", "dir_path", "directory",
+                "source_path", "target_path", "file"):
+        value = args.get(key)
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def _clip_injection_text(text, limit=20000):
+    text = str(text or "")
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n\n[界面展示已截断]"
+
+
+def _mcp_servers_label(servers):
+    names = [str(s.get("name") or s.get("id") or "") for s in servers or []
+             if isinstance(s, dict)]
+    names = [n for n in names if n]
+    return "、".join(names)
+
+
+def _agent_injection_items(workspace, workspace_path, instruction_files=None,
+                           instruction_added=False, runtime_sections=None,
+                           runtime_added=False, time_snapshot="",
+                           first_request=False):
+    """只描述本轮真正追加进 model_history 的上下文。
+
+    仿 DSH：没有变化就不返回任何行；system prompt、tools 和已有历史前缀
+    是每次请求都发送的请求参数，不算“重新注入”，不在这里展示。
+    """
+    items = []
+    if instruction_added:
+        files = instruction_files if instruction_files is not None else \
+            _workspace_instruction_files(workspace_path)
+        tag = "首次注入" if first_request else "已更新"
+        if files:
+            for item in files:
+                items.append({
+                    "kind": "agents", "label": item["name"],
+                    "content": _clip_injection_text(item["content"]),
+                    "added": True, "tag": tag,
+                    "note": ("首次请求注入工作区指令 baseline" if first_request
+                             else "指令文件内容变化，追加新的替换快照"),
+                })
+        else:
+            items.append({
+                "kind": "agents", "label": "AGENTS.md / CLAUDE.md",
+                "content": "当前工作区没有生效的工作区指令文件；之前的指令快照不再适用。",
+                "added": True, "tag": tag,
+                "note": "指令文件被移除，追加失效说明",
+            })
+    if runtime_added:
+        sections = runtime_sections if runtime_sections is not None else \
+            _runtime_context_sections(workspace_path)
+        runtime_text = "\n\n".join(str(item.get("text") or "") for item in sections)
+        title = str((workspace or {}).get("title") or "").strip() or "未命名"
+        items.append({
+            "kind": "workspace", "label": "Workspace / CWD",
+            "content": _clip_injection_text(runtime_text or (
+                f"工作区名称：{title}\n工作区路径：{workspace_path or '未设置'}\n"
+                f"WebUI 进程 CWD：{os.getcwd()}")),
+            "added": True, "tag": "首次注入" if first_request else "已更新",
+            "note": ("首次请求注入 runtime-context 快照" if first_request
+                     else "工作区/运行目录变化，追加新的替换快照"),
+        })
+    if time_snapshot:
+        items.append({
+            "kind": "time", "label": "Time / 时钟快照",
+            "content": _clip_injection_text(time_snapshot),
+            "added": True, "tag": "首次注入" if first_request else "新快照",
+            "note": "每 10 分钟最多追加一次；工具续跑步骤也可以追加",
+        })
+    return items
 
 
 def _usage_first(*values):
@@ -2172,25 +2504,49 @@ def _is_context_overflow_text(text):
     ))
 
 
-def openai_thinking_payload(info, level):
-    """把界面上的思考档位映射成上游 API 参数。"""
+def _is_deepseek_api(api):
+    """DeepSeek 的思考开关走 thinking.type，而不是只靠 reasoning_effort。"""
+    if not isinstance(api, dict):
+        return False
+    base = str(api.get("base_url") or "").lower()
+    name = str(api.get("name") or "").lower()
+    return "deepseek" in base or "deepseek" in name
+
+
+def openai_thinking_payload(info, level, api=None):
+    """把界面上的思考档位映射成上游 API 参数。
+
+    DeepSeek 默认开启思考，必须显式传 thinking.type=disabled 才能关闭；
+    只省略 reasoning_effort 不会关闭思考。
+    """
     info = info or {}
+    deepseek = _is_deepseek_api(api)
+    # Default 表示不传任何思考参数，让 provider 用自身默认值（DeepSeek 默认开启思考）。
+    if level == "default":
+        return {}
     efforts = info.get("reasoning_efforts")
     if info.get("supported") is False and not isinstance(efforts, dict):
         return {}
     if isinstance(efforts, dict):
         if level == "off":
-            return {}
+            return {"thinking": {"type": "disabled"}} if deepseek else {}
         if level in efforts:
             value = efforts[level]
             if value is None:
-                return {}
-            return {"reasoning_effort": str(value)}
+                return {"thinking": {"type": "disabled"}} if deepseek else {}
+            payload = {"reasoning_effort": str(value)}
+            if deepseek:
+                payload["thinking"] = {"type": "enabled"}
+            return payload
         return {}
     if level == "off":
+        if deepseek:
+            return {"thinking": {"type": "disabled"}}
         if info.get("mode") == "boolean":
             return {"thinking": False}
         return {}
+    if deepseek:
+        return {"thinking": {"type": "enabled"}, "reasoning_effort": level}
     if info.get("mode") == "boolean":
         return {"thinking": True}
     return {"reasoning_effort": level}
@@ -2200,6 +2556,8 @@ def ollama_thinking_payload(info, level):
     """Ollama 原生 think 支持布尔和字符串；OpenAI 兼容层同时带 reasoning_effort。"""
     info = info or {}
     if info.get("supported") is False:
+        return {}
+    if level == "default":
         return {}
     if level == "off":
         return {"think": False, "reasoning_effort": "none"}
@@ -2383,7 +2741,8 @@ class Handler(BaseHTTPRequestHandler):
                     page = session_history_page(
                         data,
                         (qs.get("history_before") or [None])[0],
-                        (qs.get("history_limit") or ["24"])[0])
+                        (qs.get("history_limit") or ["24"])[0],
+                        (qs.get("history_turns") or [None])[0])
                     data = dict(data)
                     data["history"] = page.pop("history")
                     extra = page
@@ -2583,6 +2942,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self._err(400, "会话或工作区不存在，且只有 Agent 会话可以移动")
                 self._json({"ok": True, "session": data,
                             "sessions": list_sessions()})
+            elif path == "/api/attachments":
+                # 输入区粘贴/选择的 .txt/.md 先缓存，前端再把返回的绝对路径追加到消息里。
+                try:
+                    info = save_attachment(body.get("session_id"),
+                                           body.get("name"),
+                                           body.get("content"))
+                except ValueError as e:
+                    return self._err(400, str(e))
+                self._json({"ok": True, **info})
             elif path == "/api/workspaces/pick":
                 try:
                     picked = pick_workspace_folder()
@@ -2963,7 +3331,7 @@ class Handler(BaseHTTPRequestHandler):
         if "thinking" in body:
             level = _thinking_level(body.get("thinking"))
             payload.update(openai_thinking_payload(
-                openai_model_thinking(api, model), level))
+                openai_model_thinking(api, model), level, api=api))
         overflow_retries = 0
         while True:
             payload["messages"] = compact_for_context(
@@ -3004,7 +3372,9 @@ class Handler(BaseHTTPRequestHandler):
             })
             self._sse("meta", {"model": f"{api['name']}/{model}", "config": f"{api['name']}/{model}",
                                "info": {"backend": "openai",
-                                        "thinking": _thinking_level(body.get("thinking")) != "off"}})
+                                        "thinking": _thinking_level(
+                                            body.get("thinking")) not in (
+                                                "off", "default")}})
             for obj in ollama.iter_sse(resp):
                 part = _usage_from_obj(obj)
                 if part:
@@ -3242,6 +3612,24 @@ class Handler(BaseHTTPRequestHandler):
     def _agent_chat(self, body):
         model = str(body.get("model") or "").strip()
         server_id = str(body.get("server") or "").strip()
+        # 会话级 MCP 开关：关闭时不发送 server/tools，Agent 退化为普通对话。
+        # servers 是多个 MCP 服务器 id 的列表；旧前端只传 server，仍兼容。
+        mcp_enabled = body.get("mcp_enabled")
+        if mcp_enabled is None:
+            mcp_enabled = True
+        elif isinstance(mcp_enabled, str):
+            mcp_enabled = mcp_enabled.strip().lower() not in ("0", "false", "off", "no", "")
+        server_ids = []
+        raw_servers = body.get("servers")
+        if isinstance(raw_servers, list):
+            for item in raw_servers:
+                sid = str(item or "").strip()
+                if sid and sid not in server_ids:
+                    server_ids.append(sid)
+        if not server_ids and server_id:
+            server_ids.append(server_id)
+        if not mcp_enabled:
+            server_ids = []
         api = None
         if model.startswith("api:"):
             api_id, upstream = parse_openai_model(model)
@@ -3270,7 +3658,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err(400, "这个 Ollama 模型不支持工具调用")
             backend = "ollama"
             model_label = model
-        server = find_mcp_server(server_id) if server_id else None
+        server_entries = []
+        for sid in server_ids:
+            srv = find_mcp_server(sid)
+            if srv:
+                server_entries.append(srv)
         msgs = body.get("messages")
         if not isinstance(msgs, list) or not msgs:
             text = str(body.get("text") or "").strip()
@@ -3281,22 +3673,37 @@ class Handler(BaseHTTPRequestHandler):
         thinking_info = openai_model_thinking(api, upstream) if backend == "openai" else {}
 
         self._sse_start()
-        client = None
+        server_clients = {}
         tools = []
-        allowed_names = set()
+        allowed_tool_server = {}
+        tool_errors = []
         try:
             selected = body.get("tools")
             selected_names = None
             if isinstance(selected, list) and selected:
                 selected_names = {str(x) for x in selected}
-            if server and selected_names:
-                client = ensure_mcp_client(server)
-                all_tools = client.list_tools()
-                all_tools = [t for t in all_tools
-                             if isinstance(t, dict) and t.get("name") in selected_names]
-                tools = mcp_client.openai_tools(all_tools)
-                allowed_names = {t.get("function", {}).get("name")
-                                 for t in tools if isinstance(t, dict)}
+            if server_entries and selected_names:
+                for srv in server_entries:
+                    try:
+                        client = ensure_mcp_client(srv)
+                        all_tools = client.list_tools()
+                    except Exception as e:
+                        tool_errors.append(
+                            f"{srv.get('name') or srv.get('id')}: {e}")
+                        continue
+                    server_clients[srv["id"]] = client
+                    chosen = [t for t in all_tools
+                              if isinstance(t, dict) and t.get("name") in selected_names]
+                    for tool in mcp_client.openai_tools(chosen):
+                        fn = tool.get("function") if isinstance(tool, dict) else None
+                        name = fn.get("name") if isinstance(fn, dict) else None
+                        # 多个服务器的工具重名时只保留先启用的一台，避免模型调用歧义。
+                        if not name or name in allowed_tool_server:
+                            continue
+                        allowed_tool_server[name] = srv["id"]
+                        tools.append(tool)
+            allowed_names = set(allowed_tool_server)
+            server_label = _mcp_servers_label(server_entries)
             session_id = _session_id(body.get("session_id")) or _session_id(body.get("id"))
             session = load_session(session_id) if session_id else None
             stored_history = (session.get("model_history")
@@ -3331,10 +3738,15 @@ class Handler(BaseHTTPRequestHandler):
                 after = context_tokens(compacted, tools)
                 save_session_model_history(
                     session_id, compacted,
-                    {"last_time_context": session.get("last_time_context")})
+                    {"last_time_context": session.get("last_time_context"),
+                     # 压缩可能带走运行时快照；下一轮重新注入。
+                     "context_snapshot": None, "instruction_snapshot": None})
                 self._sse("meta", {"model": model_label,
-                                   "server": server["name"] if server else "",
+                                   "server": server_label,
+                                   "servers": [s.get("name") or s.get("id")
+                                               for s in server_entries],
                                    "tools": len(tools), "thinking": thinking,
+                                   "tool_errors": tool_errors,
                                    "backend": backend})
                 self._sse("context", {"used": after, "total": ctx,
                                       "output": out_budget})
@@ -3348,8 +3760,11 @@ class Handler(BaseHTTPRequestHandler):
                 "dsh/workspace": workspace.get("path") or _default_workspace_dir(),
             }
             self._sse("meta", {"model": model_label,
-                               "server": server["name"] if server else "",
+                               "server": server_label,
+                               "servers": [s.get("name") or s.get("id")
+                                           for s in server_entries],
                                "tools": len(tools), "thinking": thinking,
+                               "tool_errors": tool_errors,
                                "backend": backend})
             last_user = None
             for item in reversed(msgs):
@@ -3365,7 +3780,45 @@ class Handler(BaseHTTPRequestHandler):
             system_prompt += "\n\n" + _agent_tool_guidance(tools)
             model_history = stored_history
             workspace_path = workspace.get("path") or _default_workspace_dir()
-            time_context_at = time.time()
+            first_request = not (isinstance(stored_history, list) and stored_history)
+            try:
+                last_tc = float(session.get("last_time_context") or 0) \
+                    if isinstance(session, dict) else 0.0
+            except (TypeError, ValueError):
+                last_tc = 0.0
+
+            # 工作区指令：baseline 只在首次请求注入；文件变化时追加一条替换快照。
+            known_instruction_paths = []
+            if isinstance(session, dict) and isinstance(
+                    session.get("instruction_paths"), list):
+                for item in session["instruction_paths"]:
+                    value = str(item or "").strip()
+                    if value and value not in known_instruction_paths:
+                        known_instruction_paths.append(value)
+            known_instruction_paths = known_instruction_paths[-200:]
+            instruction_files = _workspace_instruction_files(
+                workspace_path, known_instruction_paths)
+            instruction_digest = _instruction_digest(instruction_files)
+            previous_instructions = (session.get("instruction_snapshot")
+                                     if isinstance(session, dict) else None)
+            instruction_added = (bool(instruction_files) if first_request
+                                 else instruction_digest != previous_instructions)
+            instruction_message = (_render_instruction_message(
+                instruction_files, update=not first_request)
+                if instruction_added else None)
+
+            # runtime-context：和 DSH 一样按 section 比较，未变化不重复注入。
+            runtime_sections = _runtime_context_sections(
+                workspace_path, (workspace or {}).get("title") or "")
+            previous_runtime = (session.get("context_snapshot")
+                                if isinstance(session, dict) else None)
+            runtime_added = first_request or previous_runtime != runtime_sections
+            runtime_message = (_render_runtime_context_message(
+                runtime_sections, update=not first_request)
+                if runtime_added else None)
+
+            time_context_at = last_tc
+            time_snapshot = ""
             if isinstance(model_history, list) and model_history:
                 messages = _strip_ui_messages(model_history)
                 if messages and messages[0].get("role") == "system":
@@ -3378,31 +3831,71 @@ class Handler(BaseHTTPRequestHandler):
                             messages[-1], last_user))):
                     messages.append(last_user)
                     added_user = True
-                # 超过 10 分钟才追加新的时钟快照；追加在最后，不重写已有前缀。
-                last_tc = 0.0
-                if isinstance(session, dict):
-                    try:
-                        last_tc = float(session.get("last_time_context") or 0)
-                    except (TypeError, ValueError):
-                        last_tc = 0.0
+                # 新上下文追加在最后，不重写已有历史前缀。
+                if instruction_added and instruction_message is not None:
+                    messages.append(instruction_message)
+                if runtime_added and runtime_message is not None:
+                    messages.append(runtime_message)
+                # 时钟快照：每个 step 都可检查；这里先处理第一步。
                 if added_user and time.time() - last_tc >= 600:
-                    messages.append(_agent_time_message(workspace_path))
+                    snapshot = _agent_time_message(workspace_path)
+                    messages.append(snapshot)
+                    time_snapshot = snapshot["content"]
                     time_context_at = time.time()
-                else:
-                    time_context_at = last_tc
+                    last_tc = time_context_at
             else:
                 messages = list(msgs)
                 messages.insert(0, {"role": "system", "content": system_prompt})
-                messages.insert(1, _agent_runtime_message(workspace_path))
+                # DSH 的顺序是：用户消息在前，随后是工作区指令、runtime-context、时钟。
+                if instruction_added and instruction_message is not None:
+                    messages.append(instruction_message)
+                if runtime_added and runtime_message is not None:
+                    messages.append(runtime_message)
+                snapshot = _agent_time_message(workspace_path)
+                messages.append(snapshot)
+                time_snapshot = snapshot["content"]
+                time_context_at = time.time()
+                last_tc = time_context_at
             user_query = ""
             for item in reversed(msgs):
                 if isinstance(item, dict) and item.get("role") == "user":
                     user_query = _message_content_text(item)
                     break
+            # 上下文注入只用于界面展示；只有本轮真正追加了 user 上下文消息才发送，
+            # 没变化时前端不会出现“上下文注入”行。
+            try:
+                injection_items = _agent_injection_items(
+                    workspace=workspace, workspace_path=workspace_path,
+                    first_request=first_request, time_snapshot=time_snapshot,
+                    instruction_files=instruction_files,
+                    instruction_added=instruction_added,
+                    runtime_sections=runtime_sections,
+                    runtime_added=runtime_added)
+                if injection_items:
+                    self._sse("inject", {"items": injection_items})
+            except (OSError, TypeError, ValueError):
+                pass
             turn_usage = None
             turn_usage_missing = False
             overflow_retries = 0
+            context_compacted = False
             while True:
+                # DSH 的 time-context 是 step 级：工具续跑很久时也能在后面的 step 追加。
+                if time.time() - last_tc >= 600:
+                    snapshot = _agent_time_message(workspace_path)
+                    messages.append(snapshot)
+                    time_snapshot = snapshot["content"]
+                    time_context_at = time.time()
+                    last_tc = time_context_at
+                    # 工具续跑超过 10 分钟时也要补显示这一次真正追加的时钟快照。
+                    try:
+                        late_items = _agent_injection_items(
+                            workspace=workspace, workspace_path=workspace_path,
+                            first_request=False, time_snapshot=time_snapshot)
+                        if late_items:
+                            self._sse("inject", {"items": late_items})
+                    except (OSError, TypeError, ValueError):
+                        pass
                 output_budget = (openai_output_budget(api, upstream)
                                  if backend == "openai" else 256000)
                 payload = {"model": tag, "messages": messages,
@@ -3414,6 +3907,8 @@ class Handler(BaseHTTPRequestHandler):
                         api, upstream, messages,
                         openai_model_context(api, upstream),
                         output_budget, payload.get("tools"))
+                    if compacted is not messages:
+                        context_compacted = True
                     payload["messages"] = compacted
                     messages = compacted
                 elif context_tokens(messages, payload.get("tools")) > max(
@@ -3432,7 +3927,8 @@ class Handler(BaseHTTPRequestHandler):
                     "output": output_budget,
                 })
                 if backend == "openai":
-                    payload.update(openai_thinking_payload(thinking_info, thinking))
+                    payload.update(openai_thinking_payload(
+                        thinking_info, thinking, api=api))
                     try:
                         conn, resp = _open_chat_stream(
                             api, payload, timeout=openai_client.chat_timeout(api))
@@ -3445,6 +3941,7 @@ class Handler(BaseHTTPRequestHandler):
                                 api, upstream, messages,
                                 openai_model_context(api, upstream),
                                 output_budget, tools, force=True)
+                            context_compacted = True
                             if context_tokens(messages, tools) < before:
                                 continue
                         self._sse("error", {"error": f"API 返回错误：{e.body[:500]}"})
@@ -3464,6 +3961,7 @@ class Handler(BaseHTTPRequestHandler):
                             api, upstream, messages,
                             openai_model_context(api, upstream),
                             output_budget, tools, force=True)
+                        context_compacted = True
                         if context_tokens(messages, tools) < before:
                             continue
                     self._sse("error", {"error": f"{backend} {resp.status}：{raw[:500]}"})
@@ -3532,6 +4030,7 @@ class Handler(BaseHTTPRequestHandler):
                                      "content": "".join(parts),
                                      "tool_calls": call_list})
                     round_results = []
+                    touched_paths = []
                     for i, call in enumerate(call_list):
                         fn = call.get("function") or {}
                         name = str(fn.get("name") or "")
@@ -3542,28 +4041,36 @@ class Handler(BaseHTTPRequestHandler):
                                 args = {}
                         except ValueError:
                             args = {}
+                        touched_paths.extend(_touched_paths_from_tool_args(args))
                         self._sse("tool", {"name": name, "arguments": args,
                                            "index": indexes[i]})
-                        if name not in allowed_names or client is None:
+                        if name not in allowed_names or name not in allowed_tool_server:
                             text = f"工具不存在：{name}"
                             is_error = True
                         else:
+                            tool_server_id = allowed_tool_server[name]
+                            tool_server = next(
+                                (s for s in server_entries
+                                 if s.get("id") == tool_server_id), None)
+                            tool_client = server_clients.get(tool_server_id)
                             try:
-                                entry_now = mcp_entry(server["id"]) if server else None
-                                if (not client.alive() or
+                                entry_now = mcp_entry(tool_server_id)
+                                if (tool_client is None or not tool_client.alive() or
                                         (entry_now and entry_now.get("state") in
                                          ("reconnecting", "failed"))):
-                                    client = ensure_mcp_client(server)
-                                result = client.call_tool(name, args, meta=agent_meta)
+                                    tool_client = ensure_mcp_client(tool_server)
+                                    server_clients[tool_server_id] = tool_client
+                                result = tool_client.call_tool(name, args, meta=agent_meta)
                                 text = mcp_client.tool_result_text(result)
                                 is_error = bool(result.get("isError")) if isinstance(result, dict) else False
                             except Exception as e:
                                 text = f"MCP 工具调用失败：{type(e).__name__}: {e}"
                                 is_error = True
-                                if server and ((client is None or not client.alive()) or any(
+                                if tool_server and ((tool_client is None or
+                                                     not tool_client.alive()) or any(
                                         word in str(e) for word in
                                         ("超时", "未运行", "无法连接", "断开"))):
-                                    mcp_mark_unhealthy(server.get("id"), text)
+                                    mcp_mark_unhealthy(tool_server.get("id"), text)
                         self._sse("tool_result", {"name": name, "text": text,
                                                    "index": indexes[i],
                                                    "is_error": is_error})
@@ -3580,6 +4087,34 @@ class Handler(BaseHTTPRequestHandler):
                         f"用户请求：{user_query}\n\n"
                         f"工具执行结果：\n{result_text}\n\n"
                         "请根据以上工具结果继续完成用户请求。"})
+                    # DSH：工具触碰文件后，重新发现 cwd→文件之间的嵌套 AGENTS.md/
+                    # CLAUDE.md；只有内容变化时才追加一条替换快照。
+                    if touched_paths:
+                        for path in touched_paths:
+                            if path not in known_instruction_paths:
+                                known_instruction_paths.append(path)
+                        known_instruction_paths = known_instruction_paths[-200:]
+                        refreshed_files = _workspace_instruction_files(
+                            workspace_path, known_instruction_paths)
+                        refreshed_digest = _instruction_digest(refreshed_files)
+                        if refreshed_digest != instruction_digest:
+                            instruction_files = refreshed_files
+                            instruction_digest = refreshed_digest
+                            update_message = _render_instruction_message(
+                                instruction_files, update=True)
+                            if update_message is not None:
+                                messages.append(update_message)
+                                try:
+                                    late_items = _agent_injection_items(
+                                        workspace=workspace,
+                                        workspace_path=workspace_path,
+                                        instruction_files=instruction_files,
+                                        instruction_added=True,
+                                        first_request=False)
+                                    if late_items:
+                                        self._sse("inject", {"items": late_items})
+                                except (OSError, TypeError, ValueError):
+                                    pass
                     continue
                 text = "".join(parts)
                 done = {"text": text}
@@ -3598,7 +4133,12 @@ class Handler(BaseHTTPRequestHandler):
                                                  "content": text})
                     save_session_model_history(
                         session_id, history_messages,
-                        {"last_time_context": time_context_at})
+                        {"last_time_context": time_context_at,
+                         "context_snapshot": (None if context_compacted
+                                              else runtime_sections),
+                         "instruction_snapshot": (None if context_compacted
+                                                  else instruction_digest),
+                         "instruction_paths": known_instruction_paths})
                 self._sse("done", done)
                 return
         except (BrokenPipeError, ConnectionResetError, OSError):

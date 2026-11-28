@@ -98,7 +98,26 @@
     });
   }
 
-  function renderMarkdown(target, text) {
+  function demoteMath(root) {
+    // 流式阶段不跑 KaTeX：把占位符还原成 $...$ 字面量，等 done 后再正式渲染。
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    var node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeValue && node.nodeValue.indexOf("@@DLQQ_MATH_") >= 0) nodes.push(node);
+    }
+    nodes.forEach(function (textNode) {
+      var parent = textNode.parentElement;
+      if (parent && (parent.tagName === "CODE" || parent.tagName === "PRE")) return;
+      textNode.nodeValue = textNode.nodeValue.replace(MARK_RE, function (m, idx) {
+        var item = MATH[Number(idx)];
+        if (!item) return "";
+        return item.display ? "$$" + item.tex + "$$" : "$" + item.tex + "$";
+      });
+    });
+  }
+
+  function renderMarkdown(target, text, opts) {
     if (!target) return;
     if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
       target.textContent = text || "";
@@ -121,7 +140,8 @@
     }
     target.classList.add("md-body");
     target.innerHTML = html;
-    hydrateMath(target);
+    if (opts && opts.streaming) demoteMath(target);
+    else hydrateMath(target);
   }
 
   window.renderMarkdown = renderMarkdown;

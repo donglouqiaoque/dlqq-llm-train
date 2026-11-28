@@ -236,7 +236,8 @@ Use the **Chat** tab:
 
 1. **Model** lists every standard model directory under `model\` with size, mtime and signature status;
 2. adjust temperature / top_k / length (defaults come from `properties\<model>.properties`);
-3. type and press Enter — the reply streams character by character, and **Stop** interrupts it.
+3. type and press Enter — the reply streams character by character; the bottom-right button is a
+   single send/stop control (↑ when idle, ■ while generating) that stops the current session.
 
 - Switching models does not need a page reload: the old model is released first (VRAM included);
 - while training is running you may only pick a **different** model; the model named by the running
@@ -244,8 +245,10 @@ Use the **Chat** tab:
 - the conversation is truncated to the model's `block_size`;
 - assistant replies are rendered as Markdown, including `$...$` and `$$...$$` math via local KaTeX;
   user messages stay plain text;
-- API models (including Ollama) show a collapsible thinking block and a thinking-level selector
-  based on detected metadata; local models do not show the thinking area.
+- API models (including Ollama) combine the model and thinking level into one composer button
+  based on detected metadata; local models do not show a thinking level. The first thinking
+  option, `Default`, sends no thinking parameter and lets the provider use its own default; only
+  `Off` explicitly disables thinking.
 
 ### Two modes
 
@@ -733,7 +736,7 @@ properties\             four training configs
 res\                    corpora (not in git)
 model\                  training output (model\<name>\ standard HF directory + checkpoint-<step>\ + .sha256)
                         config.json / model.safetensors / chars.json / meta.json
-.cache\                 training cache/logs/config backups/MCP and API configs/workspace registry/sessions (directory tracked, contents ignored)
+.cache\                 training cache/logs/config backups/MCP and API configs/workspace registry/sessions/composer attachments (directory tracked, contents ignored)
 .ai_res\                AI scratch area (not in git, never used for training)
 THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend libraries (manual)
 ```
@@ -893,11 +896,26 @@ marked failed and automatic retry stops; use **Reconnect** on the MCP tab to ret
 Non-idempotent tool calls that were already dispatched are never replayed automatically.
 
 The **Agent** tab only lists API models whose tool capability is not explicitly unsupported, plus
-saved MCP servers. Model, MCP server, the **Tools** multi-select and
-**Thinking** level live above the composer. The tool panel can search by tool name or
-description; Select all / Clear apply to the current filter results. With no tools selected,
-Agent behaves as plain chat: no tool list is sent and no tool call is executed; running MCP
-servers stay resident. For each message:
+saved MCP servers. Model and thinking level are combined into one composer button. MCP occupies a
+single button showing `MCP on · 2/3 · 42` (enabled servers / total servers · selected tools) or
+`MCP off`. Opening the Agent tab for the first time creates a draft session and syncs the current
+MCP configuration, so the button already shows the correct switch and tool count without opening
+the MCP popover. The MCP popover lets you:
+
+- use a master switch to disable/restore all MCP at once;
+- enable or disable each server **individually** (for example enable A and disable B);
+- choose which server's tools to edit via the “tool source” selector;
+- search tools by name or description, select all/clear the current filter, and check individual
+  tools.
+
+Each server stores its own enabled state and tool selection; the session JSON keeps
+`mcp_servers`, `mcp_tools`, and the master switch `mcp_enabled`. Toggling a server or tool saves
+immediately, even before the first message (an empty session is created so the settings survive a
+page reload). When the master switch or a specific server is off, that server's `tools` are not
+sent to the model, while MCP processes stay resident and other sessions are unaffected. If two
+enabled servers expose the same tool name, the backend keeps the first enabled server to avoid
+ambiguous calls. Old sessions that only have the single `server` / `tools` fields are migrated to
+one enabled server automatically. For each message:
 
 ```text
 user message → model tool_calls → MCP tools/call → tool result → model continues
@@ -909,26 +927,49 @@ Each tool call sends the current Agent workspace's **absolute path** as
 from that path on its first request.
 
 Execution is shown as a flat Agent timeline rather than nested bubbles: the turn header shows
-status and elapsed time, reasoning / tool-call rows are collapsed by default while answers
-remain visible. Every reasoning row, answer, and tool call carries a local-system
-`YYYY-MM-DD HH:mm:ss.SSS` timestamp. Clicking the header expands the history, and each
-arguments/result block expands on its own. Reasoning / tool call / answer rows follow in the
-model's actual output order. As
-soon as the tool name is known, the row shows "preparing / calling"; it changes to "done" or
-"failed" after execution, and arguments/results are shown in full and sent back to the model in
-full, with no hard truncation. Only tools selected for this request are executed; if the model
-calls an unselected or unknown tool, the result is "tool does not exist" and MCP is not called.
-With a thinking level selected, reasoning and tool calls are interleaved above the answer in
-their actual order. Embedding models and local character-level models are not listed in Agent;
-local character-level models do not support the thinking level. The bridge continues to forward
-client-provided `tools` to the model as before; it does not execute MCP tools inside the bridge.
+status and elapsed time, and the current step status (for example "calling …" or "… done,
+continuing…") sits immediately after "Running · N s". All **context-injection / reasoning /
+tool-call** rows are collapsed by default while answers and fatal errors that would end the turn
+(for example a model request timeout or max-token truncation) remain visible. Every reasoning row,
+answer, and tool call carries a local-system `YYYY-MM-DD HH:mm:ss.SSS` timestamp. Clicking the
+header expands the history, and each arguments/result block expands on its own. When the turn is
+finished, stopped, or failed, the step status is cleared and no separate "done" text remains in
+the composer. Context injection, reasoning, tool calls/results, and answer segments are persisted
+in the session's UI timeline, so they remain available after a refresh or when reopening the
+session; these fields are display-only, are not written into `model_history`, and never change the
+context sent to the model. Reasoning / tool call / answer rows
+follow in the model's actual output order. As soon as the tool name is known, the row shows
+"preparing / calling"; it changes to "done" or "failed" after execution. Arguments and results
+are sent back to the model in full, with no hard truncation.
+Tool results from `dlqq-mcp-server` are rendered by type: file reads as line-numbered code,
+directory listings as trees, text searches as file/line/context cards, text edits as add/delete
+diffs, JSON and key-value returns as structured content, and command/build output as monospace
+text; each tool card still exposes the original raw return. Only tools selected for this request
+are executed; if the model calls an unselected or unknown tool, the result is "tool does not
+exist" and MCP is not called. With a thinking level selected, reasoning and tool calls are
+interleaved above the answer in their actual order; a collapsed thinking row shows the last
+sentence of its content after "Reasoning", and expanding it hides that preview and shows the full
+reasoning. The first thinking option, `Default`, sends no thinking parameter; only `off` explicitly
+disables thinking. DeepSeek thinks by default, so selecting
+"off" explicitly sends `thinking: {"type": "disabled"}`; the remaining levels send
+`thinking: enabled` plus the matching `reasoning_effort` instead of merely omitting the parameter.
+**Context-injection** rows appear only when
+this turn actually appends context messages: the first-request `AGENTS.md` / `CLAUDE.md` baseline,
+runtime-context snapshot and clock snapshot, or later replacement snapshots when instructions,
+workspace facts or the clock change. If nothing changed, no injection group appears. The `system`
+prompt and `tools` are request parameters sent on every call, not re-injection, so they are not
+shown as injection rows. Expanding an injection card shows the appended content, tagged “first
+injection / updated / new snapshot”.
+Embedding models and local character-level models are not listed in Agent; local character-level
+models do not support the thinking level. The bridge continues to forward client-provided `tools`
+to the model as before; it does not execute MCP tools inside the bridge.
 
 For large files, select only the relevant file tools (for example `dlqq_create_file` /
 `dlqq_append_file` / `dlqq_overwrite_file`) and do not ask the model to emit the whole file in one
 go. A very large tool list consumes context and makes the model more likely to invent a tool name
 or produce a truncated `tool_call`.
 
-### Workspaces, sessions, and images
+### Workspaces, sessions, and the composer
 
 Chat and Agent use a left navigation pane with conversation content on the right:
 
@@ -953,28 +994,55 @@ stream, background turns continue receiving tokens and save their own history, u
 state, and running rows show a blinking dot in the session list. A single session allows only one
 generation at a time; Stop affects only the current session and leaves other runs untouched.
 
-Opening a session scrolls to the latest message and loads only the most recent 20 messages;
-scrolling to the top lazily loads one older page instead of putting the entire history into the
-DOM. A user-turn rail on the right edge jumps to a chosen turn, loading older pages first when
-needed. User messages record their full local send time and persist it in the session JSON.
+Opening a session scrolls to the latest message and loads only the most recent 5 **user turns**
+(not 20 messages). Older pages load only after the user scrolls upward near the top; opening a
+session or programmatic scrolling never auto-fills the rest of the history. If one page is still
+shorter than the viewport, a **Load earlier messages** button stays at the top. The right edge has
+a DSH-style centered, compact turn rail with fixed spacing, internal scrolling, active-turn
+highlighting, and click-to-jump (loading older pages first when needed). User messages record their
+full local send time and persist it in the session JSON.
 
 Every Agent MCP tool call uses the **session's owning workspace** absolute path as
 `params._meta["dsh/workspace"]`, not the temporary page selection, so switching workspaces cannot
 send the wrong cwd. An Agent session also stores the full model message log (including
 `tool_calls`, tool results, and the previous assistant answer); the next request starts from that
 log and appends the new user message, so prompt cache reuse is not broken by dropping tool
-messages. The first request injects workspace context: the absolute workspace path, system time
-and time zone, and `AGENTS.md` / `CLAUDE.md` from the workspace root (bounded in size). Later
-requests append at most one clock snapshot every 10 minutes. Dynamic context is added as appended
-user messages rather than rewriting the system prompt. The system prompt also contains stable,
-name-sorted guidance for the currently visible tools. Session rows support rename, delete, and
-moving to another workspace. Restoring a session restores its history, model, MCP server, selected
-tools, and thinking level; interrupted model/tool turns are not replayed automatically.
+messages. The first request injects the workspace-instruction baseline (`AGENTS.md` /
+`CLAUDE.md` from the workspace root, bounded in size) and a runtime-context snapshot (absolute
+workspace path, process CWD, time zone). Later requests **compare before appending**, following
+DSH: changed instruction files append a replacement user message, changed runtime facts append a
+new `<system-reminder>` snapshot that supersedes the earlier one, and unchanged content is not
+injected again. After a tool reads or edits a file, nested `AGENTS.md` / `CLAUDE.md` files between
+the workspace root and that file are rediscovered and only changes append an update. The clock is
+checked per step and appends at most one snapshot every 10 minutes (including tool-continuation
+steps). All dynamic context is appended to the end of the history rather than rewriting the
+existing prefix; the system prompt also contains stable, name-sorted guidance for the currently
+visible tools. Session rows support rename, delete, and moving to another workspace. Restoring a
+session restores its history, model, MCP server, selected tools, and thinking level; interrupted
+model/tool turns are not replayed automatically.
 
-When a model declares `input_modalities` containing `image`, the composer shows an **Images**
-button for up to four images of 6 MB each. Images are sent as OpenAI-compatible `image_url`
-content blocks; local character-level models reject images. Old images are represented by
-placeholders or summaries during context compaction and are not charged again as base64 text.
+The **＋** menu at the left of the composer groups images, text files, and commands:
+
+- **Images**: only shown as selectable when the model declares `input_modalities` containing
+  `image`; up to four images of 6 MB each. You can also paste clipboard images (for example OS
+  screenshots) directly into the Chat / Agent input. Paste and file selection share the same
+  validation and preview flow. Images are sent as OpenAI-compatible `image_url` content blocks;
+  local character-level models reject images. Image thumbnails in chat messages and pending image
+  previews in the composer can both be clicked to open a larger preview; close it via the
+  backdrop, the top-right button, or Esc. Old images are represented by placeholders or summaries
+  during context compaction and are not charged again as base64 text.
+- **Text files**: only `.txt` / `.md`, at most 1 MB each. Browsers do not expose the original
+  absolute path of an ordinary file, so the server first writes the selected file to
+  `.cache\attachments\<session id>\<uuid>.<ext>` and the composer appends that cache file's
+  absolute path to the end of the user message as an `[attachment] ...` line. Attachment chips are
+  cleared when the message is sent. Attachment folders are removed with their session, and folders
+  older than 7 days are cleaned up on later uploads.
+- **Commands**: Agent can run “Compact context” (same as `/compact`); both Chat and Agent can
+  export the current session as Markdown; the model/thinking menu can also be reopened here.
+
+> An attachment path is only a string: an Agent with file tools may be able to read it, but a Chat
+> API has no file tools and only sees the path. If `.cache` is outside the Agent workspace, MCP file
+> tools may refuse access as well.
 
 ### Connect an OpenAI-compatible API (optional)
 
@@ -1019,10 +1087,15 @@ reuses the original system prompt, tools, and old-message prefix and appends the
 instruction at the end so the provider's prompt cache can still help. Oversized tool results are
 pruned first; if summarization fails the code falls back to deterministic trimming while keeping
 `tool_calls` / `tool_result` paired. A context-overflow error forces one compact-and-retry.
-Agent's composer accepts `/compact` to compact the current session manually. Note that Agent's
-"max_tokens output limit" error is the per-response output cap, not the context window. Chat and
-Agent show an estimated context occupancy and percentage below the composer (character-based
-approximation; images use a fixed visual-token estimate), together with the output cap.
+Agent's composer accepts `/compact`, and the same manual compaction is available from
+**＋ → Compact context**. Note that Agent's "max_tokens output limit" error is the per-response
+output cap, not the context window. There is no “New chat” button in the composer anymore; sessions
+are created from the left sidebar or from the **＋** on the collapsed side rail. Below the composer
+is a status bar: a ring and percentage for estimated context occupancy (character-based
+approximation; images use a fixed visual-token estimate), the cache hit rate, and current-turn /
+session input-output tokens. Click any item for details; the output cap is no longer always shown.
+Chat and Agent answers are parsed as Markdown while streaming with about 100ms throttling; math is
+shown as literal `$...$` during generation and fully rendered by KaTeX when the turn finishes.
 After an API model finishes a turn, the UI shows both the current turn and the accumulated session
 token usage: input (cached-hit / uncached), output, and cache hit rate. The rate is
 `cache read / (uncached input + cache read + cache write)` and normalizes DeepSeek's

@@ -7,23 +7,57 @@ are installed by the user into the project Python from the Environment tab;
 they are not shipped with this repository or its release package, and their
 licenses are not bundled here.
 
+Version and license lines below must match the actual bundled files. Python
+versions come from .runtime/python/VERSION.txt and `python --version`; frontend
+versions come from the bundle headers or official package metadata; license
+texts and copyright lines come from the bundled LICENSE files.
+
 Bundled Python runtime
 ----------------------
-CPython 3.13.9      PSF-2.0     .runtime/python/licenses/PYTHON-LICENSE.txt
-pip (ensurepip)      MIT         .runtime/python/licenses/
+CPython 3.14.9       PSF-2.0     .runtime/python/licenses/PYTHON-LICENSE.txt
+  Copyright (c) 2001 Python Software Foundation; All Rights Reserved
+pip 26.2.2           MIT         .runtime/python/Lib/site-packages/pip-26.2.2.dist-info/licenses/LICENSE.txt
+  Copyright (c) 2008-present The pip developers (see AUTHORS.txt file)
+  pip wheels also carry third-party/vendored license files in
+  .runtime/python/licenses/; those files retain their own copyright and
+  license terms and are not relicensed by pip.
 
 Web frontend
 ------------
 xterm.js 5.3.0       MIT         web/vendor/xterm/LICENSE
+  Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)
+  Copyright (c) 2014-2016, SourceLair Private Company (https://www.sourcelair.com)
+  Copyright (c) 2012-2013, Christopher Jeffrey (https://github.com/chjj/)
+
 marked 18.2.1        MIT         web/vendor/marked/LICENSE
+  Marked: Copyright (c) 2018+, MarkedJS (https://github.com/markedjs/);
+          Copyright (c) 2011-2018, Christopher Jeffrey (https://github.com/chjj/)
+  The bundled marked LICENSE also contains the BSD-3-Clause Markdown notice
+  for Copyright © 2004, John Gruber (http://daringfireball.net/).
+
 DOMPurify 3.4.18     Apache-2.0  web/vendor/dompurify/LICENSE
+  Copyright (c) Cure53 and other contributors.
+  DOMPurify is offered under Apache-2.0 or MPL-2.0; this project uses the
+  Apache-2.0 option and bundles the Apache-2.0 license text.
+
 KaTeX 0.19.1         MIT         web/vendor/katex/LICENSE
+  Copyright (c) 2013-2020 Khan Academy and other contributors
+
 KaTeX fonts          OFL-1.1     web/vendor/katex/fonts/OFL.txt
 
 Note: KaTeX's JavaScript and CSS are MIT; its bundled font files are
 separately licensed under the SIL Open Font License 1.1. The font files
-are distributed unchanged. marked and DOMPurify are used only in the
-browser; DOMPurify is used under its Apache-2.0 option.
+are distributed unchanged. The KaTeX fonts are:
+
+  Copyright (c) 2009-2010, Design Science, Inc. (<www.mathjax.org>)
+  Copyright (c) 2014-2018 Khan Academy (<www.khanacademy.org>),
+  with Reserved Font Name KaTeX_AMS, KaTeX_Caligraphic, KaTeX_Fraktur,
+  KaTeX_Main, KaTeX_Math, KaTeX_SansSerif, KaTeX_Script, KaTeX_Size1,
+  KaTeX_Size2, KaTeX_Size3, KaTeX_Size4, and KaTeX_Typewriter.
+
+The full OFL text (including these notices) is in
+web/vendor/katex/fonts/OFL.txt. marked and DOMPurify are used only in the
+browser.
 
 Note: the license files under .runtime/python/licenses/ are supplied by the
-make_python_env build script for the bundled Python and ensurepip only.
+make_python_env build script for the bundled Python and ensurepip/pip only.

@@ -99,7 +99,7 @@
   .chatside input, .chatside select { width:100%; }
   .chatlayout.side-collapsed .chatside { display:none; }
   .side-rail { display:none; flex:0 0 24px; width:24px; border-right:1px solid var(--line);
-               align-items:flex-start; justify-content:center; padding-top:8px; }
+               align-items:center; flex-direction:column; gap:6px; padding-top:8px; }
   .chatlayout.side-collapsed .side-rail { display:flex; }
   .side-rail button { width:22px; height:28px; padding:0; border:1px solid #465a76;
                       background:#0b1017; color:var(--muted); border-radius:6px; font-size:15px; }
@@ -155,19 +155,27 @@
               word-break:break-all; }
   .chatmain { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column;
               position:relative; }
-  .conversation-rail { position:absolute; right:2px; width:16px; z-index:6;
-                       pointer-events:auto; overflow:hidden; }
-  .conversation-mark { position:absolute; right:0; width:14px; height:7px; padding:0;
-                       border:0; background:transparent; cursor:pointer;
-                       transform:translateY(-50%); }
-  .conversation-mark::before { content:""; position:absolute; right:1px; top:50%;
-                               width:8px; height:2px; border-radius:2px;
+  /* 右侧轮次导航：固定间距的居中紧凑轨道，不再按百分比铺满整个消息区 */
+  .conversation-rail { position:absolute; right:8px; top:50%; transform:translateY(-50%);
+                       z-index:6; width:26px; padding:8px 0; display:flex;
+                       flex-direction:column; align-items:center; gap:5px;
+                       max-height:min(440px, calc(100% - 150px)); overflow-y:auto;
+                       overflow-x:hidden; scrollbar-width:none; pointer-events:auto;
+                       -webkit-mask-image:linear-gradient(180deg, transparent 0, #000 14px,
+                                                       #000 calc(100% - 14px), transparent 100%);
+                       mask-image:linear-gradient(180deg, transparent 0, #000 14px,
+                                                 #000 calc(100% - 14px), transparent 100%); }
+  .conversation-rail::-webkit-scrollbar { display:none; }
+  .conversation-mark { position:relative; flex:0 0 auto; width:18px; height:9px; padding:0;
+                       border:0; background:transparent; cursor:pointer; }
+  .conversation-mark::before { content:""; position:absolute; right:2px; top:50%;
+                               width:9px; height:2px; border-radius:2px;
                                background:#43546d; transform:translateY(-50%);
                                transition:width .12s ease, background-color .12s ease; }
   .conversation-mark:hover::before, .conversation-mark.on::before {
-    width:14px; background:var(--accent);
+    width:16px; background:var(--accent);
   }
-  #chat .msgs, #agent .msgs { padding-right:18px; }
+  #chat .msgs, #agent .msgs { padding-right:26px; }
   .history-more { display:block; margin:4px auto 12px; padding:4px 12px; border-radius:999px;
                   border:1px solid #33465e; background:#121b28; color:var(--muted);
                   font-size:11px; cursor:pointer; }
@@ -210,30 +218,123 @@
   .composerbar { display:flex; align-items:center; gap:8px; margin-top:4px; flex-wrap:nowrap; min-width:0; }
   .composerbar select { max-width:200px; }
   .composerbar button { padding:5px 12px; }
+  /* 输入区图标按钮：＋、模型/思考、MCP、发送/停止 */
+  .btn-plus { width:30px; height:30px; padding:0 !important; border-radius:9px; font-size:17px;
+              line-height:1; display:inline-flex; align-items:center; justify-content:center;
+              flex:0 0 auto; }
+  .btn-model { max-width:min(260px, 38vw); padding:5px 10px !important; font-size:12px;
+               overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:0 1 auto; }
+  .btn-mcp { padding:5px 10px !important; font-size:12px; white-space:nowrap; flex:0 0 auto; }
+  .btn-mcp.off { color:#c9a06a; border-color:#6a5330 !important; }
+  .sendbtn { width:34px; height:30px; padding:0 !important; border-radius:9px; font-size:16px;
+             line-height:1; display:inline-flex; align-items:center; justify-content:center;
+             flex:0 0 auto; }
+  .sendbtn.stop { background:#3a1d24; border-color:#8a4450; color:#ffb4bd; }
+  .sendbtn.stop:hover { background:#4a232c; }
+  .composerbar .statehint { flex:0 1 auto; min-width:0; overflow:hidden;
+                            text-overflow:ellipsis; white-space:nowrap; }
   .imagepreviews { display:flex; gap:6px; flex-wrap:wrap; margin-top:5px; }
   .imagepreviews:empty { display:none; }
   .imagepreviews .imgthumb { position:relative; width:54px; height:54px; border-radius:7px;
                              overflow:hidden; border:1px solid #3b4a60; background:#0b1017; }
-  .imagepreviews .imgthumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .imagepreviews .imgthumb img { width:100%; height:100%; object-fit:cover; display:block;
+                                 cursor:zoom-in; }
   .imagepreviews .imgthumb button { position:absolute; right:2px; top:2px; width:17px; height:17px;
                                     padding:0; line-height:15px; font-size:12px; border-radius:50%;
                                     background:rgba(10,15,22,.8); color:#fff; border:1px solid #536987; }
   .msg .bubble .msgimages { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
   .msg .bubble .msgimages img { max-width:180px; max-height:160px; border-radius:7px;
                                 border:1px solid #2b3648; }
-  .ctxmeter { display:flex; align-items:center; gap:8px; min-height:16px; margin-top:3px;
-              flex-wrap:wrap; color:var(--muted); font-size:11px; }
-  .ctxmeter .ctxbar { width:140px; height:4px; overflow:hidden; border-radius:999px;
-                      background:#0b1017; border:1px solid #222b39; }
-  .ctxmeter .ctxbar i { display:block; width:0; height:100%; border-radius:999px;
-                        background:var(--accent); transition:width .18s ease; }
-  .ctxmeter.warn { color:var(--warn); }
-  .ctxmeter.warn .ctxbar i { background:var(--warn); }
-  .ctxmeter.err { color:var(--err); }
-  .ctxmeter.err .ctxbar i { background:var(--err); }
-  .ctxmeter .cachestat { color:#9db8dd; border-left:1px solid #33465e;
-                          padding-left:8px; cursor:help; white-space:normal; }
-  .ctxmeter .cachestat b { color:#d7e5ff; font-weight:600; }
+  .msgs img { cursor:zoom-in; }
+  /* 图片查看器：点击聊天图片放大，仿 DSH 的轻量预览 */
+  .image-viewer { position:fixed; inset:0; z-index:2100; display:flex; align-items:center;
+                  justify-content:center; padding:24px; background:rgba(3,7,12,.88);
+                  backdrop-filter:blur(4px); }
+  .image-viewer[hidden] { display:none !important; }
+  .image-viewer img { max-width:calc(100vw - 48px); max-height:calc(100vh - 48px);
+                      object-fit:contain; border-radius:8px; background:#0b1017;
+                      box-shadow:0 24px 80px rgba(0,0,0,.75); }
+  .image-viewer-close { position:fixed; top:18px; right:20px; width:40px; height:40px;
+                        padding:0; border-radius:50%; border:1px solid #4a5d78;
+                        background:#141c27; color:#e6e8ee; font-size:24px; line-height:1;
+                        display:flex; align-items:center; justify-content:center;
+                        cursor:pointer; }
+  .image-viewer-close:hover { background:#1f2b3c; border-color:#708caf; }
+  .image-viewer-tip { position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
+                      color:var(--muted); font-size:12px; white-space:nowrap;
+                      background:rgba(10,15,22,.78); border:1px solid #2b3648;
+                      border-radius:999px; padding:4px 12px; }
+  /* 输入区下方状态栏：上下文圆环 / 缓存命中 / 本轮与会话用量 */
+  .statusdock { display:flex; align-items:center; gap:9px; min-height:20px; margin:5px 2px 0;
+                flex-wrap:wrap; color:var(--muted); font-size:11px; }
+  .statusdock:empty { display:none; }
+  .statusdock .dockitem { display:inline-flex; align-items:center; gap:5px; padding:1px 5px;
+                          border:0; background:none; color:var(--muted); font:inherit;
+                          font-size:11px; cursor:pointer; border-radius:6px; }
+  .statusdock .dockitem:hover { color:var(--fg); background:#182231; }
+  .statusdock .ring { width:12px; height:12px; border-radius:50%; flex:0 0 auto;
+                      background:conic-gradient(var(--accent) calc(var(--pct) * 1%), #22303f 0);
+                      -webkit-mask:radial-gradient(circle, transparent 52%, #000 55%);
+                      mask:radial-gradient(circle, transparent 52%, #000 55%); }
+  .statusdock.warn .ring { background:conic-gradient(var(--warn) calc(var(--pct) * 1%), #22303f 0); }
+  .statusdock.err .ring { background:conic-gradient(var(--err) calc(var(--pct) * 1%), #22303f 0); }
+  .statusdock .docksep { width:1px; height:12px; background:#2b3648; }
+  .statusdock b { color:#d7e5ff; font-weight:600; }
+  /* 输入区“＋”菜单、模型菜单、MCP 浮层共用的浮层样式 */
+  .popmenu { position:fixed; z-index:1400; width:min(340px, calc(100vw - 24px));
+             max-height:min(520px, calc(100vh - 40px)); overflow:auto; padding:8px;
+             background:#141c27; border:1px solid #3d536f; border-radius:12px;
+             box-shadow:0 20px 60px rgba(0,0,0,.55); font-size:12px; color:var(--fg); }
+  .popmenu[hidden] { display:none !important; }
+  .popmenu .pophead { padding:3px 6px 6px; color:var(--muted); font-size:11px; letter-spacing:.4px; }
+  .popmenu .popitem { display:flex; align-items:center; gap:8px; width:100%; padding:7px 8px;
+                      border:0; border-radius:8px; background:transparent; color:var(--fg);
+                      font:inherit; font-size:13px; text-align:left; cursor:pointer; }
+  .popmenu .popitem:hover { background:#1d2a3b; }
+  .popmenu .popitem.on { background:#1b2c46; }
+  .popmenu .popitem .tag { margin-left:auto; color:var(--muted); font-size:11px; }
+  .popmenu .popitem .ico { width:18px; text-align:center; color:#9db8dd; }
+  .popmenu .popsep { height:1px; margin:5px 4px; background:#263140; }
+  .popmenu .poprow { display:flex; align-items:center; gap:8px; padding:4px 6px 6px; }
+  .popmenu .poprow > span { color:var(--muted); font-size:12px; white-space:nowrap; }
+  .popmenu .poprow select { flex:1; min-width:0; }
+  .popmenu .popsearch { width:100%; margin:2px 0 6px; }
+  .popmenu .poptoggle { display:flex; align-items:center; gap:8px; padding:6px 8px;
+                        border-radius:8px; cursor:pointer; }
+  .popmenu .poptoggle:hover { background:#1d2a3b; }
+  .popmenu .poptoggle input { width:15px; height:15px; flex:0 0 auto; }
+  .popmenu .poptoggle .t { flex:1; }
+  .popmenu .agent-tool-list { max-height:260px; grid-template-columns:1fr; }
+  .popmenu .agent-tool-list.off { opacity:.45; pointer-events:none; }
+  .popmenu .mcp-server-list { display:flex; flex-direction:column; gap:2px; margin:0 0 6px; }
+  .popmenu .mcp-server-row { display:flex; align-items:center; gap:7px; padding:5px 8px;
+                             border-radius:8px; cursor:pointer; }
+  .popmenu .mcp-server-row:hover { background:#1d2a3b; }
+  .popmenu .mcp-server-row input { width:15px; height:15px; flex:0 0 auto; }
+  .popmenu .mcp-server-row .sname { flex:1; min-width:0; overflow:hidden;
+                                    text-overflow:ellipsis; white-space:nowrap; }
+  .popmenu .mcp-server-row .scount { flex:0 0 auto; color:var(--muted); font-size:10px;
+                                     white-space:nowrap; }
+  .popmenu .mcp-server-row.disabled .sname { color:var(--muted); }
+  .popmenu .mcp-server-row input:disabled { opacity:.45; }
+  .popmenu .popempty { padding:10px 8px; color:var(--muted); }
+  .popmenu .popdetail { padding:4px 8px 8px; color:var(--muted); line-height:1.85; }
+  .popmenu .popdetail b { color:#d7e5ff; font-weight:600; }
+  .popmenu .mcp-toolbar { display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+                          padding:2px 2px 6px; }
+  .popmenu .mcp-toolbar button { padding:2px 8px; font-size:11px; }
+  .popmenu .agent-tool-search { flex:1 1 120px; min-width:100px; }
+  .filechips { display:flex; gap:6px; flex-wrap:wrap; margin-top:5px; }
+  .filechips:empty { display:none; }
+  .filechip { display:flex; align-items:center; gap:6px; max-width:100%; padding:3px 6px 3px 8px;
+              border:1px solid #33465e; border-radius:8px; background:#0f1722;
+              color:var(--muted); font-size:11px; }
+  .filechip .fname { color:#cfdcff; white-space:nowrap; }
+  .filechip .fpath { max-width:260px; overflow:hidden; text-overflow:ellipsis;
+                     white-space:nowrap; direction:rtl; text-align:left; }
+  .filechip button { padding:0 3px; border:0; background:transparent; color:var(--muted);
+                     font-size:13px; line-height:1; }
+  .filechip button:hover { color:var(--fg); }
   .spacer { flex:1; }
   .subtabs { display:flex; align-items:center; gap:6px; margin:2px 0 8px; }
   .subtabs button { padding:4px 12px; font-size:12px; border-radius:8px; }
@@ -262,8 +363,13 @@
                      font:inherit; text-align:left; cursor:pointer; }
   .agent-turn-caret::before { content:"▾"; color:var(--muted); font-size:11px; }
   .agent-turn.collapsed .agent-turn-caret::before { content:"▸"; }
-  .agent-turn-title { font-size:13px; }
-  .agent-turn-meta { margin-left:auto; font-size:11px; color:var(--muted); font-weight:normal; }
+  .agent-turn-title { font-size:13px; flex:0 0 auto; }
+  .agent-turn-status { flex:0 1 auto; min-width:0; max-width:46%;
+                       overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+                       color:#8fb3d9; font-size:11px; font-weight:normal; }
+  .agent-turn-status:empty { display:none; }
+  .agent-turn-meta { margin-left:auto; font-size:11px; color:var(--muted); font-weight:normal;
+                     flex:0 0 auto; }
   .agent-turn.running .agent-turn-title::after {
     content:"●"; margin-left:7px; color:var(--accent); font-size:9px;
     animation:blink 1s steps(1) infinite;
@@ -284,6 +390,11 @@
   .agent-step-status.ok { color:#7fcf9b; }
   .agent-step-status.err { color:#e38b93; }
   .agent-think .think-flow { margin:5px 0 0 23px; max-height:360px; overflow:auto; }
+  .agent-think .agent-think-preview { flex:1 1 auto; min-width:0; overflow:hidden;
+                                      text-overflow:ellipsis; white-space:nowrap;
+                                      color:#e3a15c; font-size:12px; font-weight:600; }
+  .agent-think .agent-think-preview:empty { display:none; }
+  .agent-think[open] .agent-think-preview { display:none; }
   .think-text { white-space:pre-wrap; word-break:break-word; color:#aab4c4;
                 font:12px/1.55 Consolas, monospace; margin:0 0 5px; }
   .agent-tool-step pre { margin:5px 0 0 23px; padding:7px 9px; white-space:pre-wrap;
@@ -291,6 +402,87 @@
                          font:12px/1.5 Consolas, monospace; color:#aab4c4;
                          background:#0b1017; border:1px solid #202a38; border-radius:7px; }
   .agent-tool-step .agent-tool-result:empty { display:none; }
+  /* MCP 工具结果按类型展示：文件读取、目录树、搜索命中、diff、JSON、普通文本。 */
+  .agent-tool-result { margin:5px 0 0 23px; min-width:0; }
+  .tool-result-head { display:flex; align-items:center; gap:7px; flex-wrap:wrap;
+                      margin:0 0 6px; color:#8fa3bf; font-size:11px; line-height:1.4; }
+  .tool-result-title { color:#cfe1ff; font:12px Consolas, "Courier New", monospace;
+                       overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+                       max-width:min(520px, 70%); }
+  .tool-result-meta { color:#66748a; }
+  .tool-result-badge { flex:0 0 auto; border:1px solid #33465e; border-radius:999px;
+                       padding:0 6px; color:#9fb8d8; font-size:10px; line-height:1.6; }
+  .tool-result-badge.add { border-color:#2d5d40; color:#88e0a8; background:#0d1a13; }
+  .tool-result-badge.del { border-color:#5b3036; color:#ffadb4; background:#1a0f12; }
+  .tool-code, .tool-tree, .tool-json, .tool-text {
+    margin:0; padding:8px 10px; max-height:360px; overflow:auto;
+    white-space:pre; word-break:normal; tab-size:4;
+    font:12px/1.55 Consolas, "Courier New", monospace; color:#b9c6d8;
+    background:#0b1017; border:1px solid #202a38; border-radius:7px;
+  }
+  .tool-tree { color:#9fc4e8; }
+  .tool-text { white-space:pre-wrap; word-break:break-word; }
+  .tool-diff { border:1px solid #202a38; border-radius:7px; overflow:hidden;
+               background:#0b1017; }
+  .tool-diff-body { max-height:380px; overflow:auto; padding:4px 0; }
+  .tool-diff-line { display:flex; gap:8px; padding:0 9px; white-space:pre;
+                    font:12px/1.55 Consolas, "Courier New", monospace; color:#9aa8ba; }
+  .tool-diff-line .ln { flex:0 0 46px; text-align:right; color:#4f5e73;
+                        user-select:none; }
+  .tool-diff-line .sign { flex:0 0 10px; text-align:center; color:#66748a; }
+  .tool-diff-line.add { background:rgba(46,160,67,.13); color:#a7f3c0; }
+  .tool-diff-line.del { background:rgba(248,81,73,.12); color:#ffb3b8; }
+  .tool-diff-line.ctx { color:#8b98a9; }
+  .tool-diff-line.hunk { background:#0f1a28; color:#79b8ff; }
+  .tool-diff-line.meta { background:#101722; color:#8fa3bf; padding-top:2px;
+                         padding-bottom:2px; }
+  .tool-search { display:flex; flex-direction:column; gap:6px; max-height:380px; overflow:auto; }
+  .tool-search-hit { border:1px solid #202a38; border-left:3px solid #3a6ea5;
+                     border-radius:6px; background:#0b1017; padding:6px 8px; }
+  .tool-search-path { color:#bcd3f2; font:11px/1.45 Consolas, "Courier New", monospace;
+                      word-break:break-all; }
+  .tool-search-line { color:#f0c674; font:11px/1.45 Consolas, "Courier New", monospace;
+                      margin-top:2px; }
+  .tool-search-context { margin:5px 0 0; padding:5px 7px; max-height:150px; overflow:auto;
+                         white-space:pre; font:11px/1.5 Consolas, "Courier New", monospace;
+                         color:#9fb0c6; background:#080d13; border-radius:5px; }
+  .tool-kv { border:1px solid #202a38; border-radius:7px; overflow:auto;
+             background:#0b1017; max-height:360px; }
+  .tool-kv-row { display:flex; gap:10px; padding:4px 9px; border-top:1px solid #182230;
+                 font:12px/1.5 Consolas, "Courier New", monospace; }
+  .tool-kv-row:first-child { border-top:0; }
+  .tool-kv-key { flex:0 0 140px; color:#8fa3bf; word-break:break-all; }
+  .tool-kv-value { flex:1 1 auto; min-width:0; color:#cfdae8; white-space:pre-wrap;
+                   word-break:break-word; }
+  .tool-result-error { border:1px solid #5a2a30; border-left:3px solid #e38b93;
+                       background:#180d10; border-radius:7px; padding:7px 9px;
+                       color:#ffb6bd; font:12px/1.55 Consolas, "Courier New", monospace;
+                       white-space:pre-wrap; word-break:break-word; max-height:300px;
+                       overflow:auto; }
+  .tool-raw { margin-top:6px; }
+  .tool-raw > summary { color:#66748a; font-size:10px; cursor:pointer; user-select:none; }
+  .tool-raw > summary:hover { color:#91a7c4; }
+  .tool-raw pre { margin:4px 0 0; max-height:220px; overflow:auto; }
+  .agent-tool-args-wrap { margin:5px 0 0 23px; }
+  .agent-tool-args-wrap > summary { color:#66748a; font-size:10px; cursor:pointer;
+                                    user-select:none; }
+  .agent-tool-args-wrap > summary:hover { color:#91a7c4; }
+  .agent-tool-args-wrap pre { margin:4px 0 0; max-height:220px; overflow:auto; }
+  .tool-empty { color:var(--muted); font-size:11px; }
+  .agent-tool-result pre { margin:0; padding:8px 10px; max-height:380px; }
+  .agent-tool-result .tool-search-context { max-height:150px; padding:5px 7px; }
+  .agent-tool-result .tool-raw pre { margin:4px 0 0; max-height:220px; }
+  /* 上下文注入：只有本轮真正追加 AGENTS/runtime/time 时才出现，和思考/工具一样默认折叠 */
+  .agent-inject-step > summary { color:#9fb8d8; }
+  .agent-inject-tag { flex:0 0 auto; margin-left:2px; padding:0 6px; border-radius:999px;
+                      border:1px solid #33465e; color:#8fa3bf; font-size:10px; line-height:1.5; }
+  .agent-inject-size { flex:0 0 auto; margin-left:auto; color:#66748a; font-size:10px; }
+  .agent-inject-step .agent-inject-note { margin:4px 0 0 23px; color:var(--muted); font-size:11px; }
+  .agent-inject-body { margin:5px 0 0 23px; max-height:360px; overflow:auto;
+                       white-space:pre-wrap; word-break:break-word;
+                       font:12px/1.55 Consolas, "Courier New", monospace; color:#aab4c4;
+                       background:#0b1017; border:1px solid #202a38; border-radius:7px;
+                       padding:7px 9px; }
   .agent-tool-step.err > summary { color:#e38b93; }
   .agent-answer { padding:8px 0 2px; }
   .agent-answer:first-child { padding-top:2px; }
@@ -326,10 +518,6 @@
     border-color:var(--accent);
     box-shadow:0 0 0 2px rgba(79,140,255,.18);
   }
-  .agent-tool-panel { flex:0 0 auto; border:1px solid var(--line); border-radius:9px;
-                      background:#10151d; padding:7px 10px; margin-bottom:8px; }
-  .agent-tool-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-  .agent-tool-head button { padding:3px 8px; font-size:12px; }
   .agent-tool-search { flex:1 1 180px; min-width:150px; padding:5px 9px; font-size:12px;
                        color:var(--fg); background:#0b1017; border:1px solid var(--line);
                        border-radius:7px; outline:none; }
@@ -518,7 +706,7 @@
     .composerbar { flex-wrap:wrap; row-gap:5px; }
     .composerbar select { max-width:170px; }
     .agent-bar select { max-width:155px; }
-    .ctxmeter .ctxbar { width:110px; }
+    .statusdock { gap:7px; }
   }
   @media (max-width:1100px) {
     section { padding:9px; }
@@ -526,11 +714,11 @@
     .bubble { max-width:100%; }
     .msg.user .bubble { max-width:94%; }
     .msg .avatar { flex-basis:24px; width:24px; height:24px; font-size:10px; }
-    #chatThinkingWrap, #agentThinkingWrap { font-size:11px; }
     .composerbar select { max-width:145px; }
     .agent-bar select { max-width:135px; }
-    .ctxmeter { gap:5px; }
-    .ctxmeter .ctxbar { width:80px; }
+    .statusdock { gap:5px; }
+    .statusdock .dockusage { display:none; }
+    .btn-model { max-width:min(200px, 40vw); }
   }
   @media (max-width:760px) {
     section { padding:6px; }
@@ -541,6 +729,8 @@
     .bubble { padding:7px 9px; }
     .composerbar select { max-width:128px; }
     .composerbar button { padding:5px 8px; }
+    .statusdock .dockcache { display:none; }
+    .conversation-rail { display:none; }
   }
 </style>
 </head>
@@ -599,27 +789,29 @@
       </aside>
       <div class="side-rail" id="chatSideRail">
         <button id="btnChatSideExpand" type="button" title="展开侧边栏">›</button>
+        <button id="btnChatRailNew" type="button" title="新建会话">＋</button>
       </div>
       <div class="chatmain">
         <div class="msgs" id="chatBox"></div>
         <div class="composer">
           <textarea id="chatInput" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
-          <div class="composerbar">
-            <select id="chatConfig" title="配置文件（模型、采样参数、语料都由它决定）"></select>
-            <label class="muted" id="chatThinkingWrap" style="display:none">
-              思考 <select id="chatThinking"></select>
-            </label>
-            <button id="btnChatImage" type="button">图片</button>
-            <input id="chatImageInput" type="file" accept="image/*" multiple style="display:none">
-            <button id="btnNewChat">新对话</button>
-            <span class="muted" id="chatState"></span>
-            <div class="spacer"></div>
-            <button class="danger" id="btnChatStop" disabled>停止</button>
-            <button class="primary" id="btnSend">发送</button>
-          </div>
           <div class="imagepreviews" id="chatImages"></div>
-          <div class="ctxmeter" id="chatContextMeter"></div>
+          <div class="filechips" id="chatFiles"></div>
+          <div class="composerbar">
+            <button id="btnChatPlus" class="btn-plus" type="button"
+                    title="添加图片、文本文件或执行指令">＋</button>
+            <input id="chatImageInput" type="file" accept="image/*" multiple hidden>
+            <input id="chatFileInput" type="file" accept=".txt,.md,text/plain,text/markdown"
+                   multiple hidden>
+            <select id="chatConfig" hidden></select>
+            <select id="chatThinking" hidden></select>
+            <button id="btnChatModel" class="btn-model" type="button" title="模型与思考等级">选择模型 ▾</button>
+            <span class="muted statehint" id="chatState"></span>
+            <div class="spacer"></div>
+            <button id="btnSend" class="primary sendbtn" type="button" title="发送" disabled>↑</button>
+          </div>
         </div>
+        <div class="statusdock" id="chatContextMeter"></div>
       </div>
     </div>
   </section>
@@ -814,45 +1006,34 @@
       </aside>
       <div class="side-rail" id="agentSideRail">
         <button id="btnAgentSideExpand" type="button" title="展开侧边栏">›</button>
+        <button id="btnAgentRailNew" type="button" title="新建会话">＋</button>
       </div>
       <div class="chatmain">
         <div class="msgs" id="agentBox">
           <div class="empty">选择支持工具调用的 Ollama 模型或 API 服务，以及 MCP 服务器</div>
         </div>
-        <div class="agent-tool-panel" id="agentToolPanel" style="display:none">
-          <div class="agent-tool-head">
-            <strong>可用工具</strong>
-            <input class="agent-tool-search" id="agentToolSearch" type="search"
-                   placeholder="搜索工具名或说明">
-            <button id="btnAgentToolsAll" title="全选当前筛选结果">全选</button>
-            <button id="btnAgentToolsNone" title="清空当前筛选结果">清空</button>
-            <span class="muted" id="agentToolsCount"></span>
-          </div>
-          <div class="agent-tool-list" id="agentToolList"></div>
-        </div>
         <div class="composer">
           <textarea id="agentInput" rows="1"
                     placeholder="输入任务，Enter 发送，Shift+Enter 换行"></textarea>
-          <div class="composerbar agent-bar">
-            <label>模型</label>
-            <select id="agentModel"></select>
-            <label>MCP</label>
-            <select id="agentMcp"></select>
-            <label class="muted" id="agentThinkingWrap" style="display:none">
-              思考 <select id="agentThinking"></select>
-            </label>
-            <button id="btnAgentTools">工具 0</button>
-            <button id="btnAgentImage" type="button">图片</button>
-            <input id="agentImageInput" type="file" accept="image/*" multiple style="display:none">
-            <button id="btnAgentNew">新对话</button>
-            <span class="muted" id="agentState"></span>
-            <div class="spacer"></div>
-            <button id="btnAgentStop" disabled>停止</button>
-            <button class="primary" id="btnAgentSend">发送</button>
-          </div>
           <div class="imagepreviews" id="agentImages"></div>
-          <div class="ctxmeter" id="agentContextMeter"></div>
+          <div class="filechips" id="agentFiles"></div>
+          <div class="composerbar agent-bar">
+            <button id="btnAgentPlus" class="btn-plus" type="button"
+                    title="添加图片、文本文件或执行指令">＋</button>
+            <input id="agentImageInput" type="file" accept="image/*" multiple hidden>
+            <input id="agentFileInput" type="file" accept=".txt,.md,text/plain,text/markdown"
+                   multiple hidden>
+            <select id="agentModel" hidden></select>
+            <select id="agentThinking" hidden></select>
+            <button id="btnAgentModel" class="btn-model" type="button"
+                    title="模型与思考等级">选择模型 ▾</button>
+            <button id="btnAgentMcp" class="btn-mcp" type="button" title="MCP 服务器与工具">MCP 开 · 0</button>
+            <div class="spacer"></div>
+            <button id="btnAgentSend" class="primary sendbtn" type="button"
+                    title="发送" disabled>↑</button>
+          </div>
         </div>
+        <div class="statusdock" id="agentContextMeter"></div>
       </div>
     </div>
   </section>
@@ -923,9 +1104,9 @@
       <tbody>
         <tr><td>xterm.js</td><td>5.3.0</td><td>MIT</td>
             <td><a href="/vendor/xterm/LICENSE" target="_blank" rel="noopener">LICENSE</a></td></tr>
-        <tr><td>marked</td><td>18.2.1</td><td>MIT</td>
+        <tr><td>marked</td><td>18.2.1</td><td>MIT + BSD-3-Clause</td>
             <td><a href="/vendor/marked/LICENSE" target="_blank" rel="noopener">LICENSE</a></td></tr>
-        <tr><td>DOMPurify</td><td>3.4.18</td><td>Apache-2.0</td>
+        <tr><td>DOMPurify</td><td>3.4.18</td><td>Apache-2.0（双许可）</td>
             <td><a href="/vendor/dompurify/LICENSE" target="_blank" rel="noopener">LICENSE</a></td></tr>
         <tr><td>KaTeX</td><td>0.19.1</td><td>MIT</td>
             <td><a href="/vendor/katex/LICENSE" target="_blank" rel="noopener">LICENSE</a></td></tr>
@@ -935,7 +1116,11 @@
     </table>
     <div class="muted" style="margin-top:10px">
       KaTeX 的 JavaScript/CSS 使用 MIT；其字体文件使用 SIL Open Font License 1.1，
-      字体原样分发，未修改。
+      字体原样分发、未修改。字体版权：Copyright (c) 2009-2010, Design Science, Inc.
+      (mathjax.org)；Copyright (c) 2014-2018 Khan Academy (khanacademy.org)，
+      保留字体名 KaTeX_*。<br>
+      marked 的 MIT 许可证文件同时包含 John Gruber Markdown 的 BSD-3-Clause 声明；
+      DOMPurify 为 Apache-2.0 / MPL-2.0 双许可，本项目使用 Apache-2.0。
     </div>
   </section>
 </main>
@@ -969,6 +1154,34 @@
   </div>
 </div>
 
+<!-- Agent 输入区的 MCP 浮层：每台服务器独立开关，工具按服务器分别勾选 -->
+<div class="popmenu" id="agentMcpPop" hidden>
+  <div class="pophead">MCP 服务器与工具</div>
+  <label class="poptoggle">
+    <input type="checkbox" id="agentMcpEnabled" checked>
+    <span class="t">启用 MCP（总开关）</span>
+    <span class="muted" id="agentMcpState"></span>
+  </label>
+  <div class="pophead">服务器（可同时启用多台）</div>
+  <div class="mcp-server-list" id="agentMcpServerList"></div>
+  <div class="poprow"><span>工具来源</span><select id="agentMcp"></select></div>
+  <div class="mcp-toolbar">
+    <input class="agent-tool-search" id="agentToolSearch" type="search"
+           placeholder="搜索工具名或说明">
+    <button id="btnAgentToolsAll" type="button" title="全选当前筛选结果">全选</button>
+    <button id="btnAgentToolsNone" type="button" title="清空当前筛选结果">清空</button>
+    <span class="muted" id="agentToolsCount"></span>
+  </div>
+  <div class="agent-tool-list" id="agentToolList"></div>
+</div>
+
+<!-- 聊天图片点击放大查看 -->
+<div id="imageViewer" class="image-viewer" hidden>
+  <button id="imageViewerClose" class="image-viewer-close" type="button" title="关闭">×</button>
+  <img id="imageViewerImg" alt="图片预览">
+  <div class="image-viewer-tip">点击空白处或按 Esc 关闭</div>
+</div>
+
 <script src="/vendor/xterm/xterm.js"></script>
 <script src="/vendor/marked/marked.umd.js"></script>
 <script src="/vendor/dompurify/purify.min.js"></script>
@@ -989,6 +1202,46 @@ function nowStamp() {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
          `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.` +
          `${p(d.getMilliseconds(), 3)}`;
+}
+
+/* ---------------- 聊天图片查看器：点击消息里的图片放大 ---------------- */
+function openImageViewer(src) {
+  const viewer = $('#imageViewer');
+  const img = $('#imageViewerImg');
+  if (!viewer || !img || !src) return;
+  img.src = src;
+  viewer.hidden = false;
+}
+
+function closeImageViewer() {
+  const viewer = $('#imageViewer');
+  const img = $('#imageViewerImg');
+  if (!viewer) return;
+  viewer.hidden = true;
+  if (img) img.removeAttribute('src');
+}
+
+function bindImageViewer() {
+  const viewer = $('#imageViewer');
+  if (!viewer) return;
+  $('#imageViewerClose').onclick = closeImageViewer;
+  viewer.addEventListener('click', e => {
+    if (e.target === viewer) closeImageViewer();
+  });
+  // 事件委托同时覆盖聊天图片、Markdown 图片和输入框待发送图片预览。
+  document.addEventListener('click', e => {
+    const img = e.target && e.target.closest
+      ? e.target.closest('.msgs img, .imagepreviews img') : null;
+    if (!img || !img.src) return;
+    e.preventDefault();
+    openImageViewer(img.src);
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !viewer.hidden) {
+      e.preventDefault();
+      closeImageViewer();
+    }
+  });
 }
 
 function askChoice(opts = {}) {
@@ -1205,6 +1458,15 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
       positionConversationRail(kind);
       renderConversationRail(kind);
       scrollConversationToBottom(kind);
+      if (kind === 'agent') {
+        // 首次打开 Agent 时可能还没有草稿会话，按钮会停留在静态文案；
+        // 先建立会话并按当前 MCP 配置同步，避免必须点开 MCP 面板才刷新。
+        const hadState = !!composerState('agent');
+        const state = ensureAgentComposerState();
+        if (hadState && state) {
+          agentRefreshMcpFromState(state).catch(() => {});
+        }
+      }
     });
   }
 });
@@ -1226,12 +1488,15 @@ let CURRENT_AGENT_WORKSPACE = '';
 let SESSION_LOADING = false;
 let CHAT_IMAGES = [];
 let AGENT_IMAGES = [];
+const IMAGE_PENDING = { chat: 0, agent: 0 };
 let OPENAI_APIS = [];                // OpenAI 兼容 API 配置
 let API_EDIT_ID = '';
 let API_MODEL_SELECTED = null;
 let API_MODEL_OVERRIDES = {};
 let AGENT_MODELS = [];
+let AGENT_SERVERS = [];
 let AGENT_TOOLS = [];
+let AGENT_TOOL_SERVER = '';
 let AGENT_SELECTED_TOOLS = new Set();
 let AGENT_HISTORY = [];
 let AGENT_ABORT = null;
@@ -1242,7 +1507,8 @@ let AGENT_USAGE = null;
 let CHAT_SESSION_USAGE = null;
 let AGENT_SESSION_USAGE = null;
 const CHAT_STATES = new Map();
-const HISTORY_PAGE = 20;
+const HISTORY_TURNS = 5;
+const FILE_PENDING = { chat: 0, agent: 0 };
 let HISTORY_RENDER_LOCK = false;
 // 配置文件第一行常是 "# ====" 这种装饰线，不能拿来当说明
 function cleanDesc(desc) {
@@ -1274,6 +1540,7 @@ function appendMessageImages(node, images) {
     const img = el('img');
     img.src = url;
     img.alt = '图片';
+    img.title = '点击查看大图';
     img.loading = 'lazy';
     box.appendChild(img);
   });
@@ -1572,7 +1839,7 @@ async function openSession(kind, id) {
   SESSION_LOADING = true;
   try {
     const r = await api('sessions?id=' + encodeURIComponent(id) +
-      `&history_page=1&history_limit=${HISTORY_PAGE}`);
+      `&history_page=1&history_turns=${HISTORY_TURNS}`);
     if (!r.ok || !r.session) return;
     const data = r.session;
     WORKSPACES = r.workspaces || WORKSPACES;
@@ -1590,12 +1857,14 @@ async function openSession(kind, id) {
       state.usage = null;
       state.sessionUsage = data.usage_totals || null;
       state.config = data.config || '';
-      state.thinking = data.thinking || 'off';
+      state.thinking = data.thinking || 'default';
       state.root = el('div', 'chat-view');
       CURRENT_CHAT_SESSION = state.id;
       chatAttachState(state);
       chatSyncState(state);
       renderChatHistory(state);
+      renderImagePreviews('chat');
+      renderFileChips('chat');
       fillSessionSelect('chat', data.id);
       $('#chatSessionTitle').textContent = data.title || '';
       if (data.config && [...$('#chatConfig').options].some(o => o.value === data.config)) {
@@ -1617,7 +1886,27 @@ async function openSession(kind, id) {
       state.workspaceId = data.workspace_id || CURRENT_AGENT_WORKSPACE;
       state.model = data.model || '';
       state.server = data.server || '';
-      state.thinking = data.thinking || 'off';
+      state.mcpEnabled = data.mcp_enabled !== false;
+      state.mcpServers = {};
+      state.mcpInitialized = false;
+      if ('mcp_servers' in data || 'mcp_tools' in data) {
+        state.mcpInitialized = true;
+        const enabledIds = Array.isArray(data.mcp_servers)
+          ? data.mcp_servers.map(String) : [];
+        const toolMap = (data.mcp_tools && typeof data.mcp_tools === 'object' &&
+                         !Array.isArray(data.mcp_tools)) ? data.mcp_tools : {};
+        const ids = new Set([...AGENT_SERVERS.map(s => s.id),
+                             ...enabledIds, ...Object.keys(toolMap)]);
+        ids.forEach(sid => {
+          const names = Array.isArray(toolMap[sid]) ? toolMap[sid].slice() : [];
+          state.mcpServers[sid] = {
+            enabled: enabledIds.includes(sid),
+            tools: names,
+            initialized: Object.prototype.hasOwnProperty.call(toolMap, sid),
+          };
+        });
+      }
+      state.thinking = data.thinking || 'default';
       state.tools = Array.isArray(data.tools) ? data.tools.slice() : [];
       state.history = data.history || [];
       state.historyStart = r.history_start ?? 0;
@@ -1633,18 +1922,13 @@ async function openSession(kind, id) {
       agentAttachState(state);
       agentSyncState(state);
       renderAgentHistory(state);
+      renderImagePreviews('agent');
+      renderFileChips('agent');
       fillSessionSelect('agent', data.id);
       $('#agentSessionTitle').textContent = data.title || '';
       if (data.model) $('#agentModel').value = data.model;
-      if (data.server) $('#agentMcp').value = data.server;
       if (data.thinking) $('#agentThinking').value = data.thinking;
-      updateAgentThinking();
-      if (data.server) await loadAgentTools(data.server);
-      if (Array.isArray(data.tools) && data.tools.length) {
-        AGENT_SELECTED_TOOLS = new Set(data.tools);
-        renderAgentTools();
-      }
-      agentSyncState(state);
+      agentApplyStateOptions(state);
       agentRefreshControls(state);
       updateAgentContextMeter();
       renderConversationRail('agent');
@@ -1848,6 +2132,27 @@ async function saveCurrentSession(kind) {
   const history = kind === 'chat' ? HISTORY : AGENT_HISTORY;
   if (!history.length) return;
   const id = kind === 'chat' ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION;
+  let mcpFields = {};
+  if (kind === 'agent') {
+    const state = AGENT_STATES.get(CURRENT_AGENT_SESSION);
+    const enabledServers = state ? agentMcpEnabledServers(state) : [];
+    const mcpTools = {};
+    if (state) {
+      const mcp = agentEnsureMcpState(state);
+      Object.keys(mcp).forEach(sid => {
+        const entry = mcp[sid] || {};
+        if (entry.initialized || (entry.tools || []).length) {
+          mcpTools[sid] = (entry.tools || []).slice();
+        }
+      });
+    }
+    mcpFields = {
+      server: enabledServers[0] || '',
+      tools: state ? agentSelectedTools(state) : [],
+      mcp_servers: enabledServers,
+      mcp_tools: mcpTools,
+    };
+  }
   const body = {
     id,
     kind,
@@ -1855,10 +2160,11 @@ async function saveCurrentSession(kind) {
     history,
     config: kind === 'chat' ? $('#chatConfig').value : '',
     model: kind === 'agent' ? $('#agentModel').value : '',
-    server: kind === 'agent' ? $('#agentMcp').value : '',
-    tools: kind === 'agent' ? [...AGENT_SELECTED_TOOLS] : [],
-    thinking: kind === 'agent' ? ($('#agentThinking') || {}).value || 'off'
-                               : ($('#chatThinking') || {}).value || 'off',
+    ...mcpFields,
+    mcp_enabled: kind === 'agent'
+      ? !!((AGENT_STATES.get(CURRENT_AGENT_SESSION) || {}).mcpEnabled !== false) : false,
+    thinking: kind === 'agent' ? ($('#agentThinking') || {}).value || 'default'
+                               : ($('#chatThinking') || {}).value || 'default',
   };
   try {
     const r = await api('sessions', {
@@ -1888,8 +2194,6 @@ async function deleteCurrentSession(kind) {
 }
 
 function newChatSession() {
-  CHAT_IMAGES = [];
-  renderImagePreviews('chat');
   const state = chatEnsureState(newSessionId());
   state.loaded = true;
   state.title = '';
@@ -1899,8 +2203,11 @@ function newChatSession() {
   state.sessionUsage = null;
   state.abort = null;
   state.running = false;
+  state.starting = false;
+  state.images = [];
+  state.files = [];
   state.config = $('#chatConfig').value;
-  state.thinking = ($('#chatThinking') && $('#chatThinking').value) || 'off';
+  state.thinking = ($('#chatThinking') && $('#chatThinking').value) || 'default';
   state.root = el('div', 'chat-view');
   state.root.innerHTML = '<div class="empty">选择对话模型后开始对话</div>';
   CURRENT_CHAT_SESSION = state.id;
@@ -1908,6 +2215,8 @@ function newChatSession() {
   chatSyncState(state);
   fillSessionSelect('chat', '');
   $('#chatSessionTitle').textContent = '';
+  renderImagePreviews('chat');
+  renderFileChips('chat');
   renderChatSessions();
   chatRefreshControls(state);
   updateChatContextMeter();
@@ -1924,11 +2233,148 @@ function modelHasImages(kind) {
   return (m.input_modalities || ['text']).includes('image');
 }
 
+function imageDraft(kind, create = false) {
+  const state = kind === 'chat'
+    ? CHAT_STATES.get(CURRENT_CHAT_SESSION)
+    : AGENT_STATES.get(CURRENT_AGENT_SESSION);
+  if (state) {
+    if (!Array.isArray(state.images)) state.images = [];
+    return state.images;
+  }
+  if (create) {
+    if (!CURRENT_CHAT_SESSION && kind === 'chat') CURRENT_CHAT_SESSION = newSessionId();
+    if (!CURRENT_AGENT_SESSION && kind === 'agent') CURRENT_AGENT_SESSION = newSessionId();
+    const st = kind === 'chat'
+      ? chatEnsureState(CURRENT_CHAT_SESSION)
+      : agentEnsureState(CURRENT_AGENT_SESSION);
+    st.loaded = true;
+    st.images = [];
+    return st.images;
+  }
+  return kind === 'chat' ? CHAT_IMAGES : AGENT_IMAGES;
+}
+
+function composerSessionId(kind) {
+  let id = kind === 'chat' ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION;
+  if (!id) {
+    id = newSessionId();
+    if (kind === 'chat') CURRENT_CHAT_SESSION = id;
+    else CURRENT_AGENT_SESSION = id;
+  }
+  return id;
+}
+
+function fileState(kind, create = false) {
+  const id = kind === 'chat' ? CURRENT_CHAT_SESSION : CURRENT_AGENT_SESSION;
+  let state = id ? (kind === 'chat' ? CHAT_STATES.get(id) : AGENT_STATES.get(id)) : null;
+  if (!state && create) {
+    state = kind === 'chat'
+      ? chatEnsureState(composerSessionId('chat'))
+      : agentEnsureState(composerSessionId('agent'));
+    state.loaded = true;
+  }
+  if (state && !Array.isArray(state.files)) state.files = [];
+  return state;
+}
+
+function fileDraft(kind, create = false) {
+  const state = fileState(kind, create);
+  return state ? state.files : [];
+}
+
+function clearFiles(kind) {
+  const files = fileDraft(kind);
+  files.length = 0;
+  renderFileChips(kind);
+}
+
+function renderFileChips(kind) {
+  const box = $('#' + kind + 'Files');
+  if (!box) return;
+  const files = fileDraft(kind);
+  box.innerHTML = '';
+  files.forEach((file, i) => {
+    const chip = el('div', 'filechip');
+    chip.appendChild(el('span', 'fname', file.name || '附件'));
+    const path = el('span', 'fpath', file.path || '');
+    path.title = file.path || '';
+    chip.appendChild(path);
+    const del = el('button', '', '×');
+    del.type = 'button';
+    del.title = '移除附件';
+    del.onclick = () => {
+      files.splice(i, 1);
+      renderFileChips(kind);
+      renderComposerPrimary(kind);
+    };
+    chip.appendChild(del);
+    box.appendChild(chip);
+  });
+}
+
+// 浏览器不能提供普通文件的原始绝对路径，只能先缓存到 .cache 再追加缓存路径。
+async function addTextFiles(kind, files) {
+  const list = [...(files || [])].filter(Boolean);
+  if (!list.length) return;
+  const accepted = [];
+  list.forEach(file => {
+    const name = file.name || '';
+    if (!/\.(txt|md)$/i.test(name)) {
+      toast('只支持 .txt / .md 文本文件：' + name);
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      toast('文本文件不能超过 1MB：' + name);
+      return;
+    }
+    accepted.push(file);
+  });
+  if (!accepted.length) return;
+  const draft = fileDraft(kind, true);
+  const sid = composerSessionId(kind);
+  FILE_PENDING[kind] = (FILE_PENDING[kind] || 0) + accepted.length;
+  renderComposerPrimary(kind);
+  for (const file of accepted) {
+    try {
+      const content = await file.text();
+      const r = await api('attachments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sid, name: file.name, content }),
+      });
+      if (!r.ok) {
+        toast(r.error || '文件缓存失败：' + file.name);
+        continue;
+      }
+      draft.push({ name: r.name || file.name, path: r.path || '', size: r.size || 0 });
+    } catch (e) {
+      toast('文件读取失败：' + file.name);
+    } finally {
+      FILE_PENDING[kind] = Math.max(0, FILE_PENDING[kind] - 1);
+      renderFileChips(kind);
+      renderComposerPrimary(kind);
+    }
+  }
+}
+
+function filePending(kind) {
+  return FILE_PENDING[kind] || 0;
+}
+
+function attachmentLines(kind) {
+  return fileDraft(kind).filter(f => f.path)
+    .map(f => `[附件] ${f.path}`);
+}
+
 function userMessageContent(text, kind) {
-  const images = kind === 'chat' ? CHAT_IMAGES : AGENT_IMAGES;
-  if (!images.length) return text;
+  let full = String(text || '');
+  const lines = attachmentLines(kind);
+  if (lines.length) {
+    full = full ? `${full}\n\n${lines.join('\n')}` : lines.join('\n');
+  }
+  const images = imageDraft(kind);
+  if (!images.length) return full;
   const content = [];
-  if (text) content.push({ type: 'text', text });
+  if (full) content.push({ type: 'text', text: full });
   images.forEach(url => content.push({ type: 'image_url',
                                        image_url: { url } }));
   return content;
@@ -1936,13 +2382,14 @@ function userMessageContent(text, kind) {
 
 function renderImagePreviews(kind) {
   const box = $('#' + kind + 'Images');
-  const images = kind === 'chat' ? CHAT_IMAGES : AGENT_IMAGES;
+  const images = imageDraft(kind);
   box.innerHTML = '';
   images.forEach((url, i) => {
     const thumb = el('div', 'imgthumb');
     const img = el('img');
     img.src = url;
     img.alt = '待发送图片';
+    img.title = '点击查看大图';
     thumb.appendChild(img);
     const del = el('button', '', '×');
     del.type = 'button';
@@ -1954,6 +2401,11 @@ function renderImagePreviews(kind) {
     thumb.appendChild(del);
     box.appendChild(thumb);
   });
+  renderComposerPrimary(kind);
+}
+
+function imagePending(kind) {
+  return IMAGE_PENDING[kind] || 0;
 }
 
 function addImages(kind, files) {
@@ -1961,25 +2413,691 @@ function addImages(kind, files) {
     toast('当前模型未声明图片输入');
     return;
   }
-  const images = kind === 'chat' ? CHAT_IMAGES : AGENT_IMAGES;
-  [...(files || [])].slice(0, Math.max(0, 4 - images.length)).forEach(file => {
-    if (!file.type || !file.type.startsWith('image/')) return;
+  const images = imageDraft(kind, true);
+  const incoming = [...(files || [])].filter(
+    file => file && file.type && file.type.startsWith('image/'));
+  if (!incoming.length) return;
+  const remaining = Math.max(0, 4 - images.length);
+  if (incoming.length > remaining) {
+    toast(remaining > 0 ? '最多只能添加 4 张图片' : '已经有 4 张待发送图片');
+  }
+  const accepted = incoming.slice(0, remaining);
+  if (!accepted.length) return;
+  const batch = new Array(accepted.length);
+  let left = accepted.length;
+  IMAGE_PENDING[kind] = imagePending(kind) + accepted.length;
+  renderComposerPrimary(kind);
+  const finish = () => {
+    if (left > 0) return;
+    const valid = batch.filter(Boolean);
+    if (valid.length) images.push(...valid);
+    renderImagePreviews(kind);
+  };
+  accepted.forEach((file, index) => {
     if (file.size > 6 * 1024 * 1024) {
       toast('图片不能超过 6MB');
+      left -= 1;
+      IMAGE_PENDING[kind] = Math.max(0, imagePending(kind) - 1);
+      finish();
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
-      images.push(String(reader.result || ''));
-      renderImagePreviews(kind);
+      batch[index] = String(reader.result || '');
+      left -= 1;
+      IMAGE_PENDING[kind] = Math.max(0, imagePending(kind) - 1);
+      finish();
+    };
+    reader.onerror = () => {
+      left -= 1;
+      IMAGE_PENDING[kind] = Math.max(0, imagePending(kind) - 1);
+      finish();
     };
     reader.readAsDataURL(file);
   });
 }
 
+function clipboardFiles(dt) {
+  const files = [];
+  if (!dt) return files;
+  for (const item of dt.items || []) {
+    if (item.kind !== 'file') continue;
+    const file = item.getAsFile();
+    if (file) files.push(file);
+  }
+  if (!files.length) {
+    for (const file of dt.files || []) files.push(file);
+  }
+  return files;
+}
+
+function handleComposerPaste(kind, event) {
+  const dt = event.clipboardData;
+  if (!dt) return;
+  const state = kind === 'chat'
+    ? CHAT_STATES.get(CURRENT_CHAT_SESSION)
+    : AGENT_STATES.get(CURRENT_AGENT_SESSION);
+  const busy = (kind === 'chat' && (chatAbort || (state && state.starting))) ||
+               (state && (state.running || state.starting));
+  const files = clipboardFiles(dt);
+  const images = files.filter(f => f.type && f.type.startsWith('image/'));
+  const texts = files.filter(f => /\.(txt|md)$/i.test(f.name || ''));
+  if (busy && (images.length || texts.length)) {
+    event.preventDefault();
+    toast('当前会话正在生成，请停止后再粘贴图片或文件');
+    return;
+  }
+  if (images.length) {
+    const hasText = [...(dt.items || [])].some(
+      item => item.kind === 'string' && item.type === 'text/plain');
+    if (!hasText) event.preventDefault();
+    addImages(kind, images);
+  }
+  if (texts.length) {
+    event.preventDefault();
+    addTextFiles(kind, texts);
+  }
+}
+
 function clearImages(kind) {
-  if (kind === 'chat') CHAT_IMAGES = []; else AGENT_IMAGES = [];
+  const images = imageDraft(kind);
+  images.length = 0;
   renderImagePreviews(kind);
+}
+
+/* ---------------- 输入区控件：主按钮 / 浮层 / 模型菜单 / MCP / ＋菜单 ---------------- */
+let ACTIVE_POP = null;
+let ACTIVE_POP_ANCHOR = null;
+
+function popOutside(event) {
+  if (!ACTIVE_POP) return;
+  if (ACTIVE_POP.contains(event.target)) return;
+  if (ACTIVE_POP_ANCHOR && ACTIVE_POP_ANCHOR.contains(event.target)) return;
+  closePopover();
+}
+
+function popEsc(event) {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  closePopover(true);
+}
+
+function closePopover(restoreFocus) {
+  if (!ACTIVE_POP) return;
+  const node = ACTIVE_POP;
+  const anchor = ACTIVE_POP_ANCHOR;
+  ACTIVE_POP = null;
+  ACTIVE_POP_ANCHOR = null;
+  document.removeEventListener('mousedown', popOutside, true);
+  document.removeEventListener('keydown', popEsc, true);
+  // MCP 浮层是常驻节点，只隐藏；＋/模型菜单是临时节点，直接移除。
+  if (node.id === 'agentMcpPop') node.hidden = true;
+  else node.remove();
+  if (restoreFocus && anchor && anchor.isConnected) anchor.focus();
+}
+
+function openPopover(anchor, node) {
+  if (!anchor || !node) return;
+  closePopover();
+  if (!node.isConnected) document.body.appendChild(node);
+  node.hidden = false;
+  node.style.visibility = 'hidden';
+  const r = anchor.getBoundingClientRect();
+  const w = node.offsetWidth;
+  const h = node.offsetHeight;
+  const left = Math.max(12, Math.min(window.innerWidth - w - 12, r.left));
+  let top = r.top - h - 8;
+  if (top < 12) top = r.bottom + 8;
+  node.style.left = left + 'px';
+  node.style.top = Math.max(12, Math.min(window.innerHeight - h - 12, top)) + 'px';
+  node.style.visibility = '';
+  ACTIVE_POP = node;
+  ACTIVE_POP_ANCHOR = anchor;
+  setTimeout(() => {
+    document.addEventListener('mousedown', popOutside, true);
+    document.addEventListener('keydown', popEsc, true);
+  }, 0);
+}
+
+function composerState(kind) {
+  return kind === 'chat' ? CHAT_STATES.get(CURRENT_CHAT_SESSION)
+                         : AGENT_STATES.get(CURRENT_AGENT_SESSION);
+}
+
+function composerRunning(kind) {
+  const state = composerState(kind);
+  if (state && (state.running || state.starting)) return true;
+  return kind === 'chat' && !!chatAbort;
+}
+
+function composerHasContent(kind) {
+  const input = $(kind === 'chat' ? '#chatInput' : '#agentInput');
+  return !!((input && input.value.trim()) ||
+            imageDraft(kind).length || fileDraft(kind).length);
+}
+
+function composerModelReady(kind) {
+  return kind === 'chat' ? !!$('#chatConfig').value : !!$('#agentModel').value;
+}
+
+function composerEnvReady(kind) {
+  if (kind !== 'chat') return true;
+  const c = selectedChatConfig($('#chatConfig').value);
+  if (c && (c.backend === 'ollama' || c.backend === 'openai')) return true;
+  if (!ENV_DETECTED || !PY.chat.info) return true;
+  return pyPass(PY.chat.info, false);
+}
+
+function composerPendingTotal(kind) {
+  return imagePending(kind) + filePending(kind);
+}
+
+// 同一个位置两态：空闲显示 ↑（发送），生成中显示 ■（停止）。
+function renderComposerPrimary(kind) {
+  const btn = $(kind === 'chat' ? '#btnSend' : '#btnAgentSend');
+  if (!btn) return;
+  const state = composerState(kind);
+  // 提交前的准备阶段（例如本地模型检测环境）还没有 AbortController，显示加载而不是停止。
+  if (state && state.starting && !state.running && !state.abort) {
+    btn.classList.remove('stop');
+    btn.classList.add('primary');
+    btn.textContent = '…';
+    btn.title = '正在开始…';
+    btn.disabled = true;
+    return;
+  }
+  btn.classList.remove('stop');
+  if (composerRunning(kind)) {
+    btn.textContent = '■';
+    btn.title = '停止生成';
+    btn.disabled = false;
+    btn.classList.remove('primary');
+    btn.classList.add('stop');
+    return;
+  }
+  btn.classList.add('primary');
+  if (composerPendingTotal(kind) > 0) {
+    btn.textContent = '…';
+    btn.title = '正在读取图片或文件';
+    btn.disabled = true;
+    return;
+  }
+  btn.textContent = '↑';
+  btn.title = '发送';
+  btn.disabled = !composerHasContent(kind) || !composerModelReady(kind) ||
+                 !composerEnvReady(kind);
+}
+
+function composerPrimaryAction(kind) {
+  const state = composerState(kind);
+  if (state && (state.running || state.starting)) {
+    if (state.abort) state.abort.abort();
+    else if (kind === 'chat' && chatAbort) chatAbort.abort();
+    else if (kind === 'agent' && AGENT_ABORT) AGENT_ABORT.abort();
+    return;
+  }
+  if (composerPendingTotal(kind) > 0) return;
+  if (kind === 'chat') send();
+  else agentSend();
+}
+
+function thinkingSelect(kind) {
+  return kind === 'chat' ? $('#chatThinking') : $('#agentThinking');
+}
+
+function updateModelButton(kind) {
+  const btn = $(kind === 'chat' ? '#btnChatModel' : '#btnAgentModel');
+  if (!btn) return;
+  const sel = kind === 'chat' ? $('#chatConfig') : $('#agentModel');
+  const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+  let label = opt ? opt.textContent.trim() : '选择模型';
+  if (!sel || !sel.value) label = '选择模型';
+  const think = thinkingSelect(kind);
+  // 关闭仍沿用旧行为不在按钮上占位；Default 要显示，表示当前不传思考参数。
+  const level = think && think.value && think.value !== 'off'
+    ? ' · ' + thinkingLabel(think.value) : '';
+  btn.textContent = label + level + ' ▾';
+  btn.title = label + (level ? '（推理等级' + level.replace(' · ', '') + '）' : '');
+}
+
+function openModelMenu(kind) {
+  const anchor = $(kind === 'chat' ? '#btnChatModel' : '#btnAgentModel');
+  const sel = kind === 'chat' ? $('#chatConfig') : $('#agentModel');
+  if (!anchor || !sel) return;
+  const pop = el('div', 'popmenu');
+  pop.appendChild(el('div', 'pophead', '模型'));
+  const options = [...sel.options].filter(o => o.value);
+  if (!options.length) {
+    pop.appendChild(el('div', 'popempty', '没有可用模型'));
+  } else {
+    const items = [];
+    let search = null;
+    if (options.length > 8) {
+      search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'popsearch';
+      search.placeholder = '搜索模型';
+      pop.appendChild(search);
+    }
+    options.forEach(opt => {
+      const item = el('button', 'popitem' + (opt.value === sel.value ? ' on' : ''));
+      item.type = 'button';
+      item.appendChild(el('span', '', opt.textContent.trim()));
+      if (opt.value === sel.value) item.appendChild(el('span', 'tag', '当前'));
+      item.onclick = () => {
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        const state = composerState(kind);
+        if (state) {
+          if (kind === 'chat') state.config = sel.value;
+          else state.model = sel.value;
+        }
+        updateModelButton(kind);
+        // 模型变了，推理等级选项可能也变；重开菜单让用户接着选等级。
+        closePopover();
+        openModelMenu(kind);
+      };
+      items.push(item);
+      pop.appendChild(item);
+    });
+    if (search) {
+      search.oninput = () => {
+        const q = search.value.trim().toLowerCase();
+        items.forEach(item => {
+          item.style.display = !q ||
+            item.textContent.toLowerCase().includes(q) ? '' : 'none';
+        });
+      };
+    }
+  }
+  const think = thinkingSelect(kind);
+  if (think && think.options.length) {
+    pop.appendChild(el('div', 'popsep'));
+    pop.appendChild(el('div', 'pophead', '推理等级'));
+    [...think.options].forEach(opt => {
+      const item = el('button', 'popitem' + (opt.value === think.value ? ' on' : ''));
+      item.type = 'button';
+      item.appendChild(el('span', '', opt.textContent.trim()));
+      if (opt.value === think.value) item.appendChild(el('span', 'tag', '当前'));
+      item.onclick = () => {
+        think.value = opt.value;
+        const state = composerState(kind);
+        if (state) state.thinking = think.value;
+        if (kind === 'chat') {
+          CHAT_CONTEXT_DATA = null;
+          CHAT_USAGE = null;
+          updateChatContextMeter();
+        } else {
+          AGENT_CONTEXT_DATA = null;
+          AGENT_USAGE = null;
+          updateAgentContextMeter();
+        }
+        updateModelButton(kind);
+        if (state && state.history && state.history.length) {
+          if (kind === 'chat') saveChatState(state);
+          else saveAgentState(state);
+        }
+        closePopover(true);
+      };
+      pop.appendChild(item);
+    });
+  }
+  openPopover(anchor, pop);
+}
+
+function agentServerMeta(serverId) {
+  return AGENT_SERVERS.find(s => s.id === serverId) || { id: serverId, name: serverId };
+}
+
+// 每个会话保存一份 { serverId: { enabled, tools, initialized } }；每台服务器独立开关。
+function agentEnsureMcpState(state) {
+  if (!state) return {};
+  if (!state.mcpServers || typeof state.mcpServers !== 'object') state.mcpServers = {};
+  const known = new Set(AGENT_SERVERS.map(s => s.id));
+  if (known.size) {
+    Object.keys(state.mcpServers).forEach(sid => {
+      if (!known.has(sid)) delete state.mcpServers[sid];
+    });
+  }
+  if (!state.mcpInitialized) {
+    if (!AGENT_SERVERS.length) return state.mcpServers;
+    state.mcpInitialized = true;
+    const legacyServer = state.server || '';
+    if (legacyServer && known.has(legacyServer)) {
+      state.mcpServers[legacyServer] = {
+        enabled: state.mcpEnabled !== false,
+        tools: Array.isArray(state.tools) ? state.tools.slice() : [],
+        initialized: true,
+      };
+    } else if (state.mcpEnabled !== false) {
+      // 新会话默认只启用第一台服务器，避免一次把所有服务器的工具都塞进上下文。
+      const first = AGENT_SERVERS[0].id;
+      const cached = agentServerToolNames(first);
+      state.mcpServers[first] = {
+        enabled: true,
+        tools: cached,
+        // 启动检测已经有工具缓存时立即显示正确数量，不必等点击 MCP 面板再加载。
+        initialized: cached.length > 0,
+      };
+    }
+  }
+  return state.mcpServers;
+}
+
+function agentMcpEnabledServers(state) {
+  const st = state || composerState('agent');
+  const mcp = agentEnsureMcpState(st);
+  return Object.keys(mcp).filter(sid =>
+    mcp[sid] && mcp[sid].enabled && AGENT_SERVERS.some(s => s.id === sid));
+}
+
+function agentServerToolNames(serverId) {
+  const status = MCP_STATUS[serverId];
+  if (status && Array.isArray(status.tools)) {
+    return status.tools.map(t => t.name).filter(Boolean);
+  }
+  return [];
+}
+
+async function agentLoadServerTools(serverId) {
+  if (!serverId) return [];
+  let status = MCP_STATUS[serverId];
+  if (!status || !Array.isArray(status.tools)) {
+    try {
+      const r = await api('agent/tools?server=' + encodeURIComponent(serverId));
+      status = { ok: !!r.ok, tools: r.tools || [], error: r.error || '' };
+      MCP_STATUS[serverId] = status;
+    } catch (e) {
+      status = { ok: false, tools: [], error: e.message };
+      MCP_STATUS[serverId] = status;
+    }
+  }
+  return status.tools || [];
+}
+
+// 确保某台服务器的工具已加载；第一次启用时默认全选，已初始化则按保存的勾选过滤。
+async function agentEnsureServerToolsInState(state, serverId) {
+  const tools = await agentLoadServerTools(serverId);
+  if (!state) return tools;
+  const mcp = agentEnsureMcpState(state);
+  let entry = mcp[serverId];
+  if (!entry) {
+    entry = { enabled: false, tools: [], initialized: false };
+    mcp[serverId] = entry;
+  }
+  const names = tools.map(t => t.name).filter(Boolean);
+  if (!entry.initialized) {
+    entry.tools = names.slice();
+    entry.initialized = true;
+  } else {
+    const available = new Set(names);
+    entry.tools = (entry.tools || []).filter(name => available.has(name));
+  }
+  return tools;
+}
+
+async function agentRefreshMcpFromState(state) {
+  if (!state || composerState('agent') !== state) return;
+  if ($('#agentMcpEnabled')) {
+    $('#agentMcpEnabled').checked = state.mcpEnabled !== false;
+  }
+  agentEnsureMcpState(state);
+  let enabled = agentMcpEnabledServers(state);
+  if (!AGENT_TOOL_SERVER || !enabled.includes(AGENT_TOOL_SERVER)) {
+    AGENT_TOOL_SERVER = enabled[0] ||
+      (AGENT_SERVERS[0] ? AGENT_SERVERS[0].id : '');
+  }
+  fillAgentMcpToolSource();
+  renderAgentMcpServers();
+  renderAgentMcpButton();
+  updateAgentContextMeter();
+  if (!enabled.length) return;
+  try {
+    await Promise.all(enabled.map(sid => agentEnsureServerToolsInState(state, sid)));
+  } catch (e) {
+    return;
+  }
+  if (composerState('agent') !== state) return;
+  enabled = agentMcpEnabledServers(state);
+  fillAgentMcpToolSource();
+  renderAgentMcpServers();
+  renderAgentMcpButton();
+  updateAgentContextMeter();
+  if (!AGENT_TOOL_SERVER) return;
+  try {
+    await loadAgentTools(AGENT_TOOL_SERVER);
+  } catch (e) {
+    return;
+  }
+  if (composerState('agent') !== state) return;
+  fillAgentMcpToolSource();
+  renderAgentMcpButton();
+  updateAgentContextMeter();
+}
+
+function agentSelectedTools(state) {
+  const st = state || composerState('agent');
+  const out = [];
+  agentMcpEnabledServers(st).forEach(sid => {
+    const entry = agentEnsureMcpState(st)[sid];
+    (entry.tools || []).forEach(name => {
+      if (!out.includes(name)) out.push(name);
+    });
+  });
+  return out;
+}
+
+function agentSelectedToolObjects(state) {
+  const st = state || composerState('agent');
+  const out = [];
+  agentMcpEnabledServers(st).forEach(sid => {
+    const selected = new Set((agentEnsureMcpState(st)[sid].tools) || []);
+    agentServerToolNames(sid).forEach(tool => {
+      if (selected.has(tool.name) && !out.some(t => t.name === tool.name)) out.push(tool);
+    });
+  });
+  return out;
+}
+
+function fillAgentMcpToolSource() {
+  const sel = $('#agentMcp');
+  if (!sel) return;
+  const state = composerState('agent');
+  const enabled = agentMcpEnabledServers(state);
+  const ids = enabled.length ? enabled : AGENT_SERVERS.map(s => s.id);
+  sel.innerHTML = ids.length
+    ? ids.map(sid => {
+        const meta = agentServerMeta(sid);
+        return `<option value="${esc(sid)}">${esc(meta.name || sid)}` +
+               `${enabled.includes(sid) ? '' : '（未启用）'}</option>`;
+      }).join('')
+    : '<option value="">（没有 MCP 服务器）</option>';
+  if (ids.includes(AGENT_TOOL_SERVER)) sel.value = AGENT_TOOL_SERVER;
+  else if (ids.length) {
+    AGENT_TOOL_SERVER = ids[0];
+    sel.value = AGENT_TOOL_SERVER;
+  } else {
+    AGENT_TOOL_SERVER = '';
+  }
+}
+
+function renderAgentMcpButton() {
+  const btn = $('#btnAgentMcp');
+  if (!btn) return;
+  const state = composerState('agent');
+  const cb = $('#agentMcpEnabled');
+  // 有会话状态时以 state 为准，避免隐藏复选框还停留在上一个会话，
+  // 把新会话错误显示成“MCP 关”，甚至反向覆盖 state.mcpEnabled。
+  let enabled;
+  if (state) {
+    enabled = state.mcpEnabled !== false;
+    if (cb) cb.checked = enabled;
+  } else {
+    enabled = cb ? cb.checked : true;
+  }
+  if (state) state.mcpEnabled = enabled;
+  const total = AGENT_SERVERS.length;
+  const enabledIds = enabled ? agentMcpEnabledServers(state) : [];
+  const picked = enabledIds.reduce(
+    (sum, sid) => sum + ((agentEnsureMcpState(state)[sid] || {}).tools || []).length, 0);
+  if (!total) {
+    btn.textContent = 'MCP 不可用';
+    btn.classList.add('off');
+    btn.disabled = true;
+    btn.title = '未配置 MCP 服务器';
+  } else {
+    btn.textContent = enabled
+      ? `MCP 开 · ${enabledIds.length}/${total} · ${picked}`
+      : 'MCP 关';
+    btn.classList.toggle('off', !enabled || !enabledIds.length);
+    btn.disabled = false;
+    btn.title = enabled
+      ? `已启用 ${enabledIds.length}/${total} 台服务器，共 ${picked} 个工具`
+      : 'MCP 已关闭';
+  }
+  if ($('#agentMcpState')) {
+    $('#agentMcpState').textContent = !total ? '没有服务器'
+      : (enabled ? `已启用 ${enabledIds.length}/${total} 台，${picked} 个工具` : '已关闭');
+  }
+  if ($('#agentToolList')) $('#agentToolList').classList.toggle('off', !enabled);
+}
+
+function renderAgentMcpServers() {
+  const box = $('#agentMcpServerList');
+  if (!box) return;
+  const state = composerState('agent');
+  const mcp = state ? agentEnsureMcpState(state) : {};
+  const masterOn = $('#agentMcpEnabled') ? $('#agentMcpEnabled').checked : true;
+  box.innerHTML = '';
+  if (!AGENT_SERVERS.length) {
+    box.innerHTML = '<div class="popempty">没有配置 MCP 服务器</div>';
+    return;
+  }
+  AGENT_SERVERS.forEach(server => {
+    const entry = mcp[server.id] || { enabled: false, tools: [] };
+    const row = el('label', 'mcp-server-row' + (entry.enabled ? '' : ' disabled'));
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!entry.enabled;
+    cb.disabled = !state || !masterOn;
+    cb.onchange = async () => {
+      if (!state) return;
+      const entries = agentEnsureMcpState(state);
+      let current = entries[server.id];
+      if (!current) {
+        current = { enabled: false, tools: [], initialized: false };
+        entries[server.id] = current;
+      }
+      current.enabled = cb.checked;
+      // 先按用户点击立即刷新，避免工具列表请求稍慢时看起来“勾了还是关闭”。
+      fillAgentMcpToolSource();
+      renderAgentMcpServers();
+      renderAgentMcpButton();
+      updateAgentContextMeter();
+      if (cb.checked) await agentEnsureServerToolsInState(state, server.id);
+      if (composerState('agent') !== state) return;
+      fillAgentMcpToolSource();
+      renderAgentMcpServers();
+      renderAgentMcpButton();
+      updateAgentContextMeter();
+      if (AGENT_TOOL_SERVER) await loadAgentTools(AGENT_TOOL_SERVER);
+      saveAgentState(state);
+    };
+    row.appendChild(cb);
+    row.appendChild(el('span', 'sname', server.name || server.id));
+    row.appendChild(el('span', 'scount',
+      entry.enabled ? `${(entry.tools || []).length} 工具` : '已关闭'));
+    row.title = server.name || server.id;
+    box.appendChild(row);
+  });
+}
+
+async function openAgentMcpMenu() {
+  const anchor = $('#btnAgentMcp');
+  const pop = $('#agentMcpPop');
+  if (!anchor || !pop) return;
+  // MCP 开关需要挂在具体会话状态上；还没开始对话时先建立草稿会话。
+  let state = composerState('agent');
+  if (!state) {
+    agentNewChat();
+    state = composerState('agent');
+  }
+  if ($('#agentMcpEnabled')) {
+    $('#agentMcpEnabled').checked = state ? state.mcpEnabled !== false : true;
+  }
+  if (state) agentEnsureMcpState(state);
+  const enabled = agentMcpEnabledServers(state);
+  for (const sid of enabled) await agentEnsureServerToolsInState(state, sid);
+  if (!AGENT_TOOL_SERVER || !enabled.includes(AGENT_TOOL_SERVER)) {
+    AGENT_TOOL_SERVER = enabled[0] || (AGENT_SERVERS[0] ? AGENT_SERVERS[0].id : '');
+  }
+  fillAgentMcpToolSource();
+  renderAgentMcpServers();
+  renderAgentMcpButton();
+  if (AGENT_TOOL_SERVER) await loadAgentTools(AGENT_TOOL_SERVER);
+  else renderAgentTools();
+  openPopover(anchor, pop);
+}
+
+function exportConversation(kind) {
+  const state = composerState(kind);
+  if (!state || !state.history.length) return toast('当前会话还没有内容');
+  const lines = state.history.map(msg => {
+    const parts = contentParts(msg.content);
+    const role = msg.role === 'user' ? '用户' : '助手';
+    const ts = msg.ts ? ` · ${msg.ts}` : '';
+    let text = `## ${role}${ts}\n\n${parts.text || ''}`;
+    if (parts.images.length) text += `\n\n（含 ${parts.images.length} 张图片）`;
+    return text;
+  });
+  const blob = new Blob([`# ${state.title || '会话'}\n\n` + lines.join('\n\n') + '\n'],
+                        { type: 'text/markdown;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (state.title || '会话') + '.md';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function openPlusMenu(kind) {
+  const anchor = $(kind === 'chat' ? '#btnChatPlus' : '#btnAgentPlus');
+  if (!anchor) return;
+  const pop = el('div', 'popmenu');
+  const add = (icon, label, fn) => {
+    const item = el('button', 'popitem');
+    item.type = 'button';
+    item.appendChild(el('span', 'ico', icon));
+    item.appendChild(el('span', '', label));
+    item.onclick = fn;
+    pop.appendChild(item);
+  };
+  add('🖼', '图片', () => {
+    closePopover();
+    $(kind === 'chat' ? '#chatImageInput' : '#agentImageInput').click();
+  });
+  add('📄', '文本文件（.txt / .md）', () => {
+    closePopover();
+    $(kind === 'chat' ? '#chatFileInput' : '#agentFileInput').click();
+  });
+  pop.appendChild(el('div', 'popsep'));
+  pop.appendChild(el('div', 'pophead', '指令'));
+  if (kind === 'agent') {
+    add('✂', '压缩上下文', () => {
+      closePopover();
+      agentCompact();
+    });
+  }
+  add('⤓', '导出会话 Markdown', () => {
+    closePopover();
+    exportConversation(kind);
+  });
+  add('⚙', '模型与思考等级', () => {
+    closePopover();
+    openModelMenu(kind);
+  });
+  openPopover(anchor, pop);
 }
 
 function mcpFillForm(item) {
@@ -2465,6 +3583,7 @@ function agentMsg(role, text, ts, historyIndex) {
   let bubble = null;
   let turn = null;
   let title = null;
+  let status = null;
   let meta = null;
   let flow = null;
   if (role === 'user') {
@@ -2484,8 +3603,10 @@ function agentMsg(role, text, ts, historyIndex) {
     head.setAttribute('aria-expanded', 'false');
     head.appendChild(el('span', 'agent-turn-caret'));
     title = el('span', 'agent-turn-title', '运行中…');
+    status = el('span', 'agent-turn-status');
     meta = el('span', 'agent-turn-meta');
     head.appendChild(title);
+    head.appendChild(status);
     head.appendChild(meta);
     head.onclick = () => {
       turn.classList.toggle('collapsed');
@@ -2499,7 +3620,7 @@ function agentMsg(role, text, ts, historyIndex) {
   }
   box.appendChild(wrap);
   $('#agentBox').scrollTop = $('#agentBox').scrollHeight;
-  return { body, bubble, turn, title, meta, flow, answers: [], startedAt: Date.now() };
+  return { body, bubble, turn, title, status, meta, flow, answers: [], startedAt: Date.now() };
 }
 
 function agentEnsureThink(out) {
@@ -2507,10 +3628,12 @@ function agentEnsureThink(out) {
   if (!last || !last.classList.contains('agent-think')) {
     const details = el('details', 'agent-step agent-think');
     details.open = false;
+    const ts = nowStamp();
+    details.dataset.ts = ts;
     const summary = el('summary', 'agent-step-head');
     summary.appendChild(el('span', 'agent-step-icon', '🧠'));
     summary.appendChild(el('span', 'agent-step-label', '思考'));
-    summary.appendChild(el('span', 'agent-step-time', nowStamp()));
+    summary.appendChild(el('span', 'agent-step-time', ts));
     details.appendChild(summary);
     const flow = el('div', 'think-flow');
     details.appendChild(flow);
@@ -2542,29 +3665,503 @@ function agentThinkText(think) {
   return last;
 }
 
+// 折叠状态只显示思考内容的最后一句话；展开后交给完整 think-flow。
+function agentThinkPreviewText(think) {
+  if (!think || !think.flow) return '';
+  const text = Array.from(think.flow.querySelectorAll('.think-text'))
+    .map(node => node.textContent || '').join('\n')
+    .replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  const parts = text.match(/[^。！？!?；;.\n]+[。！？!?；;.]?/g) || [];
+  let last = '';
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    if (parts[i].trim()) { last = parts[i].trim(); break; }
+  }
+  if (!last) last = text;
+  return last.length > 110 ? '…' + last.slice(-110) : last;
+}
+
+function agentUpdateThinkPreview(think) {
+  if (!think || !think.box) return;
+  const summary = think.box.querySelector('summary');
+  if (!summary) return;
+  let preview = summary.querySelector('.agent-think-preview');
+  if (!preview) {
+    preview = el('span', 'agent-think-preview');
+    const time = summary.querySelector('.agent-step-time');
+    summary.insertBefore(preview, time || null);
+    think.box._preview = preview;
+  }
+  preview.textContent = agentThinkPreviewText(think);
+  preview.title = preview.textContent;
+}
+
+const TOOL_LABELS = {
+  dlqq_read_file: '读取文件', dlqq_read_bin_file: '读取二进制',
+  dlqq_read_office_file: '读取 Office',
+  dlqq_create_file: '创建文件', dlqq_overwrite_file: '覆盖文件',
+  dlqq_append_file: '追加内容', dlqq_clear_file: '清空文件',
+  dlqq_delete_file: '删除文件', dlqq_rename_file: '重命名文件',
+  dlqq_move_file: '移动文件', dlqq_copy_file: '复制文件',
+  dlqq_replace_text_in_file: '替换文本', dlqq_remove_text_in_file: '删除文本',
+  dlqq_replace_lines_in_file: '替换行', dlqq_remove_lines_in_file: '删除行',
+  dlqq_insert_text_in_file: '插入文本', dlqq_replace_text_in_dir: '批量替换',
+  dlqq_list_dir_files: '列出目录', dlqq_list_dir_tree: '目录树',
+  dlqq_search_file: '查找文件', dlqq_search_dir: '查找目录',
+  dlqq_search_text_in_file: '搜索文件', dlqq_search_text_in_dir: '搜索目录',
+  dlqq_run_command: '执行命令', dlqq_run_powershell: 'PowerShell',
+  dlqq_run_pwsh: 'PowerShell 7', dlqq_build_project: '构建项目',
+  dlqq_get_tool_list: '工具列表', dlqq_get_mcp_properties: 'MCP 配置',
+  dlqq_set_mcp_properties: '设置 MCP 配置',
+  dlqq_get_current_time: '当前时间', dlqq_get_tools_env: '开发环境',
+  dlqq_get_cwd_path: '当前目录', dlqq_get_command_list: '后台命令',
+  dlqq_get_command_log: '命令日志',
+  dlqq_write_bin_file: '写入二进制', dlqq_convert_office_file: '转换 Office',
+  dlqq_zip: '压缩', dlqq_unzip: '解压',
+};
+
+function agentToolLabel(name) {
+  if (TOOL_LABELS[name]) return TOOL_LABELS[name];
+  return String(name || '工具').replace(/^dlqq_/, '').replace(/_/g, ' ');
+}
+
+function agentToolPath(args) {
+  if (!args || typeof args !== 'object') return '';
+  for (const key of ['file_path', 'path', 'dir_path', 'directory',
+                     'source_path', 'target_path', 'file']) {
+    const value = args[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function agentToolShortPath(path) {
+  const parts = String(path || '').split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+function agentToolArgHint(name, args) {
+  if (!args || typeof args !== 'object') return '';
+  if (args.command) return String(args.command).replace(/\s+/g, ' ').slice(0, 46);
+  if (args.query) return String(args.query).slice(0, 46);
+  if (args.pattern) return String(args.pattern).slice(0, 46);
+  if (args.ssid) return String(args.ssid).slice(0, 46);
+  const path = agentToolPath(args);
+  return path ? agentToolShortPath(path) : '';
+}
+
+function toolResultHead(icon, title, meta, badges) {
+  const head = el('div', 'tool-result-head');
+  head.appendChild(el('span', 'agent-step-icon', icon || '📄'));
+  const name = el('span', 'tool-result-title', title || '返回结果');
+  name.title = title || '';
+  head.appendChild(name);
+  (badges || []).forEach(item => {
+    if (!item || !item.text) return;
+    head.appendChild(el('span', 'tool-result-badge' +
+      (item.kind ? ' ' + item.kind : ''), item.text));
+  });
+  if (meta) head.appendChild(el('span', 'tool-result-meta', meta));
+  return head;
+}
+
+function toolRawDetails(text) {
+  const wrap = el('details', 'tool-raw');
+  wrap.appendChild(el('summary', '', '查看原始返回'));
+  const pre = el('pre', 'tool-text');
+  pre.textContent = String(text || '');
+  wrap.appendChild(pre);
+  return wrap;
+}
+
+function toolDiffLines(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const body = [];
+  let adds = 0;
+  let dels = 0;
+  for (const line of lines) {
+    let m = /^([+-])\s*(\d+)\s*\|\s?(.*)$/.exec(line);
+    if (m) {
+      body.push({ kind: m[1] === '+' ? 'add' : 'del', ln: m[2], text: m[3],
+                  sign: m[1] });
+      if (m[1] === '+') adds += 1; else dels += 1;
+      continue;
+    }
+    m = /^\s+(\d+)\s*\|\s?(.*)$/.exec(line);
+    if (m) {
+      body.push({ kind: 'ctx', ln: m[1], text: m[2], sign: '' });
+      continue;
+    }
+    if (/^@@/.test(line)) {
+      body.push({ kind: 'hunk', ln: '', text: line, sign: '' });
+      continue;
+    }
+    if (line.trim()) body.push({ kind: 'meta', ln: '', text: line, sign: '' });
+  }
+  return body.some(item => item.kind === 'add' || item.kind === 'del')
+    ? { body, adds, dels } : null;
+}
+
+function renderToolDiff(name, args, text, diff) {
+  const box = document.createElement('div');
+  const path = agentToolPath(args);
+  box.appendChild(toolResultHead('📝', path || agentToolLabel(name),
+    `${diff.adds} 增加 / ${diff.dels} 删除`,
+    [{ text: '+' + diff.adds, kind: 'add' }, { text: '-' + diff.dels, kind: 'del' }]));
+  const wrap = el('div', 'tool-diff');
+  const body = el('div', 'tool-diff-body');
+  const maxLines = 1600;
+  diff.body.slice(0, maxLines).forEach(item => {
+    const row = el('div', 'tool-diff-line ' + item.kind);
+    row.appendChild(el('span', 'ln', item.ln || ''));
+    row.appendChild(el('span', 'sign', item.sign || ''));
+    row.appendChild(el('span', '', item.text));
+    body.appendChild(row);
+  });
+  if (diff.body.length > maxLines) {
+    body.appendChild(el('div', 'tool-diff-line meta',
+      `…… 仅展示前 ${maxLines} 行，完整内容见原始返回`));
+  }
+  wrap.appendChild(body);
+  box.appendChild(wrap);
+  box.appendChild(toolRawDetails(text));
+  return box;
+}
+
+function renderToolSearch(name, args, text) {
+  if (!/^找到\s+\d+\s+处匹配/m.test(text) &&
+      !/^\[\d+\]\s+\S+/m.test(text)) return null;
+  const blocks = text.split(/\r?\n(?=\[\d+\]\s)/);
+  const hits = [];
+  blocks.forEach(block => {
+    const head = /^\[(\d+)\]\s*(.+)$/m.exec(block);
+    if (!head) return;
+    const line = /第\s*(\d+)\s*行[:：]\s*(.*)/m.exec(block);
+    const ctx = /上下文[:：]\s*\n([\s\S]*)$/m.exec(block);
+    hits.push({
+      index: head[1],
+      path: head[2].trim(),
+      lineNo: line ? line[1] : '',
+      lineText: line ? line[2] : '',
+      context: ctx ? ctx[1].replace(/\s+$/, '') : '',
+    });
+  });
+  if (!hits.length) return null;
+  const total = /找到\s+(\d+)\s+处匹配/m.exec(text);
+  const box = document.createElement('div');
+  box.appendChild(toolResultHead('🔎', agentToolArgHint('', args) || '搜索结果',
+    total ? `共 ${total[1]} 处匹配` : `${hits.length} 处匹配`));
+  const list = el('div', 'tool-search');
+  hits.forEach(hit => {
+    const card = el('div', 'tool-search-hit');
+    card.appendChild(el('div', 'tool-search-path', hit.path));
+    if (hit.lineNo) {
+      card.appendChild(el('div', 'tool-search-line',
+        `第 ${hit.lineNo} 行${hit.lineText ? '：' + hit.lineText : ''}`));
+    }
+    if (hit.context) {
+      const pre = el('pre', 'tool-search-context', hit.context);
+      card.appendChild(pre);
+    }
+    list.appendChild(card);
+  });
+  box.appendChild(list);
+  box.appendChild(toolRawDetails(text));
+  return box;
+}
+
+function renderToolTree(name, args, text) {
+  if (!/[├└]──|目录结构[:：]/.test(text)) return null;
+  const dir = agentToolPath(args) ||
+    (/目录结构[:：]\s*(.+)/.exec(text) || [])[1] || '目录树';
+  const stat = /统计[:：]\s*(.+)/.exec(text);
+  const box = document.createElement('div');
+  box.appendChild(toolResultHead('📁', dir, stat ? stat[1] : ''));
+  const pre = el('pre', 'tool-tree');
+  pre.textContent = text;
+  box.appendChild(pre);
+  return box;
+}
+
+function looksLineNumbered(text) {
+  const lines = String(text || '').split(/\r?\n/).filter(line => line.trim()).slice(0, 20);
+  if (!lines.length) return false;
+  let hits = 0;
+  lines.forEach(line => { if (/^\s*\d+\s*\|/.test(line)) hits += 1; });
+  return hits >= Math.min(3, lines.length);
+}
+
+function renderToolRead(name, args, text) {
+  const bin = name === 'dlqq_read_bin_file';
+  if (!bin && !looksLineNumbered(text)) return null;
+  const path = agentToolPath(args);
+  const lineCount = String(text || '').split(/\r?\n/).filter(line => line.trim()).length;
+  let range = '';
+  if (args && (args.start_line != null || args.end_line != null)) {
+    range = `第 ${args.start_line || 1}–${args.end_line || '末尾'} 行`;
+  }
+  const box = document.createElement('div');
+  box.appendChild(toolResultHead(bin ? '🧬' : '📄', path || agentToolLabel(name),
+    [range, bin ? `${text.length} 字符 HEX` : `${lineCount} 行`].filter(Boolean).join(' · ')));
+  const pre = el('pre', 'tool-code');
+  pre.textContent = text;
+  box.appendChild(pre);
+  return box;
+}
+
+function renderToolJson(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed || !(trimmed.startsWith('{') || trimmed.startsWith('['))) return null;
+  let value = null;
+  try { value = JSON.parse(trimmed); } catch (e) { return null; }
+  const box = document.createElement('div');
+  const keys = value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.keys(value).length : (Array.isArray(value) ? value.length : 0);
+  box.appendChild(toolResultHead('{}', 'JSON 返回',
+    Array.isArray(value) ? `${keys} 项` : `${keys} 个字段`));
+  const pre = el('pre', 'tool-json', JSON.stringify(value, null, 2));
+  box.appendChild(pre);
+  return box;
+}
+
+function renderToolKeyValue(text) {
+  const lines = String(text || '').split(/\r?\n/).filter(line => line.trim());
+  if (lines.length < 3) return null;
+  const rows = [];
+  for (const line of lines) {
+    const m = /^([^:：]{1,50})[:：]\s*(.+)$/.exec(line);
+    if (!m) return null;
+    rows.push({ key: m[1].trim(), value: m[2] });
+  }
+  const box = document.createElement('div');
+  box.appendChild(toolResultHead('🧾', '返回字段', `${rows.length} 项`));
+  const table = el('div', 'tool-kv');
+  rows.forEach(row => {
+    const item = el('div', 'tool-kv-row');
+    item.appendChild(el('span', 'tool-kv-key', row.key));
+    item.appendChild(el('span', 'tool-kv-value', row.value));
+    table.appendChild(item);
+  });
+  box.appendChild(table);
+  box.appendChild(toolRawDetails(text));
+  return box;
+}
+
+function renderAgentToolResult(card, name, text, isError) {
+  const result = card.result;
+  result.innerHTML = '';
+  const raw = String(text || '');
+  result.dataset.raw = raw;
+  if (isError) {
+    const box = el('div', 'tool-result-error');
+    box.textContent = raw || '工具调用失败。';
+    result.appendChild(box);
+    return;
+  }
+  if (!raw.trim()) {
+    result.appendChild(el('div', 'tool-empty', '工具没有返回内容。'));
+    return;
+  }
+  const diff = toolDiffLines(raw);
+  if (diff) {
+    result.appendChild(renderToolDiff(name, card.args, raw, diff));
+    return;
+  }
+  const search = renderToolSearch(name, card.args, raw);
+  if (search) {
+    result.appendChild(search);
+    return;
+  }
+  const tree = renderToolTree(name, card.args, raw);
+  if (tree) {
+    result.appendChild(tree);
+    return;
+  }
+  const read = renderToolRead(name, card.args, raw);
+  if (read) {
+    result.appendChild(read);
+    return;
+  }
+  const json = renderToolJson(raw);
+  if (json) {
+    result.appendChild(json);
+    return;
+  }
+  const kv = renderToolKeyValue(raw);
+  if (kv) {
+    result.appendChild(kv);
+    return;
+  }
+  result.appendChild(toolResultHead('📃', agentToolLabel(name),
+    `${raw.length} 字符`));
+  const pre = el('pre', 'tool-text', raw);
+  result.appendChild(pre);
+}
+
 function agentToolCard(name, args, out, status, index) {
   const details = el('details', 'agent-step agent-tool-step');
+  details.dataset.tool = name || '';
+  details.dataset.ts = nowStamp();
+  details._args = args || {};
   details.open = false;
   const summary = el('summary', 'agent-step-head');
-  const label = el('span', 'agent-step-label', '调用工具 ' + (name || ''));
+  const labelText = agentToolLabel(name);
+  const hint = agentToolArgHint(name, args);
+  const label = el('span', 'agent-step-label',
+    '调用工具 · ' + labelText + (hint ? ' · ' + hint : ''));
+  label.title = hint || name || '';
   const statusEl = el('span', 'agent-step-status', status || '');
   summary.appendChild(el('span', 'agent-step-icon', '🔧'));
   summary.appendChild(label);
   summary.appendChild(statusEl);
-  summary.appendChild(el('span', 'agent-step-time', nowStamp()));
+  summary.appendChild(el('span', 'agent-step-time', details.dataset.ts));
+  const argsBox = el('details', 'agent-tool-args-wrap');
+  argsBox.appendChild(el('summary', '', '调用参数'));
   const pre = el('pre', 'agent-tool-args', JSON.stringify(args || {}, null, 2));
-  const result = el('pre', 'agent-tool-result');
+  argsBox.appendChild(pre);
+  const result = el('div', 'agent-tool-result');
   details.appendChild(summary);
-  details.appendChild(pre);
+  details.appendChild(argsBox);
   details.appendChild(result);
   out.flow.appendChild(details);
-  return { details, summary, label, statusEl, pre, result, name, index };
+  return { details, summary, label, statusEl, pre, result, name, index, args };
 }
 
 function agentToolStatus(card, status) {
   card.statusEl.textContent = status || '';
   card.statusEl.className = 'agent-step-status' +
     (status === '完成' ? ' ok' : status === '失败' ? ' err' : '');
+  if (card.details) card.details.dataset.status = status || '';
+}
+
+// 上下文注入行：顶部显示本轮 Agent 请求注入的系统提示词、工具、AGENTS.md、工作区、时间等。
+function agentInjectCard(item) {
+  const details = el('details', 'agent-step agent-inject-step');
+  details.open = false;
+  const ts = item.ts || nowStamp();
+  item.ts = ts;
+  details.dataset.ts = ts;
+  details._injectItem = item;
+  const summary = el('summary', 'agent-step-head');
+  summary.appendChild(el('span', 'agent-step-icon', '📥'));
+  summary.appendChild(el('span', 'agent-step-label',
+    '上下文注入 · ' + (item.label || item.kind || '上下文')));
+  summary.appendChild(el('span', 'agent-inject-tag',
+    item.tag || (item.added === false ? '历史前缀' : '本次注入')));
+  const content = String(item.content || '');
+  summary.appendChild(el('span', 'agent-inject-size',
+    content ? `${content.length} 字符` : '无内容'));
+  summary.appendChild(el('span', 'agent-step-time', ts));
+  details.appendChild(summary);
+  if (item.note) details.appendChild(el('div', 'agent-inject-note', item.note));
+  details.appendChild(el('pre', 'agent-inject-body', content || '（无内容）'));
+  return details;
+}
+
+function agentRenderInjections(out, items) {
+  if (!out || !out.flow) return;
+  if (!Array.isArray(items) || !items.length) return;
+  items.forEach(item => {
+    if (item && typeof item === 'object') out.flow.appendChild(agentInjectCard(item));
+  });
+}
+
+// 把实时时间线序列化到 assistant 历史项里，只供 UI 重开时重建，不参与模型上下文。
+function agentCollectSteps(out) {
+  const steps = [];
+  if (!out || !out.flow) return steps;
+  Array.from(out.flow.children).forEach(node => {
+    if (!node || !node.classList) return;
+    if (node.classList.contains('agent-inject-step') && node._injectItem) {
+      steps.push({
+        type: 'inject', item: node._injectItem,
+        ts: node.dataset.ts || node._injectItem.ts || '',
+      });
+    } else if (node.classList.contains('agent-think')) {
+      const text = Array.from(node.querySelectorAll('.think-text'))
+        .map(item => item.textContent || '').join('\n\n');
+      if (text) steps.push({ type: 'think', text, ts: node.dataset.ts || '' });
+    } else if (node.classList.contains('agent-tool-step')) {
+      const result = node.querySelector('.agent-tool-result');
+      steps.push({
+        type: 'tool', name: node.dataset.tool || '',
+        args: node._args || {},
+        text: result ? (result.dataset.raw || '') : '',
+        isError: node.dataset.isError === '1',
+        status: node.dataset.status ||
+          (node.classList.contains('err') ? '失败' : '完成'),
+        ts: node.dataset.ts || '',
+      });
+    } else if (node.classList.contains('agent-answer')) {
+      const raw = node.dataset.raw || '';
+      if (raw) steps.push({ type: 'answer', raw, ts: node.dataset.time || '' });
+    }
+  });
+  return steps;
+}
+
+function agentAppendSavedAnswer(out, raw, ts) {
+  const a = agentEnsureAnswer(out);
+  a.raw = raw || '';
+  a.body.dataset.raw = a.raw;
+  a.body.dataset.time = ts || '';
+  if (typeof renderMarkdown === 'function') renderMarkdown(a.body, a.raw);
+  else a.body.textContent = a.raw;
+}
+
+function agentRenderSavedTurn(m, index) {
+  const out = agentMsg('assistant', '', m.ts, index);
+  out.turn.classList.remove('running');
+  let hasAnswer = false;
+  (m.steps || []).forEach(step => {
+    if (!step || typeof step !== 'object') return;
+    if (step.type === 'inject') {
+      const item = Object.assign({}, step.item || {});
+      if (step.ts) item.ts = step.ts;
+      out.flow.appendChild(agentInjectCard(item));
+    } else if (step.type === 'think') {
+      const ts = step.ts || nowStamp();
+      const details = el('details', 'agent-step agent-think');
+      details.open = false;
+      details.dataset.ts = ts;
+      const summary = el('summary', 'agent-step-head');
+      summary.appendChild(el('span', 'agent-step-icon', '🧠'));
+      summary.appendChild(el('span', 'agent-step-label', '思考'));
+      summary.appendChild(el('span', 'agent-step-time', ts));
+      details.appendChild(summary);
+      const flow = el('div', 'think-flow');
+      flow.appendChild(el('div', 'think-text', step.text || ''));
+      details.appendChild(flow);
+      details._think = { box: details, flow };
+      out.flow.appendChild(details);
+      agentUpdateThinkPreview(details._think);
+    } else if (step.type === 'tool') {
+      const status = step.status || (step.isError ? '失败' : '完成');
+      const card = agentToolCard(step.name || '工具', step.args || {},
+        out, status, 0);
+      card.details.dataset.ts = step.ts || card.details.dataset.ts || '';
+      card.details._args = step.args || {};
+      const timeEl = card.summary.querySelector('.agent-step-time');
+      if (timeEl) timeEl.textContent = step.ts || '';
+      card.done = true;
+      card.details.dataset.isError = step.isError ? '1' : '0';
+      renderAgentToolResult(card, step.name || '工具', step.text || '',
+        !!step.isError);
+      if (step.isError) card.details.classList.add('err');
+      agentToolStatus(card, status);
+    } else if (step.type === 'answer') {
+      if (!step.raw) return;
+      agentAppendSavedAnswer(out, step.raw, step.ts);
+      hasAnswer = true;
+    }
+  });
+  if (!hasAnswer && m.content) {
+    agentAppendSavedAnswer(out, m.content, m.ts);
+  }
+  const duration = m.duration ? ` · 用时 ${m.duration}` : '';
+  if (m.failed === 'stopped') out.title.textContent = `已停止${duration}`;
+  else if (m.failed) out.title.textContent = `失败${duration}`;
+  else out.title.textContent = `已完成${duration}`;
 }
 
 function agentFindToolCard(cards, data) {
@@ -2586,6 +4183,56 @@ function agentScrollIf(stick) {
   box.scrollTop = box.scrollHeight;
 }
 
+/* ---------------- 流式 Markdown：约 100ms 节流渲染，done 后再完整渲染 KaTeX ---------------- */
+const STREAM_MD_TIMERS = new WeakMap();
+const STREAM_MD_RAWS = new WeakMap();
+
+function keepStreamBottom(target) {
+  const box = target && target.closest ? target.closest('.msgs') : null;
+  if (!box) return;
+  if (box.scrollHeight - box.scrollTop - box.clientHeight < 160) {
+    box.scrollTop = box.scrollHeight;
+  }
+}
+
+function scheduleStreamMarkdown(target, raw) {
+  if (!target) return;
+  STREAM_MD_RAWS.set(target, raw);
+  if (typeof renderMarkdown !== 'function') {
+    target.textContent = raw;
+    return;
+  }
+  if (STREAM_MD_TIMERS.has(target)) return;
+  const timer = setTimeout(() => {
+    STREAM_MD_TIMERS.delete(target);
+    const latest = STREAM_MD_RAWS.get(target) || '';
+    renderMarkdown(target, latest, { streaming: true });
+    keepStreamBottom(target);
+  }, 100);
+  STREAM_MD_TIMERS.set(target, timer);
+}
+
+function flushStreamMarkdown(target, raw) {
+  if (!target) return;
+  target.dataset.raw = raw || '';
+  const timer = STREAM_MD_TIMERS.get(target);
+  if (timer) {
+    clearTimeout(timer);
+    STREAM_MD_TIMERS.delete(target);
+  }
+  STREAM_MD_RAWS.delete(target);
+  if (typeof renderMarkdown === 'function') renderMarkdown(target, raw || '');
+  else target.textContent = raw || '';
+}
+
+function flushAgentAnswers(out) {
+  if (!out) return;
+  out.answers.forEach(seg => {
+    seg.body.dataset.raw = seg.raw;
+    flushStreamMarkdown(seg.body, seg.raw);
+  });
+}
+
 function mergeSessionList(list) {
   if (!Array.isArray(list)) return;
   const byId = new Map((SESSIONS || []).map(s => [s.id, s]));
@@ -2600,9 +4247,13 @@ function agentEnsureState(id) {
     state = {
       id, history: [], contextData: null, usage: null, sessionUsage: null,
       root: null, abort: null, running: false, loaded: false, status: '',
-      workspaceId: '', model: '', server: '', tools: [], thinking: 'off',
+      workspaceId: '', model: '', server: '', mcpEnabled: true, tools: [],
+      mcpServers: {}, mcpInitialized: false,
+      thinking: 'default',
       historyStart: 0, historyTotal: 0, historyHasMore: false,
       historyOutline: [], historyLoading: false, needsRender: false,
+      images: [], files: [], starting: false,
+      lazyArmed: false, lastScrollTop: 0, programmaticScroll: false,
     };
     AGENT_STATES.set(id, state);
   }
@@ -2630,39 +4281,81 @@ function agentAttachState(state) {
 }
 
 function agentSetStatus(state, text) {
+  if (!state) return;
   state.status = text || '';
-  if (CURRENT_AGENT_SESSION === state.id) $('#agentState').textContent = state.status;
+  const out = state.turnOut;
+  if (out && out.status) {
+    out.status.textContent = state.status;
+    out.status.title = state.status;
+  }
 }
 
 function agentRefreshControls(state) {
   if (!state || CURRENT_AGENT_SESSION !== state.id) return;
-  $('#btnAgentSend').disabled = !!state.running;
-  $('#btnAgentStop').disabled = !state.running;
-  $('#agentState').textContent = state.status || '';
+  const out = state.turnOut;
+  if (out && out.status) {
+    out.status.textContent = state.status || '';
+    out.status.title = state.status || '';
+  }
+  renderComposerPrimary('agent');
+  updateModelButton('agent');
 }
 
 function agentApplyStateOptions(state) {
   if (state.model && [...$('#agentModel').options].some(o => o.value === state.model)) {
     $('#agentModel').value = state.model;
   }
-  if (state.server && [...$('#agentMcp').options].some(o => o.value === state.server)) {
-    $('#agentMcp').value = state.server;
-  }
   if (state.thinking) $('#agentThinking').value = state.thinking;
-  AGENT_SELECTED_TOOLS = new Set(state.tools || []);
+  if ($('#agentMcpEnabled')) {
+    $('#agentMcpEnabled').checked = state.mcpEnabled !== false;
+  }
+  agentEnsureMcpState(state);
+  const enabled = agentMcpEnabledServers(state);
+  if (!AGENT_TOOL_SERVER || !enabled.includes(AGENT_TOOL_SERVER)) {
+    AGENT_TOOL_SERVER = enabled[0] || (AGENT_SERVERS[0] ? AGENT_SERVERS[0].id : '');
+  }
+  fillAgentMcpToolSource();
+  renderAgentMcpServers();
   updateAgentThinking();
+  updateModelButton('agent');
+  renderAgentMcpButton();
   agentSyncState(state);
-  if (state.server) loadAgentTools(state.server).then(() => {
-    if (CURRENT_AGENT_SESSION !== state.id) return;
-    if (state.tools && state.tools.length) {
-      AGENT_SELECTED_TOOLS = new Set(state.tools);
-      renderAgentTools();
-    }
-  }).catch(() => {});
+  // 预加载所有已启用服务器的工具，保证按钮计数和上下文估算准确。
+  Promise.all(enabled.map(sid => agentEnsureServerToolsInState(state, sid)))
+    .then(() => {
+      if (CURRENT_AGENT_SESSION !== state.id) return;
+      renderAgentMcpButton();
+      updateAgentContextMeter();
+    }).catch(() => {});
+  if (AGENT_TOOL_SERVER) {
+    loadAgentTools(AGENT_TOOL_SERVER).catch(() => {});
+  } else {
+    AGENT_TOOLS = [];
+    AGENT_SELECTED_TOOLS = new Set();
+    renderAgentTools();
+  }
 }
 
 async function saveAgentState(state) {
-  if (!state || !state.id || !state.history.length || state.deleted) return;
+  if (!state || !state.id || state.deleted) return;
+  const mcp = agentEnsureMcpState(state);
+  const enabledServers = Object.keys(mcp).filter(sid =>
+    mcp[sid] && mcp[sid].enabled && AGENT_SERVERS.some(s => s.id === sid));
+  const mcpTools = {};
+  Object.keys(mcp).forEach(sid => {
+    const entry = mcp[sid] || {};
+    const tools = entry.tools || [];
+    // 只保存已初始化的工具选择：空数组表示“启用但一个都没选”，未初始化则留空让下次默认全选。
+    if (entry.initialized || tools.length) mcpTools[sid] = tools.slice();
+  });
+  const flatTools = [];
+  enabledServers.forEach(sid => {
+    (mcp[sid].tools || []).forEach(name => {
+      if (!flatTools.includes(name)) flatTools.push(name);
+    });
+  });
+  state.server = enabledServers[0] || '';
+  state.tools = flatTools;
   try {
     const r = await api('sessions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2673,9 +4366,13 @@ async function saveAgentState(state) {
         history: state.history,
         history_start: state.historyStart,
         model: state.model || '',
-        server: state.server || '',
-        tools: state.tools || [],
-        thinking: state.thinking || 'off',
+        server: state.server,
+        servers: enabledServers,
+        tools: flatTools,
+        mcp_enabled: state.mcpEnabled !== false,
+        mcp_servers: enabledServers,
+        mcp_tools: mcpTools,
+        thinking: state.thinking || 'default',
       }),
     });
     if (r.sessions) mergeSessionList(r.sessions);
@@ -2707,6 +4404,9 @@ function agentShowState(state) {
   agentApplyStateOptions(state);
   agentRefreshControls(state);
   updateAgentContextMeter();
+  renderImagePreviews('agent');
+  renderFileChips('agent');
+  renderAgentMcpButton();
   const box = $('#agentBox');
   box.scrollTop = box.scrollHeight;
   renderAgentWorkspaces();
@@ -2746,6 +4446,7 @@ function renderAgentTools() {
       cb.onchange = () => {
         if (cb.checked) AGENT_SELECTED_TOOLS.add(t.name);
         else AGENT_SELECTED_TOOLS.delete(t.name);
+        syncAgentToolState();
         updateAgentToolCount();
       };
       row.appendChild(cb);
@@ -2757,36 +4458,62 @@ function renderAgentTools() {
   updateAgentToolCount();
 }
 
+function syncAgentToolState() {
+  const state = composerState('agent');
+  if (!state || !AGENT_TOOL_SERVER) return;
+  const mcp = agentEnsureMcpState(state);
+  let entry = mcp[AGENT_TOOL_SERVER];
+  if (!entry) {
+    entry = { enabled: false, tools: [], initialized: false };
+    mcp[AGENT_TOOL_SERVER] = entry;
+  }
+  entry.tools = [...AGENT_SELECTED_TOOLS];
+  entry.initialized = true;
+  saveAgentState(state);
+}
+
 function updateAgentToolCount() {
   const total = AGENT_TOOLS.length;
   const picked = AGENT_SELECTED_TOOLS.size;
   const shown = agentVisibleTools().length;
   const searching = !!($('#agentToolSearch') && $('#agentToolSearch').value.trim());
-  $('#btnAgentTools').textContent = `工具 ${picked}/${total}`;
+  const meta = AGENT_TOOL_SERVER ? agentServerMeta(AGENT_TOOL_SERVER) : null;
+  const prefix = meta ? `${meta.name || meta.id} · ` : '';
   $('#agentToolsCount').textContent = total
-    ? `已选 ${picked} / ${total}` + (searching ? ` · 匹配 ${shown}` : '')
-    : '';
-  $('#btnAgentSend').disabled = !$('#agentModel').value;
+    ? `${prefix}已选 ${picked} / ${total}` + (searching ? ` · 匹配 ${shown}` : '')
+    : (meta ? `${prefix}没有工具` : '');
+  renderAgentMcpButton();
+  renderComposerPrimary('agent');
   updateAgentContextMeter();
 }
 
 async function loadAgentTools(serverId) {
+  AGENT_TOOL_SERVER = serverId || '';
   AGENT_TOOLS = [];
   AGENT_SELECTED_TOOLS = new Set();
   if ($('#agentToolSearch')) $('#agentToolSearch').value = '';
-  if (serverId) {
-    let status = MCP_STATUS[serverId];
-    if (!status || !status.tools) {
-      try {
-        const r = await api('agent/tools?server=' + encodeURIComponent(serverId));
-        status = { ok: !!r.ok, tools: r.tools || [], error: r.error || '' };
-        MCP_STATUS[serverId] = status;
-      } catch (e) {
-        status = { ok: false, tools: [], error: e.message };
-      }
+  if (!serverId) {
+    renderAgentTools();
+    return;
+  }
+  const state = composerState('agent');
+  const sessionId = CURRENT_AGENT_SESSION;
+  const tools = await agentLoadServerTools(serverId);
+  // 等待期间可能已切换会话，旧会话的工具列表不能覆盖当前界面。
+  if (sessionId !== CURRENT_AGENT_SESSION || AGENT_TOOL_SERVER !== serverId) return;
+  AGENT_TOOLS = tools;
+  const mcp = state ? agentEnsureMcpState(state) : {};
+  const entry = mcp[serverId];
+  if (entry) {
+    if (!entry.initialized) {
+      entry.tools = tools.map(t => t.name).filter(Boolean);
+      entry.initialized = true;
     }
-    AGENT_TOOLS = status.tools || [];
-    AGENT_TOOLS.forEach(t => AGENT_SELECTED_TOOLS.add(t.name));
+    const available = new Set(tools.map(t => t.name));
+    entry.tools = (entry.tools || []).filter(name => available.has(name));
+    AGENT_SELECTED_TOOLS = new Set(entry.tools);
+  } else {
+    AGENT_SELECTED_TOOLS = new Set(tools.map(t => t.name));
   }
   renderAgentTools();
 }
@@ -2794,15 +4521,21 @@ async function loadAgentTools(serverId) {
 function updateAgentThinking() {
   AGENT_CONTEXT_DATA = null;
   AGENT_USAGE = null;
-  const wrap = $('#agentThinkingWrap');
-  if (!wrap) return;
+  const sel = $('#agentThinking');
+  if (!sel) return;
   const m = AGENT_MODELS.find(x => x.name === $('#agentModel').value);
   const info = m ? { ...(m.thinking || {}),
                      reasoning_efforts: m.reasoning_efforts || null } : null;
-  const show = thinkingAvailable(info);
-  wrap.style.display = show ? '' : 'none';
-  if (show) fillThinkingSelect($('#agentThinking'), info);
+  if (thinkingAvailable(info)) {
+    fillThinkingSelect(sel, info);
+    sel.disabled = false;
+  } else {
+    sel.innerHTML = '';
+    sel.disabled = true;
+  }
+  updateModelButton('agent');
   updateAgentContextMeter();
+  renderComposerPrimary('agent');
 }
 
 async function loadAgentConfigs() {
@@ -2810,30 +4543,42 @@ async function loadAgentConfigs() {
   const models = r.models || [];
   const servers = r.servers || [];
   AGENT_MODELS = models;
+  AGENT_SERVERS = servers;
   MCP_STATUS = r.status || MCP_STATUS;
   const oldModel = $('#agentModel').value;
-  const oldServer = $('#agentMcp').value;
   $('#agentModel').innerHTML = models.length
     ? models.map(m => {
         const label = m.label || m.name;
         return `<option value="${m.name}">${m.backend === 'openai' ? label + '（API）' : label}</option>`;
       }).join('')
     : '<option value="">（没有支持工具调用的 API 模型）</option>';
-  $('#agentMcp').innerHTML = servers.length
-    ? servers.map(s => `<option value="${s.id}">${s.name}</option>`).join('')
-    : '<option value="">（请先在 MCP 页配置服务器）</option>';
   if (models.some(m => m.name === oldModel)) $('#agentModel').value = oldModel;
-  if (servers.some(s => s.id === oldServer)) $('#agentMcp').value = oldServer;
+  const state = composerState('agent');
+  if (state) {
+    agentEnsureMcpState(state);
+    for (const sid of agentMcpEnabledServers(state)) {
+      await agentEnsureServerToolsInState(state, sid);
+    }
+    if (!AGENT_TOOL_SERVER || !agentMcpEnabledServers(state).includes(AGENT_TOOL_SERVER)) {
+      AGENT_TOOL_SERVER = agentMcpEnabledServers(state)[0] ||
+        (servers[0] ? servers[0].id : '');
+    }
+  }
+  fillAgentMcpToolSource();
+  renderAgentMcpServers();
   updateAgentThinking();
-  await loadAgentTools($('#agentMcp').value);
+  renderAgentMcpButton();
+  if (AGENT_TOOL_SERVER) await loadAgentTools(AGENT_TOOL_SERVER);
+  else renderAgentTools();
+  renderAgentMcpButton();
+  updateAgentContextMeter();
 }
 
 function agentNewChat(wid) {
   if (typeof wid === 'string' && wid) CURRENT_AGENT_WORKSPACE = wid;
   if (!CURRENT_AGENT_WORKSPACE) CURRENT_AGENT_WORKSPACE = DEFAULT_WORKSPACE_ID;
   if (CURRENT_AGENT_WORKSPACE) AGENT_COLLAPSED.delete(CURRENT_AGENT_WORKSPACE);
-  AGENT_IMAGES = [];
-  renderImagePreviews('agent');
+  const prev = composerState('agent');
   const state = agentEnsureState(newSessionId());
   state.loaded = true;
   state.title = '';
@@ -2843,12 +4588,33 @@ function agentNewChat(wid) {
   state.sessionUsage = null;
   state.abort = null;
   state.running = false;
+  state.starting = false;
   state.status = '';
+  state.images = [];
+  state.files = [];
   state.workspaceId = CURRENT_AGENT_WORKSPACE;
   state.model = $('#agentModel').value;
-  state.server = $('#agentMcp').value;
-  state.thinking = ($('#agentThinking') && $('#agentThinking').value) || 'off';
-  state.tools = [...AGENT_SELECTED_TOOLS];
+  // 新会话只在确实存在上一个 Agent 会话时继承 MCP 总开关；
+  // 首次进入 Agent 时隐藏复选框可能还残留旧值，不能拿它决定新会话。
+  state.mcpEnabled = prev ? prev.mcpEnabled !== false : true;
+  // 新会话沿用上一会话的服务器开关与工具勾选；没有可继承配置时默认启用第一台服务器。
+  state.mcpServers = {};
+  if (prev && prev.mcpInitialized && prev.mcpServers) {
+    Object.keys(prev.mcpServers).forEach(sid => {
+      const entry = prev.mcpServers[sid];
+      state.mcpServers[sid] = {
+        enabled: !!entry.enabled,
+        tools: (entry.tools || []).slice(),
+        initialized: !!entry.initialized,
+      };
+    });
+    state.mcpInitialized = true;
+  }
+  const enabledServers = agentMcpEnabledServers(state);
+  state.server = enabledServers[0] || '';
+  state.tools = agentSelectedTools(state);
+  AGENT_TOOL_SERVER = enabledServers[0] || (AGENT_SERVERS[0] ? AGENT_SERVERS[0].id : '');
+  state.thinking = ($('#agentThinking') && $('#agentThinking').value) || 'default';
   state.root = el('div', 'agent-view');
   state.root.innerHTML = '<div class="empty">选择支持工具调用的模型和 MCP 服务器</div>';
   CURRENT_AGENT_SESSION = state.id;
@@ -2856,33 +4622,61 @@ function agentNewChat(wid) {
   agentSyncState(state);
   fillSessionSelect('agent', '');
   $('#agentSessionTitle').textContent = '';
-  $('#agentState').textContent = '';
+  renderImagePreviews('agent');
+  renderFileChips('agent');
+  if ($('#agentMcpEnabled')) $('#agentMcpEnabled').checked = state.mcpEnabled;
+  fillAgentMcpToolSource();
+  renderAgentMcpServers();
+  renderAgentMcpButton();
+  if (AGENT_TOOL_SERVER) loadAgentTools(AGENT_TOOL_SERVER);
+  else renderAgentTools();
   agentRefreshControls(state);
   renderAgentSessions();
   updateAgentContextMeter();
   renderConversationRail('agent');
   scrollConversationToBottom('agent');
+  agentRefreshMcpFromState(state).catch(() => {});
+}
+
+function ensureAgentComposerState() {
+  let state = composerState('agent');
+  if (!state) {
+    agentNewChat();
+    state = composerState('agent');
+  }
+  return state;
 }
 
 async function agentCompact() {
   if (!CURRENT_AGENT_SESSION) return toast('当前会话还没有可压缩的历史');
   const state = agentEnsureState(CURRENT_AGENT_SESSION);
-  if (state && state.running) return toast('该会话正在执行，请先停止');
+  if (state && (state.running || state.starting)) return toast('该会话正在执行，请先停止');
   const model = $('#agentModel').value;
-  const server = $('#agentMcp').value;
   if (!model) return toast('请先选择模型');
-  $('#btnAgentSend').disabled = true;
-  $('#agentState').textContent = '正在压缩上下文…';
+  const mcpOn = $('#agentMcpEnabled') ? $('#agentMcpEnabled').checked : true;
+  const enabledServers = mcpOn ? agentMcpEnabledServers(state) : [];
+  const selectedTools = mcpOn ? agentSelectedTools(state) : [];
+  if (state) {
+    state.starting = true;
+    state.status = '正在压缩上下文…';
+    agentRefreshControls(state);
+  }
+  toast('正在压缩上下文…');
+  renderComposerPrimary('agent');
   try {
     const resp = await fetch(`/api/agent/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model, server, compact: true,
+        model,
+        server: enabledServers[0] || '',
+        servers: enabledServers,
+        compact: true,
+        mcp_enabled: mcpOn,
         messages: [{ role: 'user', content: '/compact' }],
         session_id: CURRENT_AGENT_SESSION,
         workspace_id: CURRENT_AGENT_WORKSPACE,
-        thinking: ($('#agentThinking') && $('#agentThinking').value) || 'off',
-        tools: [...AGENT_SELECTED_TOOLS],
+        thinking: ($('#agentThinking') && $('#agentThinking').value) || 'default',
+        tools: selectedTools,
       }),
     });
     if (!resp.ok) return toast('压缩失败：' + (await resp.text()));
@@ -2911,12 +4705,15 @@ async function agentCompact() {
   } catch (e) {
     toast('压缩失败：' + e.message);
   } finally {
+    if (state) {
+      state.starting = false;
+      state.status = '';
+    }
     if (CURRENT_AGENT_SESSION && AGENT_STATES.has(CURRENT_AGENT_SESSION)) {
       agentRefreshControls(AGENT_STATES.get(CURRENT_AGENT_SESSION));
     } else {
-      $('#btnAgentSend').disabled = false;
+      renderComposerPrimary('agent');
     }
-    $('#agentState').textContent = '';
     updateAgentContextMeter();
   }
 }
@@ -2924,9 +4721,13 @@ async function agentCompact() {
 async function agentSend() {
   const text = $('#agentInput').value.trim();
   const model = $('#agentModel').value;
-  const server = $('#agentMcp').value;
-  if (!text && !AGENT_IMAGES.length) return;
-  if (text === '/compact' && !AGENT_IMAGES.length) {
+  const mcpOn = $('#agentMcpEnabled') ? $('#agentMcpEnabled').checked : true;
+  if (!text && !imageDraft('agent').length && !fileDraft('agent').length) return;
+  if (imagePending('agent') || filePending('agent')) {
+    return toast('图片或文件还在读取，请稍候再发送');
+  }
+  if (text === '/compact' && !imageDraft('agent').length &&
+      !fileDraft('agent').length) {
     $('#agentInput').value = '';
     $('#agentInput').style.height = 'auto';
     return agentCompact();
@@ -2935,18 +4736,23 @@ async function agentSend() {
   if (!CURRENT_AGENT_SESSION) CURRENT_AGENT_SESSION = newSessionId();
   const state = agentEnsureState(CURRENT_AGENT_SESSION);
   if (!state) return;
-  if (state.running) return toast('该会话正在执行，请先停止');
-  if (AGENT_IMAGES.length && !modelHasImages('agent')) {
+  if (state.running || state.starting) return toast('该会话正在执行，请先停止');
+  if (imageDraft('agent').length && !modelHasImages('agent')) {
     return toast('当前模型未声明图片输入');
   }
+  const enabledServers = mcpOn ? agentMcpEnabledServers(state) : [];
+  const selectedTools = mcpOn ? agentSelectedTools(state) : [];
+  state.starting = true;
+  renderComposerPrimary('agent');
   state.loaded = true;
   state.contextData = null;
   state.usage = null;
   state.workspaceId = CURRENT_AGENT_WORKSPACE;
   state.model = model;
-  state.server = server;
-  state.thinking = ($('#agentThinking') && $('#agentThinking').value) || 'off';
-  state.tools = [...AGENT_SELECTED_TOOLS];
+  state.server = enabledServers[0] || '';
+  state.mcpEnabled = mcpOn;
+  state.thinking = ($('#agentThinking') && $('#agentThinking').value) || 'default';
+  state.tools = selectedTools;
   state.status = '运行中…';
   agentSyncState(state);
   $('#agentInput').value = '';
@@ -2962,9 +4768,11 @@ async function agentSend() {
   }]);
   agentMsg('user', userContent, userTs, userIndex);
   clearImages('agent');
+  clearFiles('agent');
   updateAgentContextMeter();
   renderConversationRail('agent');
   const out = agentMsg('assistant', '');
+  state.turnOut = out;
   out.turn.classList.add('running');
   out.title.textContent = '运行中 · 0 秒';
   const sid = state.id;
@@ -2974,9 +4782,10 @@ async function agentSend() {
     out.title.textContent = `运行中 · ${agentDuration(Date.now() - out.startedAt)}`;
   }, 1000);
   state.running = true;
+  state.starting = false;
   state.abort = new AbortController();
   AGENT_ABORT = state.abort;
-  agentSetStatus(state, '运行中…');
+  agentSetStatus(state, '');
   agentRefreshControls(state);
   renderAgentSessions();
   let acc = '';
@@ -2994,12 +4803,16 @@ async function agentSend() {
   try {
     const resp = await fetch(`/api/agent/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, server, messages: state.history,
+      body: JSON.stringify({ model,
+                             server: enabledServers[0] || '',
+                             servers: enabledServers,
+                             mcp_enabled: mcpOn,
+                             messages: state.history,
                              history_start: state.historyStart,
                              workspace_id: state.workspaceId,
                              session_id: sid,
                              thinking: state.thinking,
-                             tools: state.tools }),
+                             tools: selectedTools }),
       signal: state.abort.signal,
     });
     if (!resp.ok) {
@@ -3032,8 +4845,18 @@ async function agentSend() {
         const active = isActive();
         const stick = active ? agentAtBottom() : false;
         if (ev[1] === 'meta') {
-          out.meta.textContent = `${data.server} · ${data.tools} 个工具`;
-          if (active) agentSetStatus(state, `${data.server} · ${data.tools} 个工具`);
+          const serverNames = Array.isArray(data.servers) ? data.servers : [];
+          const label = serverNames.length
+            ? serverNames.join('、')
+            : (data.server || '无 MCP');
+          out.meta.textContent = `${label} · ${data.tools} 个工具`;
+          if (active) agentSetStatus(state, `${label} · ${data.tools} 个工具`);
+          if (Array.isArray(data.tool_errors) && data.tool_errors.length) {
+            toast('部分 MCP 服务器工具加载失败：' + data.tool_errors.join('；'));
+          }
+        } else if (ev[1] === 'inject') {
+          agentRenderInjections(out, data.items || []);
+          agentScrollIf(stick);
         } else if (ev[1] === 'context') {
           state.contextData = data;
           if (active) {
@@ -3043,8 +4866,10 @@ async function agentSend() {
         } else if (ev[1] === 'reasoning') {
           const think = agentEnsureThink(out);
           agentThinkText(think).textContent += data.text || '';
+          agentUpdateThinkPreview(think);
           agentScrollIf(stick);
         } else if (ev[1] === 'tool_pending') {
+          flushAgentAnswers(out);
           if (active) agentSetStatus(state, `准备调用 ${data.name}…`);
           let card = agentFindToolCard(cards, data);
           if (!card) {
@@ -3055,6 +4880,7 @@ async function agentSend() {
           }
           agentScrollIf(stick);
         } else if (ev[1] === 'tool') {
+          flushAgentAnswers(out);
           if (active) agentSetStatus(state, `正在调用 ${data.name}…`);
           let card = agentFindToolCard(cards, data);
           if (!card) {
@@ -3062,8 +4888,12 @@ async function agentSend() {
             cards.push(card);
           } else {
             card.name = data.name || card.name;
-            card.label.textContent = '调用工具 ' + card.name;
-            card.pre.textContent = JSON.stringify(data.arguments || {}, null, 2);
+            card.args = data.arguments || {};
+            card.details._args = card.args;
+            const hint = agentToolArgHint(card.name, card.args);
+            card.label.textContent = '调用工具 · ' + agentToolLabel(card.name) +
+              (hint ? ' · ' + hint : '');
+            card.pre.textContent = JSON.stringify(card.args, null, 2);
             agentToolStatus(card, '执行中…');
           }
           agentScrollIf(stick);
@@ -3071,8 +4901,9 @@ async function agentSend() {
           const card = agentFindToolCard(cards, data);
           if (card) {
             card.done = true;
-            card.result.textContent += (card.result.textContent ? '\n\n' : '') +
-                                       (data.text || '');
+            card.details.dataset.isError = data.is_error ? '1' : '0';
+            renderAgentToolResult(card, data.name || card.name,
+              data.text, data.is_error);
             if (data.is_error) {
               card.details.classList.add('err');
               agentToolStatus(card, '失败');
@@ -3090,18 +4921,15 @@ async function agentSend() {
           acc += data.text || '';
           const a = agentEnsureAnswer(out);
           a.raw += data.text || '';
-          a.body.textContent = a.raw;
+          a.body.dataset.raw = a.raw;
+          scheduleStreamMarkdown(a.body, a.raw);
           if (active) updateAgentContextMeter(acc);
           agentScrollIf(stick);
         } else if (ev[1] === 'done') {
           acc = data.text || acc;
           const a = agentEnsureAnswer(out);
           if (data.text) a.raw = data.text;
-          for (const seg of out.answers) {
-            seg.body.dataset.raw = seg.raw;
-            if (typeof renderMarkdown === 'function') renderMarkdown(seg.body, seg.raw);
-            else seg.body.textContent = seg.raw;
-          }
+          flushAgentAnswers(out);
           if (data.usage) {
             state.usage = data.usage;
             if (data.session_usage) state.sessionUsage = data.session_usage;
@@ -3115,14 +4943,11 @@ async function agentSend() {
           out.failed = true;
           const a = agentEnsureAnswer(out);
           a.raw = '错误：' + (data.error || '未知错误');
-          a.body.textContent = a.raw;
+          flushStreamMarkdown(a.body, a.raw);
           agentScrollIf(stick);
         }
       }
     }
-    if (acc) state.history.push({ role: 'assistant', content: acc, ts: nowStamp() });
-    state.historyTotal = Math.max(state.historyTotal,
-      state.historyStart + state.history.length);
     if (isActive()) updateAgentContextMeter();
   } catch (e) {
     const last = out.answers[out.answers.length - 1];
@@ -3130,17 +4955,17 @@ async function agentSend() {
       out.failed = 'stopped';
       if (last) {
         last.raw += '（已停止）';
-        last.body.textContent = last.raw;
+        flushStreamMarkdown(last.body, last.raw);
       }
     } else {
       out.failed = true;
       if (last) {
         last.raw += '\n\n出错：' + e.message;
-        last.body.textContent = last.raw;
+        flushStreamMarkdown(last.body, last.raw);
       } else {
         const a = agentEnsureAnswer(out);
         a.raw = '出错：' + e.message;
-        a.body.textContent = a.raw;
+        flushStreamMarkdown(a.body, a.raw);
       }
     }
   } finally {
@@ -3152,9 +4977,30 @@ async function agentSend() {
     else if (out.failed) out.title.textContent = `失败 · 用时 ${elapsed}`;
     else if (acc) out.title.textContent = `已完成 · 用时 ${elapsed}`;
     else out.title.textContent = `未完成 · 用时 ${elapsed}`;
+    const persistedSteps = (() => {
+      try { return agentCollectSteps(out); }
+      catch (e) { return []; }
+    })();
+    // 只有原本会写入 history 的最终回答才附加 UI 时间线；不新增空 assistant 项，
+    // 保证发给模型的历史内容与旧逻辑一致。
+    if (acc) {
+      state.history.push({
+        role: 'assistant', content: acc, ts: nowStamp(),
+        steps: persistedSteps, duration: elapsed,
+        failed: out.failed || false,
+      });
+      state.historyTotal = Math.max(state.historyTotal,
+        state.historyStart + state.history.length);
+    }
     state.running = false;
+    state.starting = false;
     state.abort = null;
-    state.status = acc ? '完成' : '未完成';
+    state.status = '';
+    state.turnOut = null;
+    if (out.status) {
+      out.status.textContent = '';
+      out.status.title = '';
+    }
     if (isActive()) {
       AGENT_ABORT = null;
       agentSyncState(state);
@@ -3175,8 +5021,9 @@ function selectedServiceConfig(name) {
 }
 
 function thinkingLabel(value) {
-  const labels = { off: '关闭', on: '开启', low: '低', medium: '中',
-                   high: '高', minimal: '最低', max: '最高', xhigh: '超高' };
+  const labels = { default: 'Default', off: '关闭', on: '开启',
+                   low: '低', medium: '中', high: '高',
+                   minimal: '最低', max: '最高', xhigh: '超高' };
   return labels[value] || value;
 }
 
@@ -3205,13 +5052,12 @@ function fillThinkingSelect(select, info) {
     }
   }
   values = [...new Set(values.filter(Boolean))];
+  // Default 表示不传思考等级，总是放在第一项，和 DSH 的模型菜单一致。
+  if (values.includes('default')) values = values.filter(v => v !== 'default');
+  values.unshift('default');
   select.innerHTML = values.map(v =>
     `<option value="${v}">${thinkingLabel(v)}</option>`).join('');
-  const wanted = old && values.includes(old) ? old
-    : (info.default && values.includes(String(info.default))
-      ? String(info.default)
-      : (values.includes('off') ? 'off' : values[0]));
-  select.value = wanted || values[0] || 'off';
+  select.value = old && values.includes(old) ? old : 'default';
 }
 
 function estimateTextTokens(text) {
@@ -3256,46 +5102,144 @@ function usageHitText(usage) {
   return '缓存命中 ' + (shown === 100 ? '100' : shown.toFixed(1)) + '%';
 }
 
-function usageStatHTML(label, usage) {
+function usagePairHTML(usage) {
   if (!usage) return '';
   const input = usageInputTokens(usage);
   const output = typeof usage.completion_tokens === 'number'
     ? usage.completion_tokens : null;
   if (input === null && output === null) return '';
-  const title = `${label}输入 ${usageTokenLabel(input)}，输出 ${usageTokenLabel(output)}；` +
-                `缓存读 ${usageTokenLabel(usage.cache_read_tokens)}，` +
-                `未缓存输入 ${usageTokenLabel(usage.uncached_input_tokens)}，` +
-                `缓存写 ${usageTokenLabel(usage.cache_write_tokens)}` +
-                (usage.turns ? `；累计 ${usage.turns} 次请求` : '');
-  const cacheBits = (typeof usage.cache_read_tokens === 'number' &&
-                     typeof usage.uncached_input_tokens === 'number')
-    ? `（命中 ${usageTokenLabel(usage.cache_read_tokens)} / ` +
-      `未命中 ${usageTokenLabel(usage.uncached_input_tokens)}）`
-    : '';
-  return `<span class="cachestat" title="${esc(title)}">` +
-         `${label} 入 ${usageTokenLabel(input)}${cacheBits} / 出 ${usageTokenLabel(output)} · ` +
-         `<b>${usageHitText(usage)}</b></span>`;
+  return `<b>${usageTokenLabel(input)}</b> / <b>${usageTokenLabel(output)}</b>`;
 }
 
-function cacheUsageHTML(usage, sessionUsage) {
-  return usageStatHTML('本轮', usage) + usageStatHTML('会话', sessionUsage);
+function usageDockHTML(label, usage) {
+  const pair = usagePairHTML(usage);
+  return pair ? `${label} ${pair}` : '';
+}
+
+function cacheHitPercent(usage) {
+  if (!usage || typeof usage.cache_hit !== 'number') return null;
+  if (usage.cache_hit >= 1) return 100;
+  return Math.min(99.9, Math.max(0, usage.cache_hit * 100));
+}
+
+function statusContextValues(kind) {
+  const c = kind === 'chat'
+    ? (selectedChatConfig($('#chatConfig').value) || {})
+    : (AGENT_MODELS.find(x => x.name === $('#agentModel').value) || {});
+  const data = kind === 'chat' ? CHAT_CONTEXT_DATA : AGENT_CONTEXT_DATA;
+  const total = Number(data ? data.total : (c.context || 1000000)) || 1000000;
+  const output = Number(data ? data.output : (c.output || 256000)) || 0;
+  let used = data ? Math.max(0, Number(data.used) || 0) : 0;
+  if (!data) {
+    used = estimateMessagesTokens(kind === 'chat' ? HISTORY : AGENT_HISTORY);
+    if (kind === 'agent') {
+      let chars = 0;
+      agentSelectedToolObjects().forEach(tool => {
+        chars += JSON.stringify(tool).length;
+      });
+      used += Math.ceil(chars / 4);
+    }
+  }
+  return {
+    used, total, output,
+    contextDefault: c.context_default !== false,
+    outputDefault: c.output_default !== false,
+  };
+}
+
+function usageDetailHTML(label, usage) {
+  if (!usage) return '';
+  const input = usageInputTokens(usage);
+  const output = typeof usage.completion_tokens === 'number'
+    ? usage.completion_tokens : null;
+  const hit = typeof usage.cache_hit === 'number' ? usageHitText(usage) : '缓存 —';
+  const rows = [
+    `${label}输入 <b>${usageTokenLabel(input)}</b>，输出 <b>${usageTokenLabel(output)}</b>`,
+    `缓存读 <b>${usageTokenLabel(usage.cache_read_tokens)}</b>，` +
+      `未缓存输入 <b>${usageTokenLabel(usage.uncached_input_tokens)}</b>，` +
+      `缓存写 <b>${usageTokenLabel(usage.cache_write_tokens)}</b>`,
+  ];
+  if (typeof usage.turns === 'number') rows.push(`累计 <b>${usage.turns}</b> 次请求`);
+  rows.push(hit);
+  return rows.join('<br>');
+}
+
+function openStatusDetail(kind, anchor, which) {
+  const usage = kind === 'chat' ? CHAT_USAGE : AGENT_USAGE;
+  const sessionUsage = kind === 'chat' ? CHAT_SESSION_USAGE : AGENT_SESSION_USAGE;
+  const pop = el('div', 'popmenu');
+  const detail = el('div', 'popdetail');
+  if (which === 'context') {
+    const v = statusContextValues(kind);
+    const pct = Math.max(0, Math.min(100, v.used / v.total * 100));
+    pop.appendChild(el('div', 'pophead', '上下文占用'));
+    detail.innerHTML =
+      `已用 <b>${contextLabel(v.used, false)}</b> / 上限 ` +
+      `<b>${contextLabel(v.total, v.contextDefault)}</b>（${pct.toFixed(1)}%）<br>` +
+      `输出上限 <b>${contextLabel(v.output, v.outputDefault)}</b><br>` +
+      `按字符数估算，图片按固定视觉 token 计，不是供应商计费值。`;
+  } else if (which === 'cache') {
+    pop.appendChild(el('div', 'pophead', '缓存命中'));
+    detail.innerHTML =
+      (usageDetailHTML('本轮', usage) || '本轮暂无缓存统计') +
+      '<br><br>' +
+      (usageDetailHTML('会话', sessionUsage) || '会话暂无缓存统计') +
+      '<br>命中率 = 缓存读 /（未缓存输入 + 缓存读 + 缓存写）。';
+  } else {
+    pop.appendChild(el('div', 'pophead', 'Token 用量'));
+    detail.innerHTML =
+      (usageDetailHTML('本轮', usage) || '本轮暂无用量统计') +
+      '<br><br>' +
+      (usageDetailHTML('会话', sessionUsage) || '会话暂无累计统计');
+  }
+  pop.appendChild(detail);
+  openPopover(anchor, pop);
 }
 
 function renderContextMeter(id, used, total, output, contextDefault, outputDefault,
                             cacheUsage, sessionUsage) {
   const box = $(id);
   if (!box) return;
+  const kind = id.indexOf('chat') >= 0 ? 'chat' : 'agent';
   total = Number(total) || 1000000;
   used = Math.max(0, Number(used) || 0);
   const pct = Math.max(0, Math.min(100, used / total * 100));
-  const outputText = output ? contextLabel(output, outputDefault) : '';
-  box.className = 'ctxmeter' + (pct >= 95 ? ' err' : (pct >= 80 ? ' warn' : ''));
-  box.innerHTML =
-    `<span>上下文 ≈ ${contextLabel(used, false)} / ${contextLabel(total, contextDefault)}</span>` +
-    `<span class="ctxbar"><i style="width:${pct.toFixed(1)}%"></i></span>` +
-    `<span>${pct.toFixed(1)}%</span>` +
-    (outputText ? `<span>输出上限 ${outputText}</span>` : '') +
-    cacheUsageHTML(cacheUsage, sessionUsage);
+  box.className = 'statusdock' + (pct >= 95 ? ' err' : (pct >= 80 ? ' warn' : ''));
+  box.innerHTML = '';
+  const pctText = pct >= 10 ? pct.toFixed(0) + '%' : pct.toFixed(1) + '%';
+  const ctx = el('button', 'dockitem dockctx');
+  ctx.type = 'button';
+  ctx.title = `上下文 ≈ ${contextLabel(used, false)} / ` +
+              `${contextLabel(total, contextDefault)}`;
+  ctx.innerHTML = `<span class="ring" style="--pct:${pct.toFixed(2)}"></span>` +
+                  `<span>${pctText}</span>`;
+  ctx.onclick = () => openStatusDetail(kind, ctx, 'context');
+  box.appendChild(ctx);
+  const cachePct = cacheHitPercent(cacheUsage);
+  const cachePctSession = cacheHitPercent(sessionUsage);
+  const shownCache = cachePct !== null ? cachePct : cachePctSession;
+  if (shownCache !== null) {
+    box.appendChild(el('span', 'docksep'));
+    const cache = el('button', 'dockitem dockcache');
+    cache.type = 'button';
+    cache.title = '缓存命中率（本轮 / 会话）';
+    const text = shownCache >= 100 ? '100%' : shownCache.toFixed(1) + '%';
+    cache.innerHTML = `缓存命中 <b>${text}</b>`;
+    cache.onclick = () => openStatusDetail(kind, cache, 'cache');
+    box.appendChild(cache);
+  }
+  const usageHTML = [usageDockHTML('本轮', cacheUsage),
+                     usageDockHTML('会话', sessionUsage)]
+    .filter(Boolean).join(' · ');
+  if (usageHTML) {
+    box.appendChild(el('span', 'docksep'));
+    const usage = el('button', 'dockitem dockusage');
+    usage.type = 'button';
+    usage.title = '本轮 / 会话的输入 / 输出 token';
+    usage.innerHTML = usageHTML;
+    usage.onclick = () => openStatusDetail(kind, usage, 'usage');
+    box.appendChild(usage);
+  }
 }
 
 function updateChatContextMeter(extra) {
@@ -3327,9 +5271,8 @@ function updateAgentContextMeter(extra) {
   const total = m.context || 1000000;
   const output = m.output || 256000;
   let toolsChars = 0;
-  AGENT_SELECTED_TOOLS.forEach(name => {
-    const tool = AGENT_TOOLS.find(t => t.name === name);
-    if (tool) toolsChars += JSON.stringify(tool).length;
+  agentSelectedToolObjects().forEach(tool => {
+    toolsChars += JSON.stringify(tool).length;
   });
   const used = estimateMessagesTokens(AGENT_HISTORY) +
                estimateTextTokens(extra || '') + Math.ceil(toolsChars / 4);
@@ -3343,14 +5286,20 @@ function updateChatBackend() {
   CHAT_USAGE = null;
   const c = selectedChatConfig($('#chatConfig').value);
   const remote = !!(c && (c.backend === 'ollama' || c.backend === 'openai'));
-  const think = $('#chatThinkingWrap');
-  if (think) {
+  const sel = $('#chatThinking');
+  if (sel) {
     const info = remote && c ? { ...(c.thinking || {}),
                                  reasoning_efforts: c.reasoning_efforts || null } : null;
-    const show = thinkingAvailable(info);
-    think.style.display = show ? '' : 'none';
-    if (show) fillThinkingSelect($('#chatThinking'), info);
+    if (thinkingAvailable(info)) {
+      fillThinkingSelect(sel, info);
+      sel.disabled = false;
+    } else {
+      sel.innerHTML = '';
+      sel.disabled = true;
+    }
   }
+  updateModelButton('chat');
+  renderComposerPrimary('chat');
   updateChatContextMeter();
 }
 
@@ -3359,7 +5308,7 @@ const PY = {
   train: { path: '', verified: false, info: null },
   srv:   { path: '', verified: false, info: null },
 };
-const PY_BTNS = { chat: ['btnSend'], train: ['btnTrainStart', 'btnTrainResume'], srv: ['btnSrvStart'] };
+const PY_BTNS = { chat: [], train: ['btnTrainStart', 'btnTrainResume'], srv: ['btnSrvStart'] };
 let ENV_DETECTED = false;
 let ENV_POLL = null;
 
@@ -3377,6 +5326,7 @@ function renderPy(page) {
     srv: !$('#btnSrvStop').disabled,
   }[page];
   PY_BTNS[page].forEach(id => { $('#' + id).disabled = !canStart || running; });
+  if (page === 'chat') renderComposerPrimary('chat');
   if (page === 'srv' && $('#btnSrvStart').textContent === '启动中…') {
     $('#btnSrvStart').disabled = true;
   }
@@ -3668,35 +5618,60 @@ $('#btnMcpSave').onclick = saveMcpConfig;
 $('#btnMcpDelete').onclick = deleteMcpConfig;
 $('#btnMcpTest').onclick = testMcpConfig;
 $('#mcpTransport').addEventListener('change', mcpTransportChanged);
-$('#btnAgentNew').onclick = () => agentNewChat();
 $('#btnAgentWorkspaceAdd').onclick = addAgentWorkspace;
-$('#btnAgentSend').onclick = agentSend;
-$('#btnAgentStop').onclick = () => { if (AGENT_ABORT) AGENT_ABORT.abort(); };
-$('#btnChatImage').onclick = () => $('#chatImageInput').click();
-$('#chatImageInput').onchange = e => { addImages('chat', e.target.files); e.target.value = ''; };
-$('#btnAgentImage').onclick = () => $('#agentImageInput').click();
+$('#btnAgentSend').onclick = () => composerPrimaryAction('agent');
+$('#btnAgentPlus').onclick = () => openPlusMenu('agent');
+$('#btnAgentModel').onclick = () => openModelMenu('agent');
+$('#btnAgentMcp').onclick = () => { openAgentMcpMenu(); };
 $('#agentImageInput').onchange = e => { addImages('agent', e.target.files); e.target.value = ''; };
+$('#agentFileInput').onchange = e => { addTextFiles('agent', e.target.files); e.target.value = ''; };
+$('#chatImageInput').onchange = e => { addImages('chat', e.target.files); e.target.value = ''; };
+$('#chatFileInput').onchange = e => { addTextFiles('chat', e.target.files); e.target.value = ''; };
+$('#chatInput').addEventListener('paste', e => handleComposerPaste('chat', e));
+$('#agentInput').addEventListener('paste', e => handleComposerPaste('agent', e));
+$('#agentMcpEnabled').onchange = () => {
+  const state = ensureAgentComposerState();
+  if (state) {
+    state.mcpEnabled = $('#agentMcpEnabled').checked;
+    saveAgentState(state);
+  }
+  renderAgentMcpServers();
+  renderAgentMcpButton();
+  updateAgentContextMeter();
+};
 $('#chatSession').onchange = () => openSession('chat', $('#chatSession').value);
 $('#agentSession').onchange = () => openSession('agent', $('#agentSession').value);
 $('#btnChatSessionDelete').onclick = () => deleteCurrentSession('chat');
 $('#btnAgentSessionDelete').onclick = () => deleteCurrentSession('agent');
-$('#btnAgentTools').onclick = () => {
-  const panel = $('#agentToolPanel');
-  const open = panel.style.display === 'none';
-  panel.style.display = open ? 'block' : 'none';
-  if (open && $('#agentToolSearch')) $('#agentToolSearch').focus();
-};
 $('#btnAgentToolsAll').onclick = () => {
   agentVisibleTools().forEach(t => AGENT_SELECTED_TOOLS.add(t.name));
+  syncAgentToolState();
   renderAgentTools();
 };
 $('#btnAgentToolsNone').onclick = () => {
   agentVisibleTools().forEach(t => AGENT_SELECTED_TOOLS.delete(t.name));
+  syncAgentToolState();
   renderAgentTools();
 };
 $('#agentToolSearch').addEventListener('input', renderAgentTools);
-$('#agentMcp').addEventListener('change', () => loadAgentTools($('#agentMcp').value));
-$('#agentModel').addEventListener('change', () => { updateAgentThinking(); updateAgentToolCount(); });
+$('#agentMcp').addEventListener('change', () => {
+  // “工具来源”只切换当前编辑哪台服务器的工具，不改变其它服务器的开关。
+  AGENT_TOOL_SERVER = $('#agentMcp').value;
+  loadAgentTools(AGENT_TOOL_SERVER).then(() => {
+    const state = ensureAgentComposerState();
+    if (!state) return;
+    state.server = agentMcpEnabledServers(state)[0] || '';
+    state.tools = agentSelectedTools(state);
+    saveAgentState(state);
+  }).catch(() => {});
+});
+$('#agentModel').addEventListener('change', () => {
+  updateAgentThinking();
+  updateAgentToolCount();
+  updateModelButton('agent');
+});
+$('#chatInput').addEventListener('input', () => renderComposerPrimary('chat'));
+$('#agentInput').addEventListener('input', () => renderComposerPrimary('agent'));
 $('#agentInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); agentSend(); }
 });
@@ -3923,9 +5898,11 @@ function chatEnsureState(id) {
     state = {
       id, history: [], contextData: null, usage: null, sessionUsage: null,
       root: null, abort: null, running: false, loaded: false,
-      config: '', thinking: 'off', title: '',
+      config: '', thinking: 'default', title: '',
       historyStart: 0, historyTotal: 0, historyHasMore: false,
       historyOutline: [], historyLoading: false, needsRender: false,
+      images: [], files: [], starting: false,
+      lazyArmed: false, lastScrollTop: 0, programmaticScroll: false,
     };
     CHAT_STATES.set(id, state);
   }
@@ -3953,9 +5930,9 @@ function chatAttachState(state) {
 
 function chatRefreshControls(state) {
   if (!state || CURRENT_CHAT_SESSION !== state.id) return;
-  $('#btnSend').disabled = !!state.running;
-  $('#btnChatStop').disabled = !state.running;
   $('#chatState').textContent = state.running ? '生成中…' : '';
+  renderComposerPrimary('chat');
+  updateModelButton('chat');
 }
 
 async function saveChatState(state) {
@@ -3967,7 +5944,7 @@ async function saveChatState(state) {
         id: state.id, kind: 'chat', workspace_id: '',
         history: state.history, history_start: state.historyStart,
         config: state.config || '',
-        thinking: state.thinking || 'off',
+        thinking: state.thinking || 'default',
       }),
     });
     if (r.sessions) mergeSessionList(r.sessions);
@@ -4007,6 +5984,8 @@ function chatShowState(state) {
   chatApplyStateOptions(state);
   chatRefreshControls(state);
   updateChatContextMeter();
+  renderImagePreviews('chat');
+  renderFileChips('chat');
   const box = $('#chatBox');
   box.scrollTop = box.scrollHeight;
   renderChatSessions();
@@ -4057,14 +6036,18 @@ function renderAgentHistory(state) {
   state.history.forEach((m, i) => {
     const index = state.historyStart + i;
     if (m.role === 'assistant') {
-      const out = agentMsg('assistant', '', m.ts, index);
-      const a = agentEnsureAnswer(out);
-      a.raw = m.content || '';
-      a.body.dataset.raw = a.raw;
-      if (typeof renderMarkdown === 'function') renderMarkdown(a.body, a.raw);
-      else a.body.textContent = a.raw;
-      out.turn.classList.remove('running');
-      out.title.textContent = '已完成';
+      if (Array.isArray(m.steps) && m.steps.length) {
+        agentRenderSavedTurn(m, index);
+      } else {
+        const out = agentMsg('assistant', '', m.ts, index);
+        const a = agentEnsureAnswer(out);
+        a.raw = m.content || '';
+        a.body.dataset.raw = a.raw;
+        if (typeof renderMarkdown === 'function') renderMarkdown(a.body, a.raw);
+        else a.body.textContent = a.raw;
+        out.turn.classList.remove('running');
+        out.title.textContent = m.duration ? `已完成 · 用时 ${m.duration}` : '已完成';
+      }
     } else {
       agentMsg('user', m.content || '', m.ts, index);
     }
@@ -4091,8 +6074,11 @@ function positionConversationRail(kind) {
   const rail = ensureConversationRail(kind);
   const box = conversationBox(kind);
   if (!rail || !box) return;
-  rail.style.top = (box.offsetTop || 0) + 'px';
-  rail.style.height = Math.max(0, box.clientHeight || 0) + 'px';
+  // 轨道对齐消息区（不是整个 chatmain）的垂直中线，高度也按消息区收紧。
+  rail.style.top = ((box.offsetTop || 0) + (box.clientHeight || 0) / 2) + 'px';
+  rail.style.transform = 'translateY(-50%)';
+  const max = Math.max(120, Math.min(440, (box.clientHeight || 400) - 140));
+  rail.style.maxHeight = max + 'px';
 }
 
 function conversationState(kind) {
@@ -4122,6 +6108,11 @@ function updateRailActive(kind) {
   rail.querySelectorAll('.conversation-mark').forEach(mark => {
     mark.classList.toggle('on', mark.dataset.index === String(active));
   });
+  const activeMark = rail.querySelector('.conversation-mark.on');
+  if (activeMark) {
+    const target = activeMark.offsetTop - (rail.clientHeight - activeMark.offsetHeight) / 2;
+    rail.scrollTop = Math.max(0, target);
+  }
 }
 
 function renderConversationRail(kind) {
@@ -4136,12 +6127,10 @@ function renderConversationRail(kind) {
   }
   rail.style.display = '';
   positionConversationRail(kind);
-  const total = Math.max(1, state.historyTotal - 1);
   outline.forEach(entry => {
     const mark = el('button', 'conversation-mark');
     mark.type = 'button';
     mark.dataset.index = String(entry.index);
-    mark.style.top = (4 + (entry.index / total) * 92).toFixed(2) + '%';
     mark.title = (entry.ts ? entry.ts + ' ' : '') + (entry.prompt || '');
     mark.onclick = () => jumpToHistory(kind, entry.index);
     rail.appendChild(mark);
@@ -4149,19 +6138,37 @@ function renderConversationRail(kind) {
   updateRailActive(kind);
 }
 
+// 程序化滚动期间不触发懒加载，避免“打开会话就自动补完所有历史”。
+function withProgrammaticScroll(kind, fn) {
+  const state = conversationState(kind);
+  const box = conversationBox(kind);
+  if (state) state.programmaticScroll = true;
+  try {
+    fn();
+  } finally {
+    requestAnimationFrame(() => {
+      if (!state) return;
+      state.programmaticScroll = false;
+      state.lastScrollTop = box ? box.scrollTop : 0;
+    });
+  }
+}
+
 async function loadOlderHistory(kind) {
   const state = conversationState(kind);
   if (!state || HISTORY_RENDER_LOCK || SESSION_LOADING ||
-      state.historyLoading || !state.historyHasMore || state.running) {
+      state.historyLoading || !state.historyHasMore ||
+      state.running || state.starting) {
     return false;
   }
   state.historyLoading = true;
+  state.lazyArmed = false;
   const box = conversationBox(kind);
   const oldHeight = box ? box.scrollHeight : 0;
   const oldTop = box ? box.scrollTop : 0;
   try {
     const r = await api('sessions?id=' + encodeURIComponent(state.id) +
-      `&history_page=1&history_limit=${HISTORY_PAGE}&history_before=${state.historyStart}`);
+      `&history_page=1&history_turns=${HISTORY_TURNS}&history_before=${state.historyStart}`);
     if (!r.ok || !r.session) return false;
     state.history = (r.session.history || []).concat(state.history);
     state.historyStart = r.history_start ?? 0;
@@ -4170,9 +6177,11 @@ async function loadOlderHistory(kind) {
     state.historyOutline = r.history_outline || state.historyOutline;
     const active = conversationState(kind) === state;
     if (active) {
-      if (kind === 'chat') renderChatHistory(state);
-      else renderAgentHistory(state);
-      if (box) box.scrollTop = oldTop + Math.max(0, box.scrollHeight - oldHeight);
+      withProgrammaticScroll(kind, () => {
+        if (kind === 'chat') renderChatHistory(state);
+        else renderAgentHistory(state);
+        if (box) box.scrollTop = oldTop + Math.max(0, box.scrollHeight - oldHeight);
+      });
       renderConversationRail(kind);
     } else {
       state.needsRender = true;
@@ -4196,24 +6205,49 @@ async function jumpToHistory(kind, index) {
   }
   const box = conversationBox(kind);
   const row = box && box.querySelector(`.msg[data-history-index="${index}"]`);
-  if (row) row.scrollIntoView({ block: 'start', behavior: 'smooth' });
-  updateRailActive(kind);
+  if (row) {
+    if (state) {
+      state.lazyArmed = false;
+      state.programmaticScroll = true;
+    }
+    row.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    updateRailActive(kind);
+    setTimeout(() => {
+      if (!state) return;
+      state.programmaticScroll = false;
+      state.lastScrollTop = box ? box.scrollTop : 0;
+    }, 520);
+  }
 }
 
 function scrollConversationToBottom(kind) {
   const box = conversationBox(kind);
   if (!box) return;
+  const state = conversationState(kind);
+  if (state) state.programmaticScroll = true;
   const apply = () => {
     box.scrollTop = box.scrollHeight;
     positionConversationRail(kind);
     updateRailActive(kind);
+  };
+  const done = () => {
+    apply();
+    if (!state) return;
+    state.programmaticScroll = false;
+    state.lazyArmed = false;
+    state.lastScrollTop = box.scrollTop;
   };
   requestAnimationFrame(() => {
     apply();
     requestAnimationFrame(apply);
   });
   setTimeout(apply, 80);
-  setTimeout(apply, 250);
+  setTimeout(done, 260);
+}
+
+function armLazyLoad(kind) {
+  const state = conversationState(kind);
+  if (state && !state.programmaticScroll) state.lazyArmed = true;
 }
 
 function initConversationRails() {
@@ -4224,8 +6258,23 @@ function initConversationRails() {
     if (!box) return;
     box.addEventListener('scroll', () => {
       updateRailActive(kind);
-      if (box.scrollTop < 48) loadOlderHistory(kind);
+      const state = conversationState(kind);
+      if (!state) return;
+      const top = box.scrollTop;
+      if (state.programmaticScroll) {
+        state.lastScrollTop = top;
+        return;
+      }
+      const upward = top < state.lastScrollTop - 2;
+      state.lastScrollTop = top;
+      // 只有“用户主动向上滚动 + 接近顶部 + 已加载过初始页”才补更早历史。
+      // 初始页不足一屏时保持不动，把「加载更早消息」按钮留在顶部给用户点。
+      if (!state.lazyArmed || !upward || top >= 48) return;
+      loadOlderHistory(kind);
     }, { passive: true });
+    ['wheel', 'touchstart', 'pointerdown'].forEach(evt => {
+      box.addEventListener(evt, () => armLazyLoad(kind), { passive: true });
+    });
   });
   window.addEventListener('resize', () => {
     ['chat', 'agent'].forEach(kind => {
@@ -4263,28 +6312,40 @@ function promptText() {
 
 async function send() {
   const text = $('#chatInput').value.trim();
-  if (!text && !CHAT_IMAGES.length) return;
+  if (!text && !imageDraft('chat').length && !fileDraft('chat').length) return;
+  if (imagePending('chat') || filePending('chat')) {
+    return toast('图片或文件还在读取，请稍候再发送');
+  }
   const cfgName = $('#chatConfig').value;
   if (!cfgName) { toast('先选一个配置'); return; }
   const selected = CHAT_CONFIGS.find(x => x.name === cfgName) || {};
   if (!CURRENT_CHAT_SESSION) CURRENT_CHAT_SESSION = newSessionId();
   const state = chatEnsureState(CURRENT_CHAT_SESSION);
   if (!state) return;
-  if (state.running) return toast('该会话正在生成，请先停止');
+  if (state.running || state.starting) return toast('该会话正在生成，请先停止');
+  state.starting = true;
+  renderComposerPrimary('chat');
   const remoteChat = selected.backend === 'ollama' || selected.backend === 'openai';
   if (selected.backend !== 'ollama' && selected.backend !== 'openai' &&
-      !(await ensurePy('chat'))) return;
+      !(await ensurePy('chat'))) {
+    state.starting = false;
+    renderComposerPrimary('chat');
+    return;
+  }
+  if (imageDraft('chat').length && selected.backend !== 'ollama' &&
+      selected.backend !== 'openai') {
+    state.starting = false;
+    renderComposerPrimary('chat');
+    return toast('本地字符级模型不支持图片');
+  }
   state.loaded = true;
   state.config = cfgName;
-  state.thinking = ($('#chatThinking') && $('#chatThinking').value) || 'off';
+  state.thinking = ($('#chatThinking') && $('#chatThinking').value) || 'default';
   state.contextData = null;
   state.usage = null;
   chatSyncState(state);
   $('#chatInput').value = '';
   $('#chatInput').style.height = 'auto';
-  if (CHAT_IMAGES.length && selected.backend !== 'ollama' && selected.backend !== 'openai') {
-    return toast('本地字符级模型不支持图片');
-  }
   const userContent = userMessageContent(text, 'chat');
   const userTs = nowStamp();
   const userIndex = state.historyStart + state.history.length;
@@ -4295,6 +6356,7 @@ async function send() {
   }]);
   renderMsg('user', userContent, userTs, userIndex);
   clearImages('chat');
+  clearFiles('chat');
   updateChatContextMeter();
   renderConversationRail('chat');
   const { body, bubble, think } = renderMsg('assistant', '');
@@ -4307,11 +6369,13 @@ async function send() {
   const isActive = () => CURRENT_CHAT_SESSION === sid;
   let acc = '';
   try {
+    // 本地字符级模型只接收当前一句；附件路径已经拼进 userContent，必须一起给它。
+    const localText = typeof userContent === 'string' ? userContent : text;
     const payload = remoteChat
       ? { config: cfgName, messages: state.history,
           history_start: state.historyStart,
           session_id: sid, thinking: state.thinking }
-      : { config: cfgName, text };
+      : { config: cfgName, text: localText };
     const resp = await fetch(`/api/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       // 本地小模型默认只发当前这一句；Ollama/API 后端发送完整 messages
@@ -4350,7 +6414,9 @@ async function send() {
             chatScrollIf(stick);
           }
         } else if (ev[1] === 'token') {
-          acc += data.text; body.textContent = acc;
+          acc += data.text;
+          body.dataset.raw = acc;
+          scheduleStreamMarkdown(body, acc);
           if (active) updateChatContextMeter(acc);
           chatScrollIf(stick);
         } else if (ev[1] === 'done') {
@@ -4360,8 +6426,7 @@ async function send() {
             think.box.style.display = '';
             think.pre.textContent = data.reasoning;
           }
-          if (typeof renderMarkdown === 'function') renderMarkdown(body, acc);
-          else body.textContent = acc;
+          flushStreamMarkdown(body, acc);
           if (data.usage) {
             state.usage = data.usage;
             if (data.session_usage) state.sessionUsage = data.session_usage;
@@ -4382,11 +6447,16 @@ async function send() {
       state.historyStart + state.history.length);
     if (isActive()) updateChatContextMeter();
   } catch (e) {
-    if (e.name === 'AbortError') body.textContent = acc + '（已停止）';
-    else body.textContent = '出错：' + e.message;
+    if (e.name === 'AbortError') {
+      // 只把“已停止”标记渲染到界面上，不写进 acc，避免下一轮历史里出现这句提示。
+      flushStreamMarkdown(body, acc + '\n\n（已停止）');
+    } else {
+      flushStreamMarkdown(body, '出错：' + e.message);
+    }
   } finally {
     bubble.classList.remove('typing');
     state.running = false;
+    state.starting = false;
     state.abort = null;
     if (isActive()) {
       chatAbort = null;
@@ -4400,9 +6470,12 @@ async function send() {
   }
 }
 
-$('#btnSend').onclick = send;
-$('#btnNewChat').onclick = newChatSession;
+$('#btnSend').onclick = () => composerPrimaryAction('chat');
+$('#btnChatPlus').onclick = () => openPlusMenu('chat');
+$('#btnChatModel').onclick = () => openModelMenu('chat');
 $('#btnChatSideNew').onclick = newChatSession;
+$('#btnChatRailNew').onclick = () => { setSideCollapsed('chat', false); newChatSession(); };
+$('#btnAgentRailNew').onclick = () => { setSideCollapsed('agent', false); agentNewChat(); };
 $('#chatInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
@@ -4410,9 +6483,9 @@ $('#chatInput').addEventListener('input', e => {
   e.target.style.height = 'auto';
   e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
 });
-$('#btnChatStop').onclick = () => { if (chatAbort) chatAbort.abort(); };
 emptyHint();
 initConversationRails();
+bindImageViewer();
 
 /* ---------------- 服务页：会话 / 日志 两个子页 ---------------- */
 const SRV_STREAMS = new Map();
