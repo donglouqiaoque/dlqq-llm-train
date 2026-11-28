@@ -19,6 +19,7 @@ import atexit
 import codecs
 import concurrent.futures
 import ctypes
+import datetime
 import hashlib
 import json
 import os
@@ -409,6 +410,86 @@ def load_session(sid):
         return None
 
 
+def _history_preview(content, limit=80):
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(str(block.get("text") or ""))
+                elif block.get("type") == "image_url":
+                    parts.append("[图片]")
+        text = " ".join(parts)
+    else:
+        text = str(content or "")
+    text = " ".join(text.split())
+    return text[:limit]
+
+
+def session_history_page(data, before=None, limit=24):
+    """只返回最近一段历史，并附带用于跳转的全部用户轮次大纲。"""
+    history = data.get("history") if isinstance(data, dict) else None
+    if not isinstance(history, list):
+        history = []
+    total = len(history)
+    try:
+        limit = max(1, min(100, int(limit or 24)))
+    except (TypeError, ValueError):
+        limit = 24
+    try:
+        end = total if before is None else max(0, min(total, int(before)))
+    except (TypeError, ValueError):
+        end = total
+    start = max(0, end - limit)
+    outline = []
+    for index, msg in enumerate(history):
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        outline.append({
+            "index": index,
+            "ts": str(msg.get("ts") or ""),
+            "prompt": _history_preview(msg.get("content")),
+        })
+    return {
+        "history": history[start:end],
+        "history_total": total,
+        "history_start": start,
+        "history_end": end,
+        "history_has_more": start > 0,
+        "history_outline": outline,
+    }
+
+
+def _strip_ui_messages(messages):
+    """去掉仅用于界面分页/时间显示的字段，避免把它们发给模型。"""
+    clean = []
+    for msg in messages or []:
+        if not isinstance(msg, dict):
+            continue
+        item = {"role": msg.get("role"), "content": msg.get("content")}
+        for key in ("tool_calls", "tool_call_id", "name"):
+            if key in msg:
+                item[key] = msg[key]
+        clean.append(item)
+    return clean
+
+
+def merge_session_history(sid, messages, history_start=0):
+    """把懒加载返回的最近历史片段和会话文件中的旧历史拼成模型输入。"""
+    clean = _strip_ui_messages(messages)
+    try:
+        start = max(0, int(history_start or 0))
+    except (TypeError, ValueError):
+        start = 0
+    if not sid or start <= 0:
+        return clean
+    data = load_session(sid)
+    old = data.get("history") if isinstance(data, dict) else None
+    if not isinstance(old, list) or len(old) < start:
+        return clean
+    return _strip_ui_messages(old[:start]) + clean
+
+
 def save_session(body):
     sid = _session_id(body.get("id"))
     history = body.get("history")
@@ -417,6 +498,15 @@ def save_session(body):
     kind = "agent" if body.get("kind") == "agent" else "chat"
     old = load_session(sid) if sid else None
     now = time.time()
+    # 懒加载会话只回传最近一段；保存时必须把未加载的旧历史和这段拼回去。
+    try:
+        history_start = int(body.get("history_start") or 0)
+    except (TypeError, ValueError):
+        history_start = 0
+    old_history = old.get("history") if isinstance(old, dict) else None
+    if (history_start > 0 and isinstance(old_history, list)
+            and len(old_history) >= history_start):
+        history = old_history[:history_start] + list(history)
     if not sid:
         sid = uuid.uuid4().hex
     title = str(body.get("title") or "").strip()
@@ -448,6 +538,9 @@ def save_session(body):
         "thinking": str(body.get("thinking") or "off"),
         "model_history": ((old or {}).get("model_history")
                           if kind == "agent" else None),
+        "last_usage": (old or {}).get("last_usage"),
+        "usage_totals": (old or {}).get("usage_totals"),
+        "last_time_context": (old or {}).get("last_time_context"),
     }
     path = _session_path(sid)
     with SESSION_LOCK:
@@ -484,9 +577,9 @@ def delete_session(sid):
     return True
 
 
-def save_session_model_history(sid, messages):
+def save_session_model_history(sid, messages, updates=None):
     """保存 Agent 的完整模型消息，保证下一轮仍是上一轮请求的前缀。"""
-    clean = [m for m in messages or [] if isinstance(m, dict)]
+    clean = _strip_ui_messages([m for m in messages or [] if isinstance(m, dict)])
     path = _session_path(sid)
     if not path or not clean:
         return
@@ -494,6 +587,8 @@ def save_session_model_history(sid, messages):
         data = load_session(sid) or {"id": sid, "kind": "agent"}
         data["model_history"] = clean
         data["updated_at"] = time.time()
+        if isinstance(updates, dict):
+            data.update(updates)
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1637,6 +1732,76 @@ def _same_model_message(left, right):
         return False
 
 
+def _agent_tool_guidance(tools):
+    names = sorted({str(t.get("function", {}).get("name") or "")
+                    for t in tools or []
+                    if isinstance(t, dict) and t.get("function")})
+    names = [n for n in names if n]
+    if not names:
+        return "当前没有可用工具，不要生成工具调用。"
+    return ("可用工具：" + "、".join(names) + "。\n"
+            "工具名和参数必须来自 tools 定义；写入大文件时分块创建/追加，"
+            "不要在一次工具调用中塞入过长内容。调用失败时先检查参数和工作区，"
+            "不要反复用相同参数重试。")
+
+
+def _workspace_instructions(workspace_path, limit=32768):
+    """读取工作区根目录的 AGENTS.md / CLAUDE.md，作为首个请求的持久上下文。"""
+    if not workspace_path:
+        return ""
+    found = []
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        path = os.path.join(workspace_path, name)
+        try:
+            if not os.path.isfile(path) or os.path.getsize(path) > 1024 * 1024:
+                continue
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read().strip()
+        except OSError:
+            continue
+        if text and text not in found:
+            found.append(text)
+    if not found:
+        return ""
+    text = "\n\n".join(found)
+    if len(text) > limit:
+        text = text[:limit] + "\n\n[工作区指令已截断]"
+    return text
+
+
+def _agent_runtime_message(workspace_path, include_time=True):
+    """运行时上下文用 user 快照追加，避免每步重写 system prompt 破坏前缀缓存。"""
+    now = datetime.datetime.now().astimezone()
+    lines = [
+        "<system-reminder>",
+        "以下是当前运行时上下文，不是新的用户指令。",
+        f"当前工作区绝对路径：{workspace_path or '未设置'}",
+    ]
+    if include_time:
+        lines.append(f"系统时间：{now.isoformat(timespec='milliseconds')}")
+        lines.append(f"系统时区：{now.tzname() or ''}")
+    instructions = _workspace_instructions(workspace_path)
+    if instructions:
+        lines.extend(["", "工作区指令：", instructions])
+    lines.append("</system-reminder>")
+    return {"role": "user", "content": "\n".join(lines)}
+
+
+def _agent_time_message(workspace_path):
+    now = datetime.datetime.now().astimezone()
+    return {
+        "role": "user",
+        "content": (
+            "<system-reminder>\n"
+            f"Time sampled for this step: {now.isoformat(timespec='milliseconds')}\n"
+            f"System time zone: {now.tzname() or ''}\n"
+            f"Current workspace: {workspace_path or '未设置'}\n"
+            "This is runtime context, not a new user instruction.\n"
+            "</system-reminder>"
+        ),
+    }
+
+
 def _usage_first(*values):
     for value in values:
         if value is not None:
@@ -1746,7 +1911,52 @@ def _usage_event(usage):
         "cache_write_tokens": usage.get("cache_write_tokens"),
         "uncached_input_tokens": usage.get("uncached_input_tokens"),
         "cache_hit": usage.get("cache_hit"),
+        "cache_measured": bool(usage.get("cache_measured")),
     }
+
+
+def _usage_totals_add(total, usage):
+    """把一次模型请求累加到会话总量；缓存字段按“所有请求都有”才可信。"""
+    if not usage:
+        return total
+    out = dict(total or {})
+    for key in ("prompt_tokens", "completion_tokens", "uncached_input_tokens",
+                "cache_read_tokens", "cache_write_tokens"):
+        value = usage.get(key)
+        if value is not None:
+            out[key] = (out.get(key) or 0) + int(value)
+    out["turns"] = int(out.get("turns") or 0) + 1
+    measured = bool(usage.get("cache_measured"))
+    if "cache_measured" in out:
+        out["cache_measured"] = bool(out["cache_measured"]) and measured
+    else:
+        out["cache_measured"] = measured
+    out["cache_hit"] = _usage_cache_hit(out)
+    return out
+
+
+def update_session_usage(sid, usage, kind="agent"):
+    """把本轮 usage 累加到会话并返回会话总量。"""
+    clean_sid = _session_id(sid)
+    if not clean_sid or not usage:
+        return None
+    path = _session_path(clean_sid)
+    if not path:
+        return None
+    with SESSION_LOCK:
+        data = load_session(clean_sid) or {"id": clean_sid}
+        data.setdefault("kind", "agent" if kind == "agent" else "chat")
+        last = _usage_event(usage)
+        totals = _usage_totals_add(data.get("usage_totals"), usage)
+        data["last_usage"] = last
+        data["usage_totals"] = totals
+        data["updated_at"] = time.time()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            return None
+        return totals
 
 
 class ChatStreamError(Exception):
@@ -1844,26 +2054,50 @@ def _group_text(group):
     return "\n\n".join(parts)
 
 
-def _summary_history(api, upstream, old_messages, max_output=4096):
-    """调用当前模型生成历史摘要；失败由调用方回退。"""
+def _prune_old_tool_results(old_groups, max_chars=24000):
+    """压缩摘要前截断过大的工具结果，保留头尾便于模型理解。"""
+    for group in old_groups:
+        for msg in group:
+            if not isinstance(msg, dict) or msg.get("role") != "tool":
+                continue
+            text = _message_content_text(msg)
+            if len(text) <= max_chars:
+                continue
+            head = max_chars // 3
+            tail = max_chars - head
+            msg["content"] = (text[:head] + "\n\n[工具结果过长，中间部分已省略]\n\n"
+                              + text[-tail:])
+    return old_groups
+
+
+def _summary_history(api, upstream, old_messages, max_output=8192,
+                     prefix=None, tools=None):
+    """用原请求前缀 + 旧历史 + 末尾压缩指令生成摘要，尽量复用 prompt cache。"""
     if not api or not old_messages:
         return ""
-    text = "\n\n".join(_group_text(g) for g in old_messages)
-    # 摘要输入本身必须有界，避免“为了压缩而再次超限”。
-    if len(text) > 32000:
-        text = text[:32000] + "\n\n[更早内容已省略]"
-    prompt = (
-        "你是上下文压缩器。将下面的历史压缩成不超过 1200 字的结构化摘要。\n"
-        "必须保留：用户目标、约束、已完成事项、关键文件路径、重要决定、"
-        "工具调用结果、未完成任务。不要编造未出现的信息。\n"
-        "不要保留完整代码、完整 diff、重复日志或思考过程。\n"
-        "输出格式：\n【用户目标】\n【已完成】\n【关键文件】\n"
-        "【重要决定】\n【工具结果】\n【未完成】\n\n"
-        "历史内容：\n" + text
-    )
+    old = []
+    for group in old_messages:
+        old.extend(group)
+    instruction = {
+        "role": "user",
+        "content": (
+            "You are now acting as a compaction engine for this AI assistant. "
+            "Condense the conversation ABOVE into a structured checkpoint that lets "
+            "another model resume the work without losing essential context.\n\n"
+            "Output only Markdown with these sections, in order:\n"
+            "## Primary Request and Intent\n## Key Technical Concepts\n## Files and Code\n"
+            "## Errors and Fixes\n## Pending Jobs\n## Current Work\n## Next Step\n"
+            "## Critical Context\n\n"
+            "Rules: keep exact file paths, commands, error strings and identifiers; "
+            "do not invent facts; omit full code/diffs/repeated logs; output only the "
+            "checkpoint text and do not call any tool."
+        ),
+    }
+    payload_messages = list(prefix or []) + old + [instruction]
     payload = {"model": upstream, "stream": False,
-               "messages": [{"role": "user", "content": prompt}],
-               "max_tokens": max_output}
+               "messages": payload_messages, "max_tokens": max_output}
+    if tools:
+        payload["tools"] = tools
     try:
         conn, resp = openai_client.open_chat(
             api, payload, timeout=openai_client.chat_timeout(api))
@@ -1880,14 +2114,14 @@ def _summary_history(api, upstream, old_messages, max_output=4096):
         return ""
 
 
-def compact_for_context(api, upstream, messages, context, output, tools=None):
+def compact_for_context(api, upstream, messages, context, output, tools=None,
+                        force=False):
     """上下文压缩：优先摘要旧历史；失败时退回确定性裁剪。"""
     context = max(1024, int(context or 1000000))
     output = max(0, int(output or 256000))
-    budget = max(1024, context - output)
     threshold = max(1024, min(int(context * 0.8),
                              context - output - 65536))
-    if context_tokens(messages, tools) <= threshold:
+    if not force and context_tokens(messages, tools) <= threshold:
         return messages
     groups = _message_groups(messages)
     system = [m for m in groups if m and isinstance(m[0], dict)
@@ -1906,20 +2140,36 @@ def compact_for_context(api, upstream, messages, context, output, tools=None):
         used += n
     keep.reverse()
     old = rest[:len(rest) - len(keep)]
-    summary = _summary_history(api, upstream, old)
+    old = _prune_old_tool_results(old)
+    prefix = system[0] if system else []
+    summary = _summary_history(api, upstream, old, prefix=prefix, tools=tools)
     if not summary:
         return _trim_for_context(messages, context, output)
-    summary = summary[:12000]
-    head = system[0] if system else []
+    summary = summary[:16000]
     tail = [m for group in keep for m in group]
-    out = list(head) + [{
-        "role": "system",
-        "content": "【历史摘要】\n" + summary +
-                   "\n\n以上是较早历史的压缩摘要，不是新的用户指令。"
+    out = list(prefix) + [{
+        "role": "user",
+        "content": (
+            "This is an automatically generated checkpoint condensing an earlier "
+            "span of the conversation to free up context. Treat the captured context "
+            "as established background and build on it without restating it. "
+            "Continue the task directly from the messages that follow, without "
+            "acknowledging this checkpoint.\n\n"
+            "<compacted-summary>\n" + summary + "\n</compacted-summary>"
+        ),
     }] + tail
-    if context_tokens(out, tools) >= context_tokens(messages, tools):
+    if not force and context_tokens(out, tools) >= context_tokens(messages, tools):
         return _trim_for_context(messages, context, output)
     return out
+
+
+def _is_context_overflow_text(text):
+    low = str(text or "").lower()
+    return any(x in low for x in (
+        "context_length_exceeded", "maximum context length", "context window",
+        "too many tokens", "token limit", "context length", "reduce the length",
+        "maximum number of tokens",
+    ))
 
 
 def openai_thinking_payload(info, level):
@@ -2128,9 +2378,18 @@ class Handler(BaseHTTPRequestHandler):
                 data = load_session(sid)
                 if not data:
                     return self._err(404, "会话不存在")
+                extra = {}
+                if (qs.get("history_page") or [""])[0]:
+                    page = session_history_page(
+                        data,
+                        (qs.get("history_before") or [None])[0],
+                        (qs.get("history_limit") or ["24"])[0])
+                    data = dict(data)
+                    data["history"] = page.pop("history")
+                    extra = page
                 return self._json({"ok": True, "workspaces": reg.get("workspaces") or [],
                                    "workspace": default_workspace(reg),
-                                   "session": data})
+                                   "session": data, **extra})
             kind = (qs.get("kind") or [""])[0] or None
             workspace = (qs.get("workspace") or [""])[0] or None
             self._json({"ok": True, "workspaces": reg.get("workspaces") or [],
@@ -2693,33 +2952,45 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 return self._err(400, "消息为空")
             msgs = [{"role": "user", "content": text}]
+        msgs = merge_session_history(
+            _session_id(body.get("session_id")), msgs, body.get("history_start"))
         payload = {"model": model, "messages": msgs, "stream": True}
         for key in ("temperature", "top_p", "max_tokens", "max_completion_tokens"):
             if key in body and body[key] is not None:
                 payload[key] = body[key]
         output_budget = openai_output_budget(api, model)
         payload.setdefault("max_tokens", output_budget)
-        payload["messages"] = compact_for_context(
-            api, model, msgs, openai_model_context(api, model),
-            output_budget, body.get("tools"))
         if "thinking" in body:
             level = _thinking_level(body.get("thinking"))
             payload.update(openai_thinking_payload(
                 openai_model_thinking(api, model), level))
-        try:
-            conn, resp = _open_chat_stream(
-                api, payload, timeout=openai_client.chat_timeout(api))
-        except ChatStreamError as e:
-            return self._err(e.status, f"API 返回错误：{e.body[:500]}")
-        except Exception as e:
-            return self._err(502, f"无法连接 API：{type(e).__name__}: {e}")
-        if resp.status < 200 or resp.status >= 300:
+        overflow_retries = 0
+        while True:
+            payload["messages"] = compact_for_context(
+                api, model, msgs, openai_model_context(api, model),
+                output_budget, body.get("tools"),
+                force=overflow_retries > 0)
             try:
-                raw = resp.read().decode("utf-8", errors="replace")
-            except Exception:
-                raw = ""
-            conn.close()
-            return self._err(resp.status, f"API 返回错误：{raw[:500]}")
+                conn, resp = _open_chat_stream(
+                    api, payload, timeout=openai_client.chat_timeout(api))
+            except ChatStreamError as e:
+                if overflow_retries < 1 and _is_context_overflow_text(e.body):
+                    overflow_retries += 1
+                    continue
+                return self._err(e.status, f"API 返回错误：{e.body[:500]}")
+            except Exception as e:
+                return self._err(502, f"无法连接 API：{type(e).__name__}: {e}")
+            if resp.status < 200 or resp.status >= 300:
+                try:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                except Exception:
+                    raw = ""
+                conn.close()
+                if overflow_retries < 1 and _is_context_overflow_text(raw):
+                    overflow_retries += 1
+                    continue
+                return self._err(resp.status, f"API 返回错误：{raw[:500]}")
+            break
 
         self._sse_start()
         parts = []
@@ -2751,6 +3022,10 @@ class Handler(BaseHTTPRequestHandler):
             usage = _usage_event(usage_total)
             if usage:
                 done["usage"] = usage
+                totals = update_session_usage(
+                    _session_id(body.get("session_id")), usage_total, "chat")
+                if totals:
+                    done["session_usage"] = totals
             self._sse("done", done)
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
@@ -3024,6 +3299,13 @@ class Handler(BaseHTTPRequestHandler):
                                  for t in tools if isinstance(t, dict)}
             session_id = _session_id(body.get("session_id")) or _session_id(body.get("id"))
             session = load_session(session_id) if session_id else None
+            stored_history = (session.get("model_history")
+                              if isinstance(session, dict) else None)
+            if isinstance(stored_history, list) and stored_history:
+                msgs = _strip_ui_messages(msgs)
+            else:
+                msgs = merge_session_history(
+                    session_id, msgs, body.get("history_start"))
             reg = load_workspace_registry()
             wid = ""
             if session:
@@ -3032,6 +3314,34 @@ class Handler(BaseHTTPRequestHandler):
             if not wid:
                 wid = str(body.get("workspace_id") or "").strip()
             workspace = find_workspace(wid) or default_workspace(reg)
+            if body.get("compact"):
+                history = (session.get("model_history")
+                           if isinstance(session, dict) else None)
+                if not isinstance(history, list) or not history:
+                    self._sse("error", {"error": "当前会话还没有可压缩的历史"})
+                    return
+                if backend != "openai":
+                    self._sse("error", {"error": "手动压缩只支持 API 模型"})
+                    return
+                ctx = openai_model_context(api, upstream)
+                out_budget = openai_output_budget(api, upstream)
+                before = context_tokens(history, tools)
+                compacted = compact_for_context(
+                    api, upstream, history, ctx, out_budget, tools, force=True)
+                after = context_tokens(compacted, tools)
+                save_session_model_history(
+                    session_id, compacted,
+                    {"last_time_context": session.get("last_time_context")})
+                self._sse("meta", {"model": model_label,
+                                   "server": server["name"] if server else "",
+                                   "tools": len(tools), "thinking": thinking,
+                                   "backend": backend})
+                self._sse("context", {"used": after, "total": ctx,
+                                      "output": out_budget})
+                self._sse("done", {"text": "", "compacted": {
+                    "before": before, "after": after,
+                    "removed": max(0, before - after)}})
+                return
             agent_meta = {
                 "dsh/sessionId": session_id or ("adhoc-" + uuid.uuid4().hex),
                 "dsh/agentId": "dlqq-llm-agent",
@@ -3052,21 +3362,38 @@ class Handler(BaseHTTPRequestHandler):
                 "写入工具；内容过长时拆成多次创建/追加，不要在一次工具调用里塞入过长内容。"
                 if tools else
                 "你是普通对话助手。当前没有启用任何 MCP 工具，不要生成工具调用，直接回答用户。")
-            model_history = (session.get("model_history")
-                             if isinstance(session, dict) else None)
+            system_prompt += "\n\n" + _agent_tool_guidance(tools)
+            model_history = stored_history
+            workspace_path = workspace.get("path") or _default_workspace_dir()
+            time_context_at = time.time()
             if isinstance(model_history, list) and model_history:
-                messages = [m for m in model_history if isinstance(m, dict)]
+                messages = _strip_ui_messages(model_history)
                 if messages and messages[0].get("role") == "system":
                     messages[0] = {"role": "system", "content": system_prompt}
                 else:
                     messages.insert(0, {"role": "system", "content": system_prompt})
+                added_user = False
                 if (last_user is not None and
                         (not messages or not _same_model_message(
                             messages[-1], last_user))):
                     messages.append(last_user)
+                    added_user = True
+                # 超过 10 分钟才追加新的时钟快照；追加在最后，不重写已有前缀。
+                last_tc = 0.0
+                if isinstance(session, dict):
+                    try:
+                        last_tc = float(session.get("last_time_context") or 0)
+                    except (TypeError, ValueError):
+                        last_tc = 0.0
+                if added_user and time.time() - last_tc >= 600:
+                    messages.append(_agent_time_message(workspace_path))
+                    time_context_at = time.time()
+                else:
+                    time_context_at = last_tc
             else:
                 messages = list(msgs)
                 messages.insert(0, {"role": "system", "content": system_prompt})
+                messages.insert(1, _agent_runtime_message(workspace_path))
             user_query = ""
             for item in reversed(msgs):
                 if isinstance(item, dict) and item.get("role") == "user":
@@ -3074,6 +3401,7 @@ class Handler(BaseHTTPRequestHandler):
                     break
             turn_usage = None
             turn_usage_missing = False
+            overflow_retries = 0
             while True:
                 output_budget = (openai_output_budget(api, upstream)
                                  if backend == "openai" else 256000)
@@ -3109,6 +3437,16 @@ class Handler(BaseHTTPRequestHandler):
                         conn, resp = _open_chat_stream(
                             api, payload, timeout=openai_client.chat_timeout(api))
                     except ChatStreamError as e:
+                        if (overflow_retries < 1 and
+                                _is_context_overflow_text(e.body)):
+                            overflow_retries += 1
+                            before = context_tokens(messages, tools)
+                            messages = compact_for_context(
+                                api, upstream, messages,
+                                openai_model_context(api, upstream),
+                                output_budget, tools, force=True)
+                            if context_tokens(messages, tools) < before:
+                                continue
                         self._sse("error", {"error": f"API 返回错误：{e.body[:500]}"})
                         return
                 else:
@@ -3118,6 +3456,16 @@ class Handler(BaseHTTPRequestHandler):
                 if resp.status < 200 or resp.status >= 300:
                     raw = resp.read().decode("utf-8", errors="replace")
                     conn.close()
+                    if (backend == "openai" and overflow_retries < 1 and
+                            _is_context_overflow_text(raw)):
+                        overflow_retries += 1
+                        before = context_tokens(messages, tools)
+                        messages = compact_for_context(
+                            api, upstream, messages,
+                            openai_model_context(api, upstream),
+                            output_budget, tools, force=True)
+                        if context_tokens(messages, tools) < before:
+                            continue
                     self._sse("error", {"error": f"{backend} {resp.status}：{raw[:500]}"})
                     return
                 parts = []
@@ -3240,12 +3588,17 @@ class Handler(BaseHTTPRequestHandler):
                     if turn_usage_missing:
                         usage["cache_hit"] = None
                     done["usage"] = usage
+                    totals = update_session_usage(session_id, turn_usage, "agent")
+                    if totals:
+                        done["session_usage"] = totals
                 if session_id:
                     history_messages = list(messages)
                     if text:
                         history_messages.append({"role": "assistant",
                                                  "content": text})
-                    save_session_model_history(session_id, history_messages)
+                    save_session_model_history(
+                        session_id, history_messages,
+                        {"last_time_context": time_context_at})
                 self._sse("done", done)
                 return
         except (BrokenPipeError, ConnectionResetError, OSError):

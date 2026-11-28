@@ -178,8 +178,8 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/openai/detect` | 启动时检测全部已保存 API 的 `/models`，结果写入 `.cache/openai_status.json` |
 | POST | `/api/openai/test` | 只检测当前选中的 API（草稿也可）；已保存配置同时更新状态并返回模型/思考能力 |
 | POST | `/api/openai/model` | 保存单个模型的手工能力覆盖（上下文、输出、工具、输入类型、思考档位） |
-| GET | `/api/sessions` | 会话列表；`?id=` 返回单个会话，`?kind=chat\|agent&workspace=` 过滤 |
-| POST | `/api/sessions` | 保存会话（历史、模型、MCP、工具、思考等级、Agent 工作区） |
+| GET | `/api/sessions` | 会话列表；`?id=` 返回单个会话；`?id=&history_page=1&history_limit=20&history_before=<n>` 只返回最近一段历史及 `history_total` / `history_start` / `history_has_more` / 用户轮次 `history_outline`；`?kind=chat\|agent&workspace=` 过滤 |
+| POST | `/api/sessions` | 保存会话（历史、模型、MCP、工具、思考等级、Agent 工作区）；带 `history_start` 时与旧历史前缀合并，支持懒加载分页 |
 | POST | `/api/sessions/delete` | 删除会话 |
 | POST | `/api/sessions/rename` | 会话改名 |
 | POST | `/api/sessions/move` | 把 Agent 会话移动到另一个工作区 |
@@ -190,7 +190,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/mcp/restart` | 手动重连指定 MCP 服务器并刷新工具列表 |
 | GET | `/api/agent/configs` | Agent 可用的工具模型 + MCP 服务器 + 检测结果 |
 | GET | `/api/agent/tools?server=<id>` | 获取某个 MCP 服务器的工具（供 Agent 多选） |
-| POST | `/api/agent/chat` | Agent 工具循环，SSE：`context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error`；API 模型的 `done.usage` 带缓存计数 |
+| POST | `/api/agent/chat` | Agent 工具循环，SSE：`context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error`；API 模型的 `done.usage`/`done.session_usage` 带本轮和会话累计统计，`compact=true` 时手动压缩 |
 | GET | `/api/corpora` | `res\` 下的语料目录（文件数、体积） |
 | GET | `/api/train/status` `train/log` | 训练状态与增量日志 |
 | GET | `/api/server/status` | 桥接服务状态与端口 |
@@ -198,7 +198,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/config/save` | 逐行改 value 保存（保注释与键顺序），先备份 |
 | POST | `/api/env/install` | 用项目 Python 安装 torch / numpy / transformers；`torch_type=cpu|gpu|xpu|auto`，`torch_version` / `numpy_version` / `transformers_version` 可留空；兼容旧 `torch_index=cpu|cu126|cu128|xpu|auto`；输出走 `env-log` |
 | POST | `/api/train/start` `train/stop` | 启动 / 停止训练子进程 |
-| POST | `/api/chat` | 对话，返回 SSE：`context` / `meta` / `reasoning` / `token` / `done` / `error`；API 模型的 `done.usage` 带缓存计数 |
+| POST | `/api/chat` | 对话，返回 SSE：`context` / `meta` / `reasoning` / `token` / `done` / `error`；API 模型的 `done.usage`/`done.session_usage` 带本轮和会话累计统计 |
 | POST | `/api/server/start` `server/stop` | 启停桥接服务 |
 | POST | `/api/sign` | `mode=compute|verify`，跑签名工具 |
 
@@ -277,15 +277,20 @@ Ollama 配置的聊天超时为 600 秒，其他供应商为 300 秒；Ollama �
 
 API 页点击模型行可手工覆盖上述字段，保存在 `.cache/openai_model_overrides.json`，
 自动检测不会覆盖手工值。上下文上限从 `/models` 的 `context_length` / `context_window` /
-`max_model_len` 等字段读取。API 请求会按上下文预留输出空间后压缩历史：先摘要旧历史，
-失败时退回按工具调用组裁剪；`tool_calls` / `tool_result` 必须成对保留。
+`max_model_len` 等字段读取。API 请求会按上下文预留输出空间后压缩历史：使用 DSH 风格
+80% 阈值和 16% 近期保留预算，把旧历史替换为检查点摘要；摘要请求复用原 system prompt、
+tools 和旧消息前缀，压缩指令追加在末尾，尽量复用 provider 热前缀。压缩前会修剪超大工具
+结果；摘要失败时退回按工具调用组裁剪，`tool_calls` / `tool_result` 必须成对保留。上下文
+溢出错误会强制压缩并重试一次。Agent 输入框支持 `/compact` 手动压缩当前会话。
 Agent 的 `max_tokens` 默认 256K（有模型输出字段时用模型值，并受上下文限制），它不是上下文上限；
 单轮输出上限和上下文窗口分开计算。Chat / Agent 输入框下方显示按字符数估算的上下文占用率；
 图片按固定视觉 token 估算，不按 base64 字符数计费。API 模型完成一轮后显示 provider 上报的
-prompt cache 命中率，公式为缓存读 /（未缓存输入 + 缓存读 + 缓存写）；兼容 DeepSeek
+本轮和会话累计 token（输入、输出、缓存命中/未命中）及命中率，公式为
+缓存读 /（未缓存输入 + 缓存读 + 缓存写）；兼容 DeepSeek
 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` 和 OpenAI
 `prompt_tokens_details.cached_tokens`，Agent 多步按 token 加权；无缓存字段显示“—”，
-本地模型和没有缓存统计的 Ollama 不显示。流式请求对非 Ollama API 尝试
+本地模型和没有缓存统计的 Ollama 不显示。会话累计写入会话 JSON 的 `usage_totals`，重新
+打开会话后仍保留。流式请求对非 Ollama API 尝试
 `stream_options.include_usage`，代理不支持时自动去掉重试一次。
 
 **MCP / Agent**：`mcp_client.py` 只用标准库实现 STDIO（一行一个 JSON）和 Streamable HTTP
@@ -319,12 +324,19 @@ Agent 允许 `tool_use` 为 `native` 或 `unknown` 的 API 模型，只隐藏明
 绝对路径；Agent 左侧是「工作区 → 会话」树，每个工作区下只显示自己的会话，一个工作区可保存
 多个会话。新建 Agent 会话默认使用当前工作区，未指定时使用默认工作区。会话保存时记录
 `workspace_id`；同时保存完整的 `model_history`（含 system、tool_calls、tool 结果和最终回答），
-下一轮请求以它为前缀追加新用户消息，避免丢失工具消息导致 prompt cache 中断。
+下一轮请求以它为前缀追加新用户消息，避免丢失工具消息导致 prompt cache 中断。首次请求把
+工作区绝对路径、系统时间/时区和根目录 `AGENTS.md` / `CLAUDE.md` 作为追加的 user 上下文；
+之后每 10 分钟最多追加一次时钟快照。system prompt 包含按名称稳定排序的工具指导。
 Agent 调用 MCP 工具时以**会话所属工作区**的绝对路径优先，而不是页面临时选择。
 工作区路径选择通过 `/api/workspaces/pick` 调用本机原生目录窗口。会话支持改名、删除和
 移动工作区（`/api/sessions/move`），移动后每次 MCP 调用仍读取会话当前 `workspace_id`；
 每轮结束自动保存；恢复时恢复历史、模型、MCP、工具和思考选择。Chat / Agent 侧边栏支持收起，
 并可拖动右边缘调整宽度，状态保存在浏览器 localStorage。未完成的模型/工具轮次不自动重放。
+Chat / Agent 的多个会话可并行执行：前端按会话保存独立的 DOM、历史、usage、上下文和
+AbortController，切换会话不中止后台流；同一会话只允许一个生成任务，停止按钮只停止当前会话。
+会话打开时默认滚到最新消息，只加载最近 20 条；滚动到顶部按 `history_before` 懒加载更早页面，
+保存时用 `history_start` 合并旧前缀。右侧用户轮次刻度条可跳转，目标未加载时先补页。
+用户消息在发送时写入 `ts`（本地完整时间），会话 JSON 持久化；发给模型前由后端剥离界面字段。
 模型 `input_modalities` 含 `image` 时输入栏显示【图片】，最多 4 张、单张 6MB；图片以 OpenAI
 兼容 `image_url` 内容块发送，本地字符级模型拒绝。图片 token 按固定视觉 token 估算，不按
 base64 字符数计费。

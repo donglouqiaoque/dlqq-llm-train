@@ -139,6 +139,8 @@
   .sessionrow.on, .wsrow.on { background:#1b2a3e; }
   .sessionrow .t, .wsrow .t { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
                               white-space:nowrap; font-size:12px; }
+  .sessionrow.running .t::after { content:" ●"; color:var(--accent); font-size:9px;
+                                  animation:blink 1s steps(1) infinite; }
   .sessionrow .acts, .wsrow .acts { display:none; gap:1px; }
   .sessionrow:hover .acts, .sessionrow.on .acts,
   .wsrow:hover .acts, .wsrow.on .acts { display:flex; }
@@ -151,7 +153,25 @@
   .wsnew { color:var(--muted); font-size:12px; padding:3px 6px; }
   .sidemeta { margin-top:auto; color:var(--muted); font-size:12px; line-height:1.8;
               word-break:break-all; }
-  .chatmain { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
+  .chatmain { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column;
+              position:relative; }
+  .conversation-rail { position:absolute; right:2px; width:16px; z-index:6;
+                       pointer-events:auto; overflow:hidden; }
+  .conversation-mark { position:absolute; right:0; width:14px; height:7px; padding:0;
+                       border:0; background:transparent; cursor:pointer;
+                       transform:translateY(-50%); }
+  .conversation-mark::before { content:""; position:absolute; right:1px; top:50%;
+                               width:8px; height:2px; border-radius:2px;
+                               background:#43546d; transform:translateY(-50%);
+                               transition:width .12s ease, background-color .12s ease; }
+  .conversation-mark:hover::before, .conversation-mark.on::before {
+    width:14px; background:var(--accent);
+  }
+  #chat .msgs, #agent .msgs { padding-right:18px; }
+  .history-more { display:block; margin:4px auto 12px; padding:4px 12px; border-radius:999px;
+                  border:1px solid #33465e; background:#121b28; color:var(--muted);
+                  font-size:11px; cursor:pointer; }
+  .history-more:hover { color:var(--fg); border-color:#4d6d91; }
   .msgs { flex:1; min-height:0; overflow:auto; padding:2px 2px 10px;
           scrollbar-width:thin; scrollbar-color:#43546d transparent; }
   .msgs::-webkit-scrollbar { width:8px; }
@@ -212,7 +232,7 @@
   .ctxmeter.err { color:var(--err); }
   .ctxmeter.err .ctxbar i { background:var(--err); }
   .ctxmeter .cachestat { color:#9db8dd; border-left:1px solid #33465e;
-                          padding-left:8px; cursor:help; white-space:nowrap; }
+                          padding-left:8px; cursor:help; white-space:normal; }
   .ctxmeter .cachestat b { color:#d7e5ff; font-weight:600; }
   .spacer { flex:1; }
   .subtabs { display:flex; align-items:center; gap:6px; margin:2px 0 8px; }
@@ -1179,6 +1199,14 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.remove('on'));
   document.querySelectorAll('section').forEach(x => x.classList.remove('on'));
   b.classList.add('on'); $('#' + b.dataset.tab).classList.add('on');
+  if (b.dataset.tab === 'chat' || b.dataset.tab === 'agent') {
+    const kind = b.dataset.tab;
+    requestAnimationFrame(() => {
+      positionConversationRail(kind);
+      renderConversationRail(kind);
+      scrollConversationToBottom(kind);
+    });
+  }
 });
 
 let CONFIGS = [];
@@ -1207,9 +1235,15 @@ let AGENT_TOOLS = [];
 let AGENT_SELECTED_TOOLS = new Set();
 let AGENT_HISTORY = [];
 let AGENT_ABORT = null;
+const AGENT_STATES = new Map();
 let AGENT_CONTEXT_DATA = null;
 let CHAT_USAGE = null;
 let AGENT_USAGE = null;
+let CHAT_SESSION_USAGE = null;
+let AGENT_SESSION_USAGE = null;
+const CHAT_STATES = new Map();
+const HISTORY_PAGE = 20;
+let HISTORY_RENDER_LOCK = false;
 // 配置文件第一行常是 "# ====" 这种装饰线，不能拿来当说明
 function cleanDesc(desc) {
   const d = (desc || '').trim();
@@ -1388,6 +1422,8 @@ function renderChatSessions() {
   list.forEach(s => {
     const row = el('div', 'sessionrow');
     row.title = s.title || '新会话';
+    const chatState = CHAT_STATES.get(s.id);
+    if (chatState && chatState.running) row.classList.add('running');
     if (s.id === CURRENT_CHAT_SESSION) row.classList.add('on');
     const t = el('span', 't', s.title || '新会话');
     row.appendChild(t);
@@ -1454,6 +1490,8 @@ function renderAgentWorkspaces() {
       list.forEach(s => {
         const sr = el('div', 'sessionrow child');
         sr.title = s.title || '新会话';
+        const runState = AGENT_STATES.get(s.id);
+        if (runState && runState.running) sr.classList.add('running');
         if (s.id === CURRENT_AGENT_SESSION) sr.classList.add('on');
         sr.appendChild(el('span', 't', s.title || '新会话'));
         const sacts = el('span', 'acts');
@@ -1518,58 +1556,83 @@ async function loadSessions() {
 
 async function openSession(kind, id) {
   if (!id) return;
-  if ((kind === 'chat' && chatAbort) || (kind === 'agent' && AGENT_ABORT)) {
-    toast('请先停止当前生成再切换会话');
-    renderSessionLists();
-    return;
+  if (kind === 'agent') {
+    const existing = AGENT_STATES.get(id);
+    if (existing && existing.loaded) {
+      agentShowState(existing);
+      return;
+    }
+  } else {
+    const existing = CHAT_STATES.get(id);
+    if (existing && existing.loaded) {
+      chatShowState(existing);
+      return;
+    }
   }
   SESSION_LOADING = true;
   try {
-    const r = await api('sessions?id=' + encodeURIComponent(id));
+    const r = await api('sessions?id=' + encodeURIComponent(id) +
+      `&history_page=1&history_limit=${HISTORY_PAGE}`);
     if (!r.ok || !r.session) return;
     const data = r.session;
     WORKSPACES = r.workspaces || WORKSPACES;
     if (kind === 'chat') {
-      CURRENT_CHAT_SESSION = data.id || '';
-      CHAT_USAGE = null;
-      HISTORY.length = 0;
-      $('#chatBox').innerHTML = '';
-      (data.history || []).forEach(m => {
-        if (!m || (m.role !== 'user' && m.role !== 'assistant')) return;
-        HISTORY.push({ role: m.role, content: m.content || '' });
-        renderMsg(m.role, m.content || '');
-      });
+      const state = chatEnsureState(data.id || newSessionId());
+      state.id = data.id || state.id;
+      state.loaded = true;
+      state.title = data.title || '';
+      state.history = data.history || [];
+      state.historyStart = r.history_start ?? 0;
+      state.historyTotal = r.history_total ?? state.history.length;
+      state.historyHasMore = !!r.history_has_more;
+      state.historyOutline = r.history_outline || [];
+      state.contextData = null;
+      state.usage = null;
+      state.sessionUsage = data.usage_totals || null;
+      state.config = data.config || '';
+      state.thinking = data.thinking || 'off';
+      state.root = el('div', 'chat-view');
+      CURRENT_CHAT_SESSION = state.id;
+      chatAttachState(state);
+      chatSyncState(state);
+      renderChatHistory(state);
       fillSessionSelect('chat', data.id);
       $('#chatSessionTitle').textContent = data.title || '';
       if (data.config && [...$('#chatConfig').options].some(o => o.value === data.config)) {
         $('#chatConfig').value = data.config;
         updateChatBackend();
       }
+      chatSyncState(state);
+      chatRefreshControls(state);
       updateChatContextMeter();
+      renderConversationRail('chat');
+      scrollConversationToBottom('chat');
     } else {
-      CURRENT_AGENT_SESSION = data.id || '';
-      AGENT_USAGE = null;
-      if (data.workspace_id && WORKSPACES.some(w => w.id === data.workspace_id)) {
-        CURRENT_AGENT_WORKSPACE = data.workspace_id;
+      const state = agentEnsureState(data.id || newSessionId());
+      state.id = data.id || state.id;
+      state.loaded = true;
+      state.title = data.title || '';
+      state.usage = null;
+      state.sessionUsage = data.usage_totals || null;
+      state.workspaceId = data.workspace_id || CURRENT_AGENT_WORKSPACE;
+      state.model = data.model || '';
+      state.server = data.server || '';
+      state.thinking = data.thinking || 'off';
+      state.tools = Array.isArray(data.tools) ? data.tools.slice() : [];
+      state.history = data.history || [];
+      state.historyStart = r.history_start ?? 0;
+      state.historyTotal = r.history_total ?? state.history.length;
+      state.historyHasMore = !!r.history_has_more;
+      state.historyOutline = r.history_outline || [];
+      state.contextData = null;
+      state.root = el('div', 'agent-view');
+      CURRENT_AGENT_SESSION = state.id;
+      if (state.workspaceId && WORKSPACES.some(w => w.id === state.workspaceId)) {
+        CURRENT_AGENT_WORKSPACE = state.workspaceId;
       }
-      AGENT_HISTORY = [];
-      $('#agentBox').innerHTML = '';
-      (data.history || []).forEach(m => {
-        if (!m || (m.role !== 'user' && m.role !== 'assistant')) return;
-        AGENT_HISTORY.push({ role: m.role, content: m.content || '' });
-        if (m.role === 'assistant') {
-          const out = agentMsg('assistant', '');
-          const a = agentEnsureAnswer(out);
-          a.raw = m.content || '';
-          a.body.dataset.raw = a.raw;
-          if (typeof renderMarkdown === 'function') renderMarkdown(a.body, a.raw);
-          else a.body.textContent = a.raw;
-          out.turn.classList.remove('running');
-          out.title.textContent = '已完成';
-        } else {
-          agentMsg('user', m.content || '');
-        }
-      });
+      agentAttachState(state);
+      agentSyncState(state);
+      renderAgentHistory(state);
       fillSessionSelect('agent', data.id);
       $('#agentSessionTitle').textContent = data.title || '';
       if (data.model) $('#agentModel').value = data.model;
@@ -1581,6 +1644,11 @@ async function openSession(kind, id) {
         AGENT_SELECTED_TOOLS = new Set(data.tools);
         renderAgentTools();
       }
+      agentSyncState(state);
+      agentRefreshControls(state);
+      updateAgentContextMeter();
+      renderConversationRail('agent');
+      scrollConversationToBottom('agent');
     }
     renderSessionLists();
   } finally {
@@ -1590,7 +1658,6 @@ async function openSession(kind, id) {
 
 async function setAgentWorkspace(wid) {
   if (!wid || wid === CURRENT_AGENT_WORKSPACE) return;
-  if (AGENT_ABORT) return toast('请先停止当前生成再切换工作区');
   CURRENT_AGENT_WORKSPACE = wid;
   AGENT_COLLAPSED.delete(wid);
   CURRENT_AGENT_SESSION = '';
@@ -1697,7 +1764,6 @@ async function renameSession(id) {
 }
 
 async function moveSession(s) {
-  if (AGENT_ABORT) return toast('请先停止当前生成再移动会话');
   if (!s || s.kind !== 'agent') return;
   const options = WORKSPACES.map(w => ({
     value: w.id,
@@ -1725,6 +1791,8 @@ async function moveSession(s) {
     if (CURRENT_AGENT_SESSION === s.id) {
       CURRENT_AGENT_WORKSPACE = wid;
     }
+    const movedState = AGENT_STATES.get(s.id);
+    if (movedState) movedState.workspaceId = wid;
     renderSessionLists();
     toast('会话已移动');
   } catch (e) {
@@ -1735,6 +1803,18 @@ async function moveSession(s) {
 async function deleteSession(id) {
   if (!id) return;
   if (!confirm('删除这个会话？')) return;
+  const runState = AGENT_STATES.get(id);
+  if (runState) {
+    runState.deleted = true;
+    if (runState.abort) runState.abort.abort();
+    AGENT_STATES.delete(id);
+  }
+  const chatState = CHAT_STATES.get(id);
+  if (chatState) {
+    chatState.deleted = true;
+    if (chatState.abort) chatState.abort.abort();
+    CHAT_STATES.delete(id);
+  }
   try {
     const r = await api('sessions/delete', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1808,18 +1888,31 @@ async function deleteCurrentSession(kind) {
 }
 
 function newChatSession() {
-  HISTORY.length = 0;
-  CHAT_CONTEXT_DATA = null;
-  CHAT_USAGE = null;
   CHAT_IMAGES = [];
   renderImagePreviews('chat');
-  CURRENT_CHAT_SESSION = '';
-  $('#chatBox').innerHTML = '';
-  emptyHint();
+  const state = chatEnsureState(newSessionId());
+  state.loaded = true;
+  state.title = '';
+  state.history = [];
+  state.contextData = null;
+  state.usage = null;
+  state.sessionUsage = null;
+  state.abort = null;
+  state.running = false;
+  state.config = $('#chatConfig').value;
+  state.thinking = ($('#chatThinking') && $('#chatThinking').value) || 'off';
+  state.root = el('div', 'chat-view');
+  state.root.innerHTML = '<div class="empty">选择对话模型后开始对话</div>';
+  CURRENT_CHAT_SESSION = state.id;
+  chatAttachState(state);
+  chatSyncState(state);
   fillSessionSelect('chat', '');
   $('#chatSessionTitle').textContent = '';
   renderChatSessions();
+  chatRefreshControls(state);
   updateChatContextMeter();
+  renderConversationRail('chat');
+  scrollConversationToBottom('chat');
 }
 
 function modelHasImages(kind) {
@@ -2352,13 +2445,21 @@ async function detectCurrentApi() {
   }
 }
 
-function agentMsg(role, text) {
+function agentMsg(role, text, ts, historyIndex) {
   const parts = contentParts(text);
   text = parts.text;
-  const box = $('#agentBox');
+  const state = AGENT_STATES.get(CURRENT_AGENT_SESSION);
+  const box = state ? agentStateRoot(state) : $('#agentBox');
+  if (state && CURRENT_AGENT_SESSION === state.id) {
+    const host = $('#agentBox');
+    if (box.parentNode !== host) host.replaceChildren(box);
+  }
   const empty = box.querySelector('.empty');
   if (empty) empty.remove();
   const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot agent-msg'));
+  if (historyIndex !== undefined && historyIndex !== null) {
+    wrap.dataset.historyIndex = String(historyIndex);
+  }
   wrap.appendChild(el('div', 'avatar', role === 'user' ? '你' : 'AI'));
   let body = null;
   let bubble = null;
@@ -2371,6 +2472,9 @@ function agentMsg(role, text) {
     body = el('div', 'body', text || '');
     appendMessageImages(body, parts.images);
     bubble.appendChild(body);
+    const umeta = el('div', 'meta');
+    umeta.appendChild(el('span', '', ts || nowStamp()));
+    bubble.appendChild(umeta);
     wrap.appendChild(bubble);
   } else {
     turn = el('div', 'agent-turn collapsed');
@@ -2394,7 +2498,7 @@ function agentMsg(role, text) {
     wrap.appendChild(turn);
   }
   box.appendChild(wrap);
-  box.scrollTop = box.scrollHeight;
+  $('#agentBox').scrollTop = $('#agentBox').scrollHeight;
   return { body, bubble, turn, title, meta, flow, answers: [], startedAt: Date.now() };
 }
 
@@ -2480,6 +2584,134 @@ function agentScrollIf(stick) {
   if (!stick) return;
   const box = $('#agentBox');
   box.scrollTop = box.scrollHeight;
+}
+
+function mergeSessionList(list) {
+  if (!Array.isArray(list)) return;
+  const byId = new Map((SESSIONS || []).map(s => [s.id, s]));
+  list.forEach(s => { if (s && s.id) byId.set(s.id, s); });
+  SESSIONS = [...byId.values()].sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+}
+
+function agentEnsureState(id) {
+  if (!id) return null;
+  let state = AGENT_STATES.get(id);
+  if (!state) {
+    state = {
+      id, history: [], contextData: null, usage: null, sessionUsage: null,
+      root: null, abort: null, running: false, loaded: false, status: '',
+      workspaceId: '', model: '', server: '', tools: [], thinking: 'off',
+      historyStart: 0, historyTotal: 0, historyHasMore: false,
+      historyOutline: [], historyLoading: false, needsRender: false,
+    };
+    AGENT_STATES.set(id, state);
+  }
+  return state;
+}
+
+function agentStateRoot(state) {
+  if (!state.root) state.root = el('div', 'agent-view');
+  return state.root;
+}
+
+function agentSyncState(state) {
+  if (!state) return;
+  AGENT_HISTORY = state.history;
+  AGENT_CONTEXT_DATA = state.contextData;
+  AGENT_USAGE = state.usage;
+  AGENT_SESSION_USAGE = state.sessionUsage;
+  AGENT_ABORT = state.abort;
+}
+
+function agentAttachState(state) {
+  if (!state) return;
+  const host = $('#agentBox');
+  host.replaceChildren(agentStateRoot(state));
+}
+
+function agentSetStatus(state, text) {
+  state.status = text || '';
+  if (CURRENT_AGENT_SESSION === state.id) $('#agentState').textContent = state.status;
+}
+
+function agentRefreshControls(state) {
+  if (!state || CURRENT_AGENT_SESSION !== state.id) return;
+  $('#btnAgentSend').disabled = !!state.running;
+  $('#btnAgentStop').disabled = !state.running;
+  $('#agentState').textContent = state.status || '';
+}
+
+function agentApplyStateOptions(state) {
+  if (state.model && [...$('#agentModel').options].some(o => o.value === state.model)) {
+    $('#agentModel').value = state.model;
+  }
+  if (state.server && [...$('#agentMcp').options].some(o => o.value === state.server)) {
+    $('#agentMcp').value = state.server;
+  }
+  if (state.thinking) $('#agentThinking').value = state.thinking;
+  AGENT_SELECTED_TOOLS = new Set(state.tools || []);
+  updateAgentThinking();
+  agentSyncState(state);
+  if (state.server) loadAgentTools(state.server).then(() => {
+    if (CURRENT_AGENT_SESSION !== state.id) return;
+    if (state.tools && state.tools.length) {
+      AGENT_SELECTED_TOOLS = new Set(state.tools);
+      renderAgentTools();
+    }
+  }).catch(() => {});
+}
+
+async function saveAgentState(state) {
+  if (!state || !state.id || !state.history.length || state.deleted) return;
+  try {
+    const r = await api('sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: state.id,
+        kind: 'agent',
+        workspace_id: state.workspaceId || CURRENT_AGENT_WORKSPACE,
+        history: state.history,
+        history_start: state.historyStart,
+        model: state.model || '',
+        server: state.server || '',
+        tools: state.tools || [],
+        thinking: state.thinking || 'off',
+      }),
+    });
+    if (r.sessions) mergeSessionList(r.sessions);
+    if (r.workspaces) WORKSPACES = r.workspaces;
+    if (r.session && r.session.title) state.title = r.session.title;
+    if (CURRENT_AGENT_SESSION === state.id && state.title) {
+      $('#agentSessionTitle').textContent = state.title;
+    }
+  } catch (e) {
+    /* 后台会话保存失败不应影响其他正在运行的会话 */
+  }
+  renderAgentWorkspaces();
+}
+
+function agentShowState(state) {
+  if (!state) return;
+  CURRENT_AGENT_SESSION = state.id;
+  if (state.workspaceId) CURRENT_AGENT_WORKSPACE = state.workspaceId;
+  const meta = SESSIONS.find(s => s.id === state.id);
+  if (meta && meta.title) state.title = meta.title;
+  agentAttachState(state);
+  agentSyncState(state);
+  if (!state.running && state.needsRender) {
+    renderAgentHistory(state);
+    state.needsRender = false;
+  }
+  fillSessionSelect('agent', state.id);
+  $('#agentSessionTitle').textContent = state.title || '';
+  agentApplyStateOptions(state);
+  agentRefreshControls(state);
+  updateAgentContextMeter();
+  const box = $('#agentBox');
+  box.scrollTop = box.scrollHeight;
+  renderAgentWorkspaces();
+  renderConversationRail('agent');
+  scrollConversationToBottom('agent');
 }
 
 function agentDuration(ms) {
@@ -2597,77 +2829,178 @@ async function loadAgentConfigs() {
 }
 
 function agentNewChat(wid) {
-  if (AGENT_ABORT) AGENT_ABORT.abort();
-  AGENT_ABORT = null;
   if (typeof wid === 'string' && wid) CURRENT_AGENT_WORKSPACE = wid;
   if (!CURRENT_AGENT_WORKSPACE) CURRENT_AGENT_WORKSPACE = DEFAULT_WORKSPACE_ID;
   if (CURRENT_AGENT_WORKSPACE) AGENT_COLLAPSED.delete(CURRENT_AGENT_WORKSPACE);
-  AGENT_HISTORY = [];
-  AGENT_CONTEXT_DATA = null;
-  AGENT_USAGE = null;
   AGENT_IMAGES = [];
   renderImagePreviews('agent');
-  CURRENT_AGENT_SESSION = newSessionId();
+  const state = agentEnsureState(newSessionId());
+  state.loaded = true;
+  state.title = '';
+  state.history = [];
+  state.contextData = null;
+  state.usage = null;
+  state.sessionUsage = null;
+  state.abort = null;
+  state.running = false;
+  state.status = '';
+  state.workspaceId = CURRENT_AGENT_WORKSPACE;
+  state.model = $('#agentModel').value;
+  state.server = $('#agentMcp').value;
+  state.thinking = ($('#agentThinking') && $('#agentThinking').value) || 'off';
+  state.tools = [...AGENT_SELECTED_TOOLS];
+  state.root = el('div', 'agent-view');
+  state.root.innerHTML = '<div class="empty">选择支持工具调用的模型和 MCP 服务器</div>';
+  CURRENT_AGENT_SESSION = state.id;
+  agentAttachState(state);
+  agentSyncState(state);
   fillSessionSelect('agent', '');
   $('#agentSessionTitle').textContent = '';
-  $('#agentBox').innerHTML = '<div class="empty">选择支持工具调用的模型和 MCP 服务器</div>';
   $('#agentState').textContent = '';
+  agentRefreshControls(state);
   renderAgentSessions();
   updateAgentContextMeter();
+  renderConversationRail('agent');
+  scrollConversationToBottom('agent');
+}
+
+async function agentCompact() {
+  if (!CURRENT_AGENT_SESSION) return toast('当前会话还没有可压缩的历史');
+  const state = agentEnsureState(CURRENT_AGENT_SESSION);
+  if (state && state.running) return toast('该会话正在执行，请先停止');
+  const model = $('#agentModel').value;
+  const server = $('#agentMcp').value;
+  if (!model) return toast('请先选择模型');
+  $('#btnAgentSend').disabled = true;
+  $('#agentState').textContent = '正在压缩上下文…';
+  try {
+    const resp = await fetch(`/api/agent/chat?t=${TOKEN}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model, server, compact: true,
+        messages: [{ role: 'user', content: '/compact' }],
+        session_id: CURRENT_AGENT_SESSION,
+        workspace_id: CURRENT_AGENT_WORKSPACE,
+        thinking: ($('#agentThinking') && $('#agentThinking').value) || 'off',
+        tools: [...AGENT_SELECTED_TOOLS],
+      }),
+    });
+    if (!resp.ok) return toast('压缩失败：' + (await resp.text()));
+    const raw = await resp.text();
+    let compacted = null;
+    raw.split('\n\n').forEach(chunk => {
+      const m = /event: (\w+)\ndata: ([\s\S]*)/.exec(chunk);
+      if (!m) return;
+      try {
+        const data = JSON.parse(m[2]);
+        if (m[1] === 'context') {
+          AGENT_CONTEXT_DATA = data;
+          if (state) state.contextData = data;
+          updateAgentContextMeter();
+        } else if (m[1] === 'done' && data.compacted) {
+          compacted = data.compacted;
+        } else if (m[1] === 'error') {
+          toast(data.error || '压缩失败');
+        }
+      } catch (e) {}
+    });
+    if (compacted) {
+      toast(`上下文已压缩：${usageTokenLabel(compacted.before)} → ` +
+            `${usageTokenLabel(compacted.after)} tokens`);
+    }
+  } catch (e) {
+    toast('压缩失败：' + e.message);
+  } finally {
+    if (CURRENT_AGENT_SESSION && AGENT_STATES.has(CURRENT_AGENT_SESSION)) {
+      agentRefreshControls(AGENT_STATES.get(CURRENT_AGENT_SESSION));
+    } else {
+      $('#btnAgentSend').disabled = false;
+    }
+    $('#agentState').textContent = '';
+    updateAgentContextMeter();
+  }
 }
 
 async function agentSend() {
-  if (AGENT_ABORT) return;
   const text = $('#agentInput').value.trim();
   const model = $('#agentModel').value;
   const server = $('#agentMcp').value;
   if (!text && !AGENT_IMAGES.length) return;
+  if (text === '/compact' && !AGENT_IMAGES.length) {
+    $('#agentInput').value = '';
+    $('#agentInput').style.height = 'auto';
+    return agentCompact();
+  }
   if (!model) return toast('请先选择模型');
   if (!CURRENT_AGENT_SESSION) CURRENT_AGENT_SESSION = newSessionId();
+  const state = agentEnsureState(CURRENT_AGENT_SESSION);
+  if (!state) return;
+  if (state.running) return toast('该会话正在执行，请先停止');
   if (AGENT_IMAGES.length && !modelHasImages('agent')) {
     return toast('当前模型未声明图片输入');
   }
-  AGENT_CONTEXT_DATA = null;
-  AGENT_USAGE = null;
+  state.loaded = true;
+  state.contextData = null;
+  state.usage = null;
+  state.workspaceId = CURRENT_AGENT_WORKSPACE;
+  state.model = model;
+  state.server = server;
+  state.thinking = ($('#agentThinking') && $('#agentThinking').value) || 'off';
+  state.tools = [...AGENT_SELECTED_TOOLS];
+  state.status = '运行中…';
+  agentSyncState(state);
   $('#agentInput').value = '';
   $('#agentInput').style.height = 'auto';
   const userContent = userMessageContent(text, 'agent');
-  AGENT_HISTORY.push({ role: 'user', content: userContent });
-  agentMsg('user', userContent);
+  const userTs = nowStamp();
+  const userIndex = state.historyStart + state.history.length;
+  state.history.push({ role: 'user', content: userContent, ts: userTs });
+  state.historyTotal = Math.max(state.historyTotal, userIndex + 1);
+  state.historyOutline = (state.historyOutline || []).concat([{
+    index: userIndex, ts: userTs,
+    prompt: text.slice(0, 80),
+  }]);
+  agentMsg('user', userContent, userTs, userIndex);
   clearImages('agent');
   updateAgentContextMeter();
+  renderConversationRail('agent');
   const out = agentMsg('assistant', '');
   out.turn.classList.add('running');
   out.title.textContent = '运行中 · 0 秒';
+  const sid = state.id;
+  const isActive = () => CURRENT_AGENT_SESSION === sid;
   const turnTimer = setInterval(() => {
-    if (!AGENT_ABORT) return;
+    if (!state.abort) return;
     out.title.textContent = `运行中 · ${agentDuration(Date.now() - out.startedAt)}`;
   }, 1000);
-  $('#btnAgentSend').disabled = true;
-  $('#btnAgentStop').disabled = false;
-  $('#agentState').textContent = '运行中…';
-  AGENT_ABORT = new AbortController();
+  state.running = true;
+  state.abort = new AbortController();
+  AGENT_ABORT = state.abort;
+  agentSetStatus(state, '运行中…');
+  agentRefreshControls(state);
+  renderAgentSessions();
   let acc = '';
   const cards = [];
   let activeTool = '';
   let lastEventAt = Date.now();
   const idleTimer = setInterval(() => {
-    if (!AGENT_ABORT) return;
+    if (!state.abort) return;
     if (activeTool) {
-      $('#agentState').textContent = `正在调用 ${activeTool}…`;
+      agentSetStatus(state, `正在调用 ${activeTool}…`);
     } else if (Date.now() - lastEventAt > 1200) {
-      $('#agentState').textContent = '模型正在生成工具调用参数…';
+      agentSetStatus(state, '模型正在生成工具调用参数…');
     }
   }, 400);
   try {
     const resp = await fetch(`/api/agent/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, server, messages: AGENT_HISTORY,
-                             workspace_id: CURRENT_AGENT_WORKSPACE,
-                             session_id: CURRENT_AGENT_SESSION,
-                             thinking: ($('#agentThinking') && $('#agentThinking').value) || 'off',
-                             tools: [...AGENT_SELECTED_TOOLS] }),
-      signal: AGENT_ABORT.signal,
+      body: JSON.stringify({ model, server, messages: state.history,
+                             history_start: state.historyStart,
+                             workspace_id: state.workspaceId,
+                             session_id: sid,
+                             thinking: state.thinking,
+                             tools: state.tools }),
+      signal: state.abort.signal,
     });
     if (!resp.ok) {
       out.failed = true;
@@ -2696,19 +3029,23 @@ async function agentSend() {
         } else if (ev[1] === 'tool_result') {
           activeTool = '';
         }
-        const stick = agentAtBottom();
+        const active = isActive();
+        const stick = active ? agentAtBottom() : false;
         if (ev[1] === 'meta') {
           out.meta.textContent = `${data.server} · ${data.tools} 个工具`;
-          $('#agentState').textContent = `${data.server} · ${data.tools} 个工具`;
+          if (active) agentSetStatus(state, `${data.server} · ${data.tools} 个工具`);
         } else if (ev[1] === 'context') {
-          AGENT_CONTEXT_DATA = data;
-          updateAgentContextMeter();
+          state.contextData = data;
+          if (active) {
+            agentSyncState(state);
+            updateAgentContextMeter();
+          }
         } else if (ev[1] === 'reasoning') {
           const think = agentEnsureThink(out);
           agentThinkText(think).textContent += data.text || '';
           agentScrollIf(stick);
         } else if (ev[1] === 'tool_pending') {
-          $('#agentState').textContent = `准备调用 ${data.name}…`;
+          if (active) agentSetStatus(state, `准备调用 ${data.name}…`);
           let card = agentFindToolCard(cards, data);
           if (!card) {
             card = agentToolCard(data.name, {}, out, '准备中…', data.index);
@@ -2718,7 +3055,7 @@ async function agentSend() {
           }
           agentScrollIf(stick);
         } else if (ev[1] === 'tool') {
-          $('#agentState').textContent = `正在调用 ${data.name}…`;
+          if (active) agentSetStatus(state, `正在调用 ${data.name}…`);
           let card = agentFindToolCard(cards, data);
           if (!card) {
             card = agentToolCard(data.name, data.arguments, out, '执行中…', data.index);
@@ -2743,16 +3080,18 @@ async function agentSend() {
               agentToolStatus(card, '完成');
             }
           }
-          $('#agentState').textContent = data.is_error
-            ? `${data.name} 调用失败，继续生成…`
-            : `${data.name} 已完成，继续生成…`;
+          if (active) {
+            agentSetStatus(state, data.is_error
+              ? `${data.name} 调用失败，继续生成…`
+              : `${data.name} 已完成，继续生成…`);
+          }
           agentScrollIf(stick);
         } else if (ev[1] === 'token') {
           acc += data.text || '';
           const a = agentEnsureAnswer(out);
           a.raw += data.text || '';
           a.body.textContent = a.raw;
-          updateAgentContextMeter(acc);
+          if (active) updateAgentContextMeter(acc);
           agentScrollIf(stick);
         } else if (ev[1] === 'done') {
           acc = data.text || acc;
@@ -2764,8 +3103,12 @@ async function agentSend() {
             else seg.body.textContent = seg.raw;
           }
           if (data.usage) {
-            AGENT_USAGE = data.usage;
-            updateAgentContextMeter();
+            state.usage = data.usage;
+            if (data.session_usage) state.sessionUsage = data.session_usage;
+            if (active) {
+              agentSyncState(state);
+              updateAgentContextMeter();
+            }
           }
           agentScrollIf(stick);
         } else if (ev[1] === 'error') {
@@ -2777,8 +3120,10 @@ async function agentSend() {
         }
       }
     }
-    if (acc) AGENT_HISTORY.push({ role: 'assistant', content: acc });
-    updateAgentContextMeter();
+    if (acc) state.history.push({ role: 'assistant', content: acc, ts: nowStamp() });
+    state.historyTotal = Math.max(state.historyTotal,
+      state.historyStart + state.history.length);
+    if (isActive()) updateAgentContextMeter();
   } catch (e) {
     const last = out.answers[out.answers.length - 1];
     if (e.name === 'AbortError') {
@@ -2807,12 +3152,18 @@ async function agentSend() {
     else if (out.failed) out.title.textContent = `失败 · 用时 ${elapsed}`;
     else if (acc) out.title.textContent = `已完成 · 用时 ${elapsed}`;
     else out.title.textContent = `未完成 · 用时 ${elapsed}`;
-    updateAgentToolCount();
-    $('#btnAgentStop').disabled = true;
-    $('#agentState').textContent = acc ? '完成' : '未完成';
-    AGENT_ABORT = null;
-    updateAgentContextMeter();
-    await saveCurrentSession('agent');
+    state.running = false;
+    state.abort = null;
+    state.status = acc ? '完成' : '未完成';
+    if (isActive()) {
+      AGENT_ABORT = null;
+      agentSyncState(state);
+      agentRefreshControls(state);
+      updateAgentContextMeter();
+    }
+    renderAgentSessions();
+    renderConversationRail('agent');
+    await saveAgentState(state);
   }
 }
 
@@ -2887,23 +3238,51 @@ function usageTokenLabel(n) {
   return String(Math.round(n));
 }
 
-function cacheUsageHTML(usage) {
+function usageInputTokens(usage) {
+  if (!usage) return null;
+  if (typeof usage.prompt_tokens === 'number') return usage.prompt_tokens;
+  const uncached = typeof usage.uncached_input_tokens === 'number'
+    ? usage.uncached_input_tokens : 0;
+  const read = typeof usage.cache_read_tokens === 'number' ? usage.cache_read_tokens : 0;
+  const write = typeof usage.cache_write_tokens === 'number' ? usage.cache_write_tokens : 0;
+  if (uncached + read + write > 0) return uncached + read + write;
+  return null;
+}
+
+function usageHitText(usage) {
+  if (!usage || typeof usage.cache_hit !== 'number') return '缓存 —';
+  const pct = Math.max(0, Math.min(100, usage.cache_hit * 100));
+  const shown = usage.cache_hit >= 1 ? 100 : Math.min(99.9, pct);
+  return '缓存命中 ' + (shown === 100 ? '100' : shown.toFixed(1)) + '%';
+}
+
+function usageStatHTML(label, usage) {
   if (!usage) return '';
-  const hit = usage.cache_hit;
-  if (typeof hit !== 'number') {
-    return '<span class="cachestat" title="供应商没有返回 prompt cache 明细">缓存命中 —</span>';
-  }
-  const pct = Math.max(0, Math.min(100, hit * 100));
-  const shown = hit >= 1 ? 100 : Math.min(99.9, pct);
-  const text = (shown === 100 ? '100' : shown.toFixed(1)) + '%';
-  const title = `缓存读 ${usageTokenLabel(usage.cache_read_tokens)} / ` +
-                `未缓存 ${usageTokenLabel(usage.uncached_input_tokens)} / ` +
-                `缓存写 ${usageTokenLabel(usage.cache_write_tokens)}`;
-  return `<span class="cachestat" title="${esc(title)}">缓存命中 <b>${text}</b></span>`;
+  const input = usageInputTokens(usage);
+  const output = typeof usage.completion_tokens === 'number'
+    ? usage.completion_tokens : null;
+  if (input === null && output === null) return '';
+  const title = `${label}输入 ${usageTokenLabel(input)}，输出 ${usageTokenLabel(output)}；` +
+                `缓存读 ${usageTokenLabel(usage.cache_read_tokens)}，` +
+                `未缓存输入 ${usageTokenLabel(usage.uncached_input_tokens)}，` +
+                `缓存写 ${usageTokenLabel(usage.cache_write_tokens)}` +
+                (usage.turns ? `；累计 ${usage.turns} 次请求` : '');
+  const cacheBits = (typeof usage.cache_read_tokens === 'number' &&
+                     typeof usage.uncached_input_tokens === 'number')
+    ? `（命中 ${usageTokenLabel(usage.cache_read_tokens)} / ` +
+      `未命中 ${usageTokenLabel(usage.uncached_input_tokens)}）`
+    : '';
+  return `<span class="cachestat" title="${esc(title)}">` +
+         `${label} 入 ${usageTokenLabel(input)}${cacheBits} / 出 ${usageTokenLabel(output)} · ` +
+         `<b>${usageHitText(usage)}</b></span>`;
+}
+
+function cacheUsageHTML(usage, sessionUsage) {
+  return usageStatHTML('本轮', usage) + usageStatHTML('会话', sessionUsage);
 }
 
 function renderContextMeter(id, used, total, output, contextDefault, outputDefault,
-                            cacheUsage) {
+                            cacheUsage, sessionUsage) {
   const box = $(id);
   if (!box) return;
   total = Number(total) || 1000000;
@@ -2916,7 +3295,7 @@ function renderContextMeter(id, used, total, output, contextDefault, outputDefau
     `<span class="ctxbar"><i style="width:${pct.toFixed(1)}%"></i></span>` +
     `<span>${pct.toFixed(1)}%</span>` +
     (outputText ? `<span>输出上限 ${outputText}</span>` : '') +
-    cacheUsageHTML(cacheUsage);
+    cacheUsageHTML(cacheUsage, sessionUsage);
 }
 
 function updateChatContextMeter(extra) {
@@ -2925,7 +3304,7 @@ function updateChatContextMeter(extra) {
     renderContextMeter('#chatContextMeter', CHAT_CONTEXT_DATA.used,
                        CHAT_CONTEXT_DATA.total, CHAT_CONTEXT_DATA.output,
                        c.context_default !== false, c.output_default !== false,
-                       CHAT_USAGE);
+                       CHAT_USAGE, CHAT_SESSION_USAGE);
     return;
   }
   const total = c.context || 1000000;
@@ -2933,7 +3312,7 @@ function updateChatContextMeter(extra) {
   const used = estimateMessagesTokens(HISTORY) + estimateTextTokens(extra || '');
   renderContextMeter('#chatContextMeter', used, total, output,
                      c.context_default !== false, c.output_default !== false,
-                     CHAT_USAGE);
+                     CHAT_USAGE, CHAT_SESSION_USAGE);
 }
 
 function updateAgentContextMeter(extra) {
@@ -2942,7 +3321,7 @@ function updateAgentContextMeter(extra) {
     renderContextMeter('#agentContextMeter', AGENT_CONTEXT_DATA.used,
                        AGENT_CONTEXT_DATA.total, AGENT_CONTEXT_DATA.output,
                        m.context_default !== false, m.output_default !== false,
-                       AGENT_USAGE);
+                       AGENT_USAGE, AGENT_SESSION_USAGE);
     return;
   }
   const total = m.context || 1000000;
@@ -2956,7 +3335,7 @@ function updateAgentContextMeter(extra) {
                estimateTextTokens(extra || '') + Math.ceil(toolsChars / 4);
   renderContextMeter('#agentContextMeter', used, total, output,
                      m.context_default !== false, m.output_default !== false,
-                     AGENT_USAGE);
+                     AGENT_USAGE, AGENT_SESSION_USAGE);
 }
 
 function updateChatBackend() {
@@ -3477,12 +3856,21 @@ function emptyHint() {
     $('#chatBox').appendChild(el('div', 'empty', '选一个模型，输入问题开始对话'));
   }
 }
-function renderMsg(role, text) {
+function renderMsg(role, text, ts, historyIndex) {
   const parts = contentParts(text);
   text = parts.text;
-  const empty = $('#chatBox').querySelector('.empty');
+  const state = CHAT_STATES.get(CURRENT_CHAT_SESSION);
+  const box = state ? chatStateRoot(state) : $('#chatBox');
+  if (state && CURRENT_CHAT_SESSION === state.id) {
+    const host = $('#chatBox');
+    if (box.parentNode !== host) host.replaceChildren(box);
+  }
+  const empty = box.querySelector('.empty');
   if (empty) empty.remove();
   const wrap = el('div', 'msg ' + (role === 'user' ? 'user' : 'bot'));
+  if (historyIndex !== undefined && historyIndex !== null) {
+    wrap.dataset.historyIndex = String(historyIndex);
+  }
   const av = el('div', 'avatar', role === 'user' ? '你' : 'AI');
   const bubble = el('div', 'bubble');
   let think = null;
@@ -3502,7 +3890,7 @@ function renderMsg(role, text) {
   body.dataset.raw = text || '';
   appendMessageImages(body, parts.images);
   const meta = el('div', 'meta');
-  meta.appendChild(el('span', '', nowStamp()));
+  meta.appendChild(el('span', '', ts || nowStamp()));
   if (role !== 'user') {
     const cp = el('a', '', '复制');
     cp.onclick = () => navigator.clipboard.writeText(body.dataset.raw || body.textContent).then(() => toast('已复制'));
@@ -3512,7 +3900,7 @@ function renderMsg(role, text) {
   bubble.appendChild(meta);
   wrap.appendChild(av);
   wrap.appendChild(bubble);
-  $('#chatBox').appendChild(wrap);
+  box.appendChild(wrap);
   $('#chatBox').scrollTop = $('#chatBox').scrollHeight;
   return { body, bubble, think };
 }
@@ -3526,6 +3914,334 @@ function chatScrollIf(stick) {
   if (!stick) return;
   const box = $('#chatBox');
   box.scrollTop = box.scrollHeight;
+}
+
+function chatEnsureState(id) {
+  if (!id) return null;
+  let state = CHAT_STATES.get(id);
+  if (!state) {
+    state = {
+      id, history: [], contextData: null, usage: null, sessionUsage: null,
+      root: null, abort: null, running: false, loaded: false,
+      config: '', thinking: 'off', title: '',
+      historyStart: 0, historyTotal: 0, historyHasMore: false,
+      historyOutline: [], historyLoading: false, needsRender: false,
+    };
+    CHAT_STATES.set(id, state);
+  }
+  return state;
+}
+
+function chatStateRoot(state) {
+  if (!state.root) state.root = el('div', 'chat-view');
+  return state.root;
+}
+
+function chatSyncState(state) {
+  if (!state) return;
+  HISTORY = state.history;
+  CHAT_CONTEXT_DATA = state.contextData;
+  CHAT_USAGE = state.usage;
+  CHAT_SESSION_USAGE = state.sessionUsage;
+  chatAbort = state.abort;
+}
+
+function chatAttachState(state) {
+  if (!state) return;
+  $('#chatBox').replaceChildren(chatStateRoot(state));
+}
+
+function chatRefreshControls(state) {
+  if (!state || CURRENT_CHAT_SESSION !== state.id) return;
+  $('#btnSend').disabled = !!state.running;
+  $('#btnChatStop').disabled = !state.running;
+  $('#chatState').textContent = state.running ? '生成中…' : '';
+}
+
+async function saveChatState(state) {
+  if (!state || !state.id || !state.history.length || state.deleted) return;
+  try {
+    const r = await api('sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: state.id, kind: 'chat', workspace_id: '',
+        history: state.history, history_start: state.historyStart,
+        config: state.config || '',
+        thinking: state.thinking || 'off',
+      }),
+    });
+    if (r.sessions) mergeSessionList(r.sessions);
+    if (r.session && r.session.title) state.title = r.session.title;
+    if (CURRENT_CHAT_SESSION === state.id && state.title) {
+      $('#chatSessionTitle').textContent = state.title;
+    }
+  } catch (e) {
+    /* 后台会话保存失败不应影响其他会话 */
+  }
+  renderChatSessions();
+}
+
+function chatApplyStateOptions(state) {
+  if (!state) return;
+  if (state.config && [...$('#chatConfig').options].some(o => o.value === state.config)) {
+    $('#chatConfig').value = state.config;
+  }
+  if (state.thinking) $('#chatThinking').value = state.thinking;
+  updateChatBackend();
+  chatSyncState(state);
+}
+
+function chatShowState(state) {
+  if (!state) return;
+  CURRENT_CHAT_SESSION = state.id;
+  const meta = SESSIONS.find(s => s.id === state.id);
+  if (meta && meta.title) state.title = meta.title;
+  chatAttachState(state);
+  chatSyncState(state);
+  if (!state.running && state.needsRender) {
+    renderChatHistory(state);
+    state.needsRender = false;
+  }
+  fillSessionSelect('chat', state.id);
+  $('#chatSessionTitle').textContent = state.title || '';
+  chatApplyStateOptions(state);
+  chatRefreshControls(state);
+  updateChatContextMeter();
+  const box = $('#chatBox');
+  box.scrollTop = box.scrollHeight;
+  renderChatSessions();
+  renderConversationRail('chat');
+  scrollConversationToBottom('chat');
+}
+
+function renderChatHistory(state) {
+  if (!state) return;
+  HISTORY_RENDER_LOCK = true;
+  const root = chatStateRoot(state);
+  root.innerHTML = '';
+  if (!state.history.length) {
+    root.innerHTML = '<div class="empty">选择对话模型后开始对话</div>';
+    HISTORY_RENDER_LOCK = false;
+    return;
+  }
+  if (state.historyHasMore) {
+    const more = el('button', 'history-more',
+      state.historyLoading ? '加载中…' : '加载更早消息');
+    more.type = 'button';
+    more.onclick = () => loadOlderHistory('chat');
+    root.appendChild(more);
+  }
+  state.history.forEach((m, i) => {
+    renderMsg(m.role, m.content || '', m.ts, state.historyStart + i);
+  });
+  HISTORY_RENDER_LOCK = false;
+}
+
+function renderAgentHistory(state) {
+  if (!state) return;
+  HISTORY_RENDER_LOCK = true;
+  const root = agentStateRoot(state);
+  root.innerHTML = '';
+  if (!state.history.length) {
+    root.innerHTML = '<div class="empty">选择支持工具调用的模型和 MCP 服务器</div>';
+    HISTORY_RENDER_LOCK = false;
+    return;
+  }
+  if (state.historyHasMore) {
+    const more = el('button', 'history-more',
+      state.historyLoading ? '加载中…' : '加载更早消息');
+    more.type = 'button';
+    more.onclick = () => loadOlderHistory('agent');
+    root.appendChild(more);
+  }
+  state.history.forEach((m, i) => {
+    const index = state.historyStart + i;
+    if (m.role === 'assistant') {
+      const out = agentMsg('assistant', '', m.ts, index);
+      const a = agentEnsureAnswer(out);
+      a.raw = m.content || '';
+      a.body.dataset.raw = a.raw;
+      if (typeof renderMarkdown === 'function') renderMarkdown(a.body, a.raw);
+      else a.body.textContent = a.raw;
+      out.turn.classList.remove('running');
+      out.title.textContent = '已完成';
+    } else {
+      agentMsg('user', m.content || '', m.ts, index);
+    }
+  });
+  HISTORY_RENDER_LOCK = false;
+}
+
+function conversationBox(kind) {
+  return kind === 'chat' ? $('#chatBox') : $('#agentBox');
+}
+
+function ensureConversationRail(kind) {
+  const main = document.querySelector('#' + kind + ' .chatmain');
+  if (!main) return null;
+  let rail = main.querySelector('.conversation-rail');
+  if (!rail) {
+    rail = el('div', 'conversation-rail');
+    main.appendChild(rail);
+  }
+  return rail;
+}
+
+function positionConversationRail(kind) {
+  const rail = ensureConversationRail(kind);
+  const box = conversationBox(kind);
+  if (!rail || !box) return;
+  rail.style.top = (box.offsetTop || 0) + 'px';
+  rail.style.height = Math.max(0, box.clientHeight || 0) + 'px';
+}
+
+function conversationState(kind) {
+  return kind === 'chat'
+    ? CHAT_STATES.get(CURRENT_CHAT_SESSION)
+    : AGENT_STATES.get(CURRENT_AGENT_SESSION);
+}
+
+function updateRailActive(kind) {
+  const state = conversationState(kind);
+  const box = conversationBox(kind);
+  const rail = ensureConversationRail(kind);
+  if (!state || !box || !rail) return;
+  let visibleIndex = -1;
+  const rows = box.querySelectorAll('.msg[data-history-index]');
+  for (const row of rows) {
+    if ((row.offsetTop || 0) <= box.scrollTop + 24) {
+      visibleIndex = Number(row.dataset.historyIndex);
+    } else {
+      break;
+    }
+  }
+  let active = null;
+  (state.historyOutline || []).forEach(entry => {
+    if (entry.index <= visibleIndex) active = entry.index;
+  });
+  rail.querySelectorAll('.conversation-mark').forEach(mark => {
+    mark.classList.toggle('on', mark.dataset.index === String(active));
+  });
+}
+
+function renderConversationRail(kind) {
+  const state = conversationState(kind);
+  const rail = ensureConversationRail(kind);
+  if (!state || !rail) return;
+  rail.innerHTML = '';
+  const outline = state.historyOutline || [];
+  if (outline.length < 2) {
+    rail.style.display = 'none';
+    return;
+  }
+  rail.style.display = '';
+  positionConversationRail(kind);
+  const total = Math.max(1, state.historyTotal - 1);
+  outline.forEach(entry => {
+    const mark = el('button', 'conversation-mark');
+    mark.type = 'button';
+    mark.dataset.index = String(entry.index);
+    mark.style.top = (4 + (entry.index / total) * 92).toFixed(2) + '%';
+    mark.title = (entry.ts ? entry.ts + ' ' : '') + (entry.prompt || '');
+    mark.onclick = () => jumpToHistory(kind, entry.index);
+    rail.appendChild(mark);
+  });
+  updateRailActive(kind);
+}
+
+async function loadOlderHistory(kind) {
+  const state = conversationState(kind);
+  if (!state || HISTORY_RENDER_LOCK || SESSION_LOADING ||
+      state.historyLoading || !state.historyHasMore || state.running) {
+    return false;
+  }
+  state.historyLoading = true;
+  const box = conversationBox(kind);
+  const oldHeight = box ? box.scrollHeight : 0;
+  const oldTop = box ? box.scrollTop : 0;
+  try {
+    const r = await api('sessions?id=' + encodeURIComponent(state.id) +
+      `&history_page=1&history_limit=${HISTORY_PAGE}&history_before=${state.historyStart}`);
+    if (!r.ok || !r.session) return false;
+    state.history = (r.session.history || []).concat(state.history);
+    state.historyStart = r.history_start ?? 0;
+    state.historyTotal = r.history_total ?? state.history.length;
+    state.historyHasMore = !!r.history_has_more;
+    state.historyOutline = r.history_outline || state.historyOutline;
+    const active = conversationState(kind) === state;
+    if (active) {
+      if (kind === 'chat') renderChatHistory(state);
+      else renderAgentHistory(state);
+      if (box) box.scrollTop = oldTop + Math.max(0, box.scrollHeight - oldHeight);
+      renderConversationRail(kind);
+    } else {
+      state.needsRender = true;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  } finally {
+    state.historyLoading = false;
+  }
+}
+
+async function jumpToHistory(kind, index) {
+  const state = conversationState(kind);
+  if (!state) return;
+  let guard = 0;
+  while (state.historyStart > index && state.historyHasMore && guard < 100) {
+    guard += 1;
+    const ok = await loadOlderHistory(kind);
+    if (!ok) break;
+  }
+  const box = conversationBox(kind);
+  const row = box && box.querySelector(`.msg[data-history-index="${index}"]`);
+  if (row) row.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  updateRailActive(kind);
+}
+
+function scrollConversationToBottom(kind) {
+  const box = conversationBox(kind);
+  if (!box) return;
+  const apply = () => {
+    box.scrollTop = box.scrollHeight;
+    positionConversationRail(kind);
+    updateRailActive(kind);
+  };
+  requestAnimationFrame(() => {
+    apply();
+    requestAnimationFrame(apply);
+  });
+  setTimeout(apply, 80);
+  setTimeout(apply, 250);
+}
+
+function initConversationRails() {
+  ['chat', 'agent'].forEach(kind => {
+    ensureConversationRail(kind);
+    positionConversationRail(kind);
+    const box = conversationBox(kind);
+    if (!box) return;
+    box.addEventListener('scroll', () => {
+      updateRailActive(kind);
+      if (box.scrollTop < 48) loadOlderHistory(kind);
+    }, { passive: true });
+  });
+  window.addEventListener('resize', () => {
+    ['chat', 'agent'].forEach(kind => {
+      positionConversationRail(kind);
+      updateRailActive(kind);
+    });
+  });
+  if (typeof ResizeObserver !== 'undefined') {
+    ['chat', 'agent'].forEach(kind => {
+      const main = document.querySelector('#' + kind + ' .chatmain');
+      if (main) new ResizeObserver(() => {
+        positionConversationRail(kind);
+        updateRailActive(kind);
+      }).observe(main);
+    });
+  }
 }
 
 // 把历史拼成一条提示词：第一条用户话直接给，后面的轮次自带「用户：」「助手：」标记，
@@ -3547,41 +4263,60 @@ function promptText() {
 
 async function send() {
   const text = $('#chatInput').value.trim();
-  if ((!text && !CHAT_IMAGES.length) || chatAbort) return;
+  if (!text && !CHAT_IMAGES.length) return;
   const cfgName = $('#chatConfig').value;
   if (!cfgName) { toast('先选一个配置'); return; }
   const selected = CHAT_CONFIGS.find(x => x.name === cfgName) || {};
-  CHAT_CONTEXT_DATA = null;
-  CHAT_USAGE = null;
+  if (!CURRENT_CHAT_SESSION) CURRENT_CHAT_SESSION = newSessionId();
+  const state = chatEnsureState(CURRENT_CHAT_SESSION);
+  if (!state) return;
+  if (state.running) return toast('该会话正在生成，请先停止');
+  const remoteChat = selected.backend === 'ollama' || selected.backend === 'openai';
   if (selected.backend !== 'ollama' && selected.backend !== 'openai' &&
       !(await ensurePy('chat'))) return;
+  state.loaded = true;
+  state.config = cfgName;
+  state.thinking = ($('#chatThinking') && $('#chatThinking').value) || 'off';
+  state.contextData = null;
+  state.usage = null;
+  chatSyncState(state);
   $('#chatInput').value = '';
   $('#chatInput').style.height = 'auto';
   if (CHAT_IMAGES.length && selected.backend !== 'ollama' && selected.backend !== 'openai') {
     return toast('本地字符级模型不支持图片');
   }
   const userContent = userMessageContent(text, 'chat');
-  HISTORY.push({ role: 'user', content: userContent });
-  renderMsg('user', userContent);
+  const userTs = nowStamp();
+  const userIndex = state.historyStart + state.history.length;
+  state.history.push({ role: 'user', content: userContent, ts: userTs });
+  state.historyTotal = Math.max(state.historyTotal, userIndex + 1);
+  state.historyOutline = (state.historyOutline || []).concat([{
+    index: userIndex, ts: userTs, prompt: text.slice(0, 80),
+  }]);
+  renderMsg('user', userContent, userTs, userIndex);
   clearImages('chat');
   updateChatContextMeter();
+  renderConversationRail('chat');
   const { body, bubble, think } = renderMsg('assistant', '');
   bubble.classList.add('typing');
-  $('#btnSend').disabled = true;
-  $('#btnChatStop').disabled = false;
-  $('#chatState').textContent = '生成中…';
-  chatAbort = new AbortController();
+  state.running = true;
+  state.abort = new AbortController();
+  chatAbort = state.abort;
+  chatRefreshControls(state);
+  const sid = state.id;
+  const isActive = () => CURRENT_CHAT_SESSION === sid;
   let acc = '';
   try {
-    const payload = selected.backend === 'ollama' || selected.backend === 'openai'
-      ? { config: cfgName, messages: HISTORY,
-          thinking: ($('#chatThinking') && $('#chatThinking').value) || 'off' }
+    const payload = remoteChat
+      ? { config: cfgName, messages: state.history,
+          history_start: state.historyStart,
+          session_id: sid, thinking: state.thinking }
       : { config: cfgName, text };
     const resp = await fetch(`/api/chat?t=${TOKEN}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      // 本地小模型默认只发当前这一句；Ollama 后端发送完整 messages
+      // 本地小模型默认只发当前这一句；Ollama/API 后端发送完整 messages
       body: JSON.stringify(payload),
-      signal: chatAbort.signal });
+      signal: state.abort.signal });
     if (!resp.ok) { body.textContent = '请求失败：' + (await resp.text()); return; }
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
@@ -3597,11 +4332,15 @@ async function send() {
         const ev = /event: (\w+)\ndata: ([\s\S]*)/.exec(chunk);
         if (!ev) continue;
         const data = JSON.parse(ev[2]);
-        const stick = chatAtBottom();
+        const active = isActive();
+        const stick = active ? chatAtBottom() : false;
         if (ev[1] === 'meta') { CHAT_INFO = data.info; }
         else if (ev[1] === 'context') {
-          CHAT_CONTEXT_DATA = data;
-          updateChatContextMeter();
+          state.contextData = data;
+          if (active) {
+            chatSyncState(state);
+            updateChatContextMeter();
+          }
         }
         else if (ev[1] === 'reasoning') {
           if (think) {
@@ -3612,7 +4351,7 @@ async function send() {
           }
         } else if (ev[1] === 'token') {
           acc += data.text; body.textContent = acc;
-          updateChatContextMeter(acc);
+          if (active) updateChatContextMeter(acc);
           chatScrollIf(stick);
         } else if (ev[1] === 'done') {
           acc = data.text || acc;
@@ -3624,8 +4363,12 @@ async function send() {
           if (typeof renderMarkdown === 'function') renderMarkdown(body, acc);
           else body.textContent = acc;
           if (data.usage) {
-            CHAT_USAGE = data.usage;
-            updateChatContextMeter();
+            state.usage = data.usage;
+            if (data.session_usage) state.sessionUsage = data.session_usage;
+            if (active) {
+              chatSyncState(state);
+              updateChatContextMeter();
+            }
           }
           chatScrollIf(stick);
         } else if (ev[1] === 'error') {
@@ -3634,19 +4377,26 @@ async function send() {
         }
       }
     }
-    if (acc) HISTORY.push({ role: 'assistant', content: acc });
-    updateChatContextMeter();
+    if (acc) state.history.push({ role: 'assistant', content: acc, ts: nowStamp() });
+    state.historyTotal = Math.max(state.historyTotal,
+      state.historyStart + state.history.length);
+    if (isActive()) updateChatContextMeter();
   } catch (e) {
     if (e.name === 'AbortError') body.textContent = acc + '（已停止）';
     else body.textContent = '出错：' + e.message;
   } finally {
     bubble.classList.remove('typing');
-    $('#btnSend').disabled = false;
-    $('#btnChatStop').disabled = true;
-    chatAbort = null;
-    $('#chatState').textContent = '';
-    updateChatContextMeter();
-    await saveCurrentSession('chat');
+    state.running = false;
+    state.abort = null;
+    if (isActive()) {
+      chatAbort = null;
+      chatSyncState(state);
+      chatRefreshControls(state);
+      updateChatContextMeter();
+    }
+    renderChatSessions();
+    renderConversationRail('chat');
+    await saveChatState(state);
   }
 }
 
@@ -3662,6 +4412,7 @@ $('#chatInput').addEventListener('input', e => {
 });
 $('#btnChatStop').onclick = () => { if (chatAbort) chatAbort.abort(); };
 emptyHint();
+initConversationRails();
 
 /* ---------------- 服务页：会话 / 日志 两个子页 ---------------- */
 const SRV_STREAMS = new Map();

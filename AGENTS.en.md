@@ -202,8 +202,8 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | POST | `/api/openai/detect` | detect `/models` for every saved API at startup; result saved to `.cache/openai_status.json` |
 | POST | `/api/openai/test` | detect only the selected API (draft allowed); saved configs also update status and return model/thinking capability |
 | POST | `/api/openai/model` | save one model's manual capability overrides (context, output, tools, input types, reasoning levels) |
-| GET | `/api/sessions` | session list; `?id=` returns one, `?kind=chat\|agent&workspace=` filters |
-| POST | `/api/sessions` | save a session (history, model, MCP, tools, thinking, Agent workspace) |
+| GET | `/api/sessions` | session list; `?id=` returns one; `?id=&history_page=1&history_limit=20&history_before=<n>` returns a recent history page plus `history_total` / `history_start` / `history_has_more` / user-turn `history_outline`; `?kind=chat\|agent&workspace=` filters |
+| POST | `/api/sessions` | save a session (history, model, MCP, tools, thinking, Agent workspace); `history_start` merges the older stored prefix for lazy paging |
 | POST | `/api/sessions/delete` | delete a session |
 | POST | `/api/sessions/rename` | rename a session |
 | POST | `/api/sessions/move` | move an Agent session to another workspace |
@@ -214,7 +214,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | POST | `/api/mcp/restart` | manually reconnect one MCP server and refresh its tools |
 | GET | `/api/agent/configs` | tool-capable models, MCP servers and detection results for Agent |
 | GET | `/api/agent/tools?server=<id>` | list a server's tools for Agent multi-select |
-| POST | `/api/agent/chat` | Agent tool loop; SSE: `context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error`; API model `done.usage` carries cache counts |
+| POST | `/api/agent/chat` | Agent tool loop; SSE: `context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error`; API model `done.usage` / `done.session_usage` carry turn and session totals; `compact=true` compacts manually |
 | GET | `/api/corpora` | corpus directories under `res\` (file count, size) |
 | GET | `/api/train/status` `train/log` | training state and incremental log |
 | GET | `/api/server/status` | bridge state and port |
@@ -222,7 +222,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | POST | `/api/config/save` | line-level value update (keeps comments/order), backs up first |
 | POST | `/api/env/install` | install torch / numpy / transformers into the project Python; `torch_type=cpu|gpu|xpu|auto`; `torch_version` / `numpy_version` / `transformers_version` may be empty; legacy `torch_index=cpu|cu126|cu128|xpu|auto` remains supported; output via `env-log` |
 | POST | `/api/train/start` `train/stop` | start / stop the training child |
-| POST | `/api/chat` | chat, returns SSE: `context` / `meta` / `reasoning` / `token` / `done` / `error`; API model `done.usage` carries cache counts |
+| POST | `/api/chat` | chat, returns SSE: `context` / `meta` / `reasoning` / `token` / `done` / `error`; API model `done.usage` / `done.session_usage` carry turn and session totals |
 | POST | `/api/server/start` `server/stop` | start / stop the bridge child |
 | POST | `/api/sign` | `mode=compute|verify`, runs the signature tool |
 
@@ -310,17 +310,23 @@ Model capability uses automatic detection plus manual overrides:
 Clicking a model row on the API tab overrides these fields in
 `.cache/openai_model_overrides.json`; later detection does not overwrite manual values. Context is
 read from `/models` fields such as `context_length` / `context_window` / `max_model_len`. API
-requests compact history after reserving output space: old history is summarized first, falling
-back to tool-group-safe trimming; `tool_calls` / `tool_result` stay paired. Agent's `max_tokens`
-defaults to 256K (a model output field wins, bounded by context); it is a per-response output cap,
-not the context limit. Chat and Agent show an estimated context occupancy below the composer;
-images use a fixed visual-token estimate rather than base64 character count. After an API turn,
-the UI shows the provider-reported prompt cache hit rate: cache read / (uncached input + cache
-read + cache write). It normalizes DeepSeek's `prompt_cache_hit_tokens` /
-`prompt_cache_miss_tokens` and OpenAI's `prompt_tokens_details.cached_tokens`; Agent steps are
-weighted by tokens, missing cache fields show “—”, and local/Ollama models without cache stats
-show nothing. Non-Ollama API streams try `stream_options.include_usage` and retry once without it
-when the proxy rejects the option.
+requests compact history using the DSH-style 80% threshold and 16% recent-retention budget: old
+history is replaced by a checkpoint summary; the summary request reuses the original system prompt,
+tools and old-message prefix, appending the compaction instruction at the end so the provider's
+warm prefix can still be reused. Oversized tool results are pruned first; if summarization fails the
+code falls back to tool-group-safe trimming, keeping `tool_calls` / `tool_result` paired. A
+context-overflow error forces one compact-and-retry. Agent's composer accepts `/compact` for manual
+compaction. Agent's `max_tokens` defaults to 256K (a model output field wins, bounded by context);
+it is a per-response output cap, not the context limit. Chat and Agent show an estimated context
+occupancy below the composer; images use a fixed visual-token estimate rather than base64 character
+count. After an API turn, the UI shows provider-reported current-turn and accumulated-session
+tokens: input, output, cached-hit / uncached input and cache hit rate. The rate is
+cache read / (uncached input + cache read + cache write). It normalizes DeepSeek's
+`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` and OpenAI's
+`prompt_tokens_details.cached_tokens`; Agent steps are weighted by tokens, missing cache fields
+show “—”, and local/Ollama models without cache stats show nothing. Session totals are persisted in
+the session JSON under `usage_totals` and survive reopening. Non-Ollama API streams try
+`stream_options.include_usage` and retry once without it when the proxy rejects the option.
 
 **MCP / Agent**: `mcp_client.py` uses only the standard library and supports STDIO (one JSON per
 line) and Streamable HTTP (JSON-RPC POST + Mcp-Session-Id). Configured MCP clients are created at
@@ -362,14 +368,25 @@ a "workspace → sessions" tree; each workspace shows only its own sessions and 
 sessions. A new Agent session uses the current workspace, or the default when none is specified.
 A session stores its `workspace_id` and full `model_history` (system, tool_calls, tool results,
 and the final answer); the next request starts from that history and appends the new user message,
-so dropped tool messages cannot break prompt-cache reuse. MCP tool calls prefer the **session's
-owning workspace** path over the temporary page selection. Workspace paths are chosen through
-`/api/workspaces/pick`, which opens the native directory dialog. Sessions support rename, delete,
-and moving to another
+so dropped tool messages cannot break prompt-cache reuse. The first request injects workspace
+context as appended user messages: absolute workspace path, system time/zone, and root
+`AGENTS.md` / `CLAUDE.md`; later requests append at most one clock snapshot every 10 minutes. The
+system prompt carries stable, name-sorted guidance for visible tools. MCP tool calls prefer the
+**session's owning workspace** path over the temporary page selection. Workspace paths are chosen
+through `/api/workspaces/pick`, which opens the native directory dialog. Sessions support rename,
+delete, and moving to another
 workspace (`/api/sessions/move`); after a move, every MCP call still reads the session's current
 `workspace_id`. Each turn auto-saves; restoring a session restores history, model, MCP, tools, and
 thinking. The Chat / Agent sidebar can be collapsed and resized by dragging its right edge; the
-state is stored in browser localStorage. Interrupted model/tool turns are not replayed. When a
+state is stored in browser localStorage. Interrupted model/tool turns are not replayed. Multiple
+Chat and Agent sessions run concurrently: the frontend keeps per-session DOM, history, usage,
+context and AbortController, so switching sessions does not abort background streams. A session
+allows only one generation at a time, and Stop affects only the current session. Opening a session
+scrolls to the latest message and loads only the newest 20 messages; scrolling to the top loads one
+older page with `history_before`, and saves merge with `history_start`. A right-edge user-turn rail
+jumps to a turn, loading older pages first when needed. User messages store their full local send
+time in `ts`, persisted in the session JSON; the backend strips UI-only fields before sending to the
+model. When a
 model's `input_modalities` contains `image`, the composer
 shows an **Images** button (at most 4 images, 6 MB each); images are sent as OpenAI-compatible
 `image_url` blocks and local character-level models reject them. Image tokens use a fixed visual

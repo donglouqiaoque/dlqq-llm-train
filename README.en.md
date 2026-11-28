@@ -948,14 +948,28 @@ Agent workspaces live in `.cache/workspaces.json`. Hovering a workspace row lets
 delete it, or create a session directly in it. When adding a workspace you can type an absolute
 path or press **Browse…** to open the native directory picker.
 
+Chat and Agent sessions can run concurrently: switching sessions does not abort an in-flight
+stream, background turns continue receiving tokens and save their own history, usage and model
+state, and running rows show a blinking dot in the session list. A single session allows only one
+generation at a time; Stop affects only the current session and leaves other runs untouched.
+
+Opening a session scrolls to the latest message and loads only the most recent 20 messages;
+scrolling to the top lazily loads one older page instead of putting the entire history into the
+DOM. A user-turn rail on the right edge jumps to a chosen turn, loading older pages first when
+needed. User messages record their full local send time and persist it in the session JSON.
+
 Every Agent MCP tool call uses the **session's owning workspace** absolute path as
 `params._meta["dsh/workspace"]`, not the temporary page selection, so switching workspaces cannot
 send the wrong cwd. An Agent session also stores the full model message log (including
 `tool_calls`, tool results, and the previous assistant answer); the next request starts from that
 log and appends the new user message, so prompt cache reuse is not broken by dropping tool
-messages. Session rows support rename, delete, and moving to another workspace. Restoring a
-session restores its history, model, MCP server, selected tools, and thinking level; interrupted
-model/tool turns are not replayed automatically.
+messages. The first request injects workspace context: the absolute workspace path, system time
+and time zone, and `AGENTS.md` / `CLAUDE.md` from the workspace root (bounded in size). Later
+requests append at most one clock snapshot every 10 minutes. Dynamic context is added as appended
+user messages rather than rewriting the system prompt. The system prompt also contains stable,
+name-sorted guidance for the currently visible tools. Session rows support rename, delete, and
+moving to another workspace. Restoring a session restores its history, model, MCP server, selected
+tools, and thinking level; interrupted model/tool turns are not replayed automatically.
 
 When a model declares `input_modalities` containing `image`, the composer shows an **Images**
 button for up to four images of 6 MB each. Images are sent as OpenAI-compatible `image_url`
@@ -999,18 +1013,24 @@ and the context limit. Ollama chat requests use a 600-second timeout while other
 300 seconds. Context is read from `/models` fields such as `context_length`, `context_window`,
 `max_model_len` and `top_provider.context_length`; when unavailable the UI shows
 `unknown (provider default)` while a conservative internal budget is used. Request history is
-compacted against the context after reserving output space: old history is summarized first and
-falls back to deterministic trimming, keeping `tool_calls` / `tool_result` paired. Note that
-Agent's "max_tokens output limit" error is the per-response output cap, not the context window.
-Chat and Agent show an estimated context occupancy and percentage below the composer
-(character-based approximation; images use a fixed visual-token estimate), together with the
-output cap.
-After an API model finishes a turn, the UI also shows the provider-reported **cache hit** rate.
-It is calculated as `cache read / (uncached input + cache read + cache write)` and normalizes
-DeepSeek's `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, OpenAI's
-`prompt_tokens_details.cached_tokens`, and similar usage fields. Agent tool steps are aggregated
-by token weight; when the provider reports no cache fields the UI shows “—” instead of 0%.
-Local character-level models and Ollama models without cache accounting do not show this metric.
+compacted against the context after reserving output space using the DSH-style 80% threshold and
+16% recent-retention budget: old history is replaced by a checkpoint summary, the summary request
+reuses the original system prompt, tools, and old-message prefix and appends the compaction
+instruction at the end so the provider's prompt cache can still help. Oversized tool results are
+pruned first; if summarization fails the code falls back to deterministic trimming while keeping
+`tool_calls` / `tool_result` paired. A context-overflow error forces one compact-and-retry.
+Agent's composer accepts `/compact` to compact the current session manually. Note that Agent's
+"max_tokens output limit" error is the per-response output cap, not the context window. Chat and
+Agent show an estimated context occupancy and percentage below the composer (character-based
+approximation; images use a fixed visual-token estimate), together with the output cap.
+After an API model finishes a turn, the UI shows both the current turn and the accumulated session
+token usage: input (cached-hit / uncached), output, and cache hit rate. The rate is
+`cache read / (uncached input + cache read + cache write)` and normalizes DeepSeek's
+`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, OpenAI's
+`prompt_tokens_details.cached_tokens`, and similar fields. Agent tool steps are aggregated by token
+weight; missing cache fields show “—” rather than 0%. Session totals are persisted in the session
+JSON and survive reopening the session. Local character-level models and Ollama models without
+cache accounting do not show token/cache metrics.
 
 ---
 
