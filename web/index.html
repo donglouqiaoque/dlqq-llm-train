@@ -37,8 +37,8 @@
                padding:7px 14px; border-radius:8px 8px 0 0; cursor:pointer; font-size:13px; }
   nav button.on { background:var(--panel); color:var(--fg); border-color:var(--line);
                   border-bottom-color:var(--panel); }
-  main { flex:1; min-height:0; padding:14px 18px 18px; display:flex; }
-  section { display:none; flex:1; min-height:0; flex-direction:column;
+  main { flex:1; min-height:0; min-width:0; padding:14px 18px 18px; display:flex; }
+  section { display:none; flex:1; min-width:0; max-width:100%; min-height:0; flex-direction:column;
             background:var(--panel); border:1px solid var(--line);
             border-radius:0 10px 10px 10px; padding:16px; }
   section.on { display:flex; }
@@ -202,7 +202,7 @@
   .msg .bubble .msgimages img { max-width:180px; max-height:160px; border-radius:7px;
                                 border:1px solid #2b3648; }
   .ctxmeter { display:flex; align-items:center; gap:8px; min-height:16px; margin-top:3px;
-              color:var(--muted); font-size:11px; }
+              flex-wrap:wrap; color:var(--muted); font-size:11px; }
   .ctxmeter .ctxbar { width:140px; height:4px; overflow:hidden; border-radius:999px;
                       background:#0b1017; border:1px solid #222b39; }
   .ctxmeter .ctxbar i { display:block; width:0; height:100%; border-radius:999px;
@@ -211,6 +211,9 @@
   .ctxmeter.warn .ctxbar i { background:var(--warn); }
   .ctxmeter.err { color:var(--err); }
   .ctxmeter.err .ctxbar i { background:var(--err); }
+  .ctxmeter .cachestat { color:#9db8dd; border-left:1px solid #33465e;
+                          padding-left:8px; cursor:help; white-space:nowrap; }
+  .ctxmeter .cachestat b { color:#d7e5ff; font-weight:600; }
   .spacer { flex:1; }
   .subtabs { display:flex; align-items:center; gap:6px; margin:2px 0 8px; }
   .subtabs button { padding:4px 12px; font-size:12px; border-radius:8px; }
@@ -271,6 +274,13 @@
   .agent-tool-step.err > summary { color:#e38b93; }
   .agent-answer { padding:8px 0 2px; }
   .agent-answer:first-child { padding-top:2px; }
+  .agent-answer::after { content:attr(data-time); display:block; margin-top:5px;
+                         color:#66748a; font:10px/1.4 Consolas, "Courier New", monospace;
+                         text-align:right; white-space:nowrap; }
+  .agent-step-time { margin-left:8px; color:#66748a; font:10px/1.4 Consolas, "Courier New", monospace;
+                     white-space:nowrap; }
+  .agent-think .agent-step-time { margin-left:auto; }
+  .thinking summary .msgtime { float:right; color:#66748a; font:10px/1.4 Consolas, "Courier New", monospace; }
   .agent-bar { flex-wrap:wrap; row-gap:5px; }
   .agent-bar select { max-width:190px; }
   #agentThinking, #chatThinking { min-width:74px; }
@@ -459,6 +469,59 @@
   .envfield .installed.ok { color:var(--ok); }
   .envfield .installed.missing { color:var(--err); }
   .envfield.actions { margin-top:4px; }
+  /* Markdown 渲染后覆盖气泡默认的 pre-wrap，否则表格/段落会出现异常换行 */
+  .msg.bot .body.md-body,
+  .msg.bot .agent-answer.md-body { white-space:normal; }
+  /* 长代码/宽表格必须留在消息区内滚动，不能把整个页面撑宽 */
+  #chat, #agent, .chatlayout, .chatmain, .msgs,
+  .msg, .agent-msg, .agent-turn, .agent-flow, .agent-answer, .bubble { min-width:0; }
+  #chat, #agent { overflow:hidden; }
+  .chatlayout, .chatmain, .msgs, .msg, .agent-msg, .agent-turn,
+  .agent-flow, .agent-answer { max-width:100%; }
+  .msgs { overflow-x:auto; }
+  .composer, .composerbar { min-width:0; max-width:100%; }
+  .composerbar > * { min-width:0; }
+  .composerbar select, .composerbar button { min-width:0; }
+  .composerbar > .spacer { flex:1 1 10px; }
+  .md-body { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+  .md-body pre { display:block; width:100%; max-width:100%; overflow:auto; }
+  .md-body table { display:block; width:100%; max-width:100%; overflow-x:auto; }
+  .md-body th, .md-body td { white-space:normal; word-break:break-word; }
+
+  /* 非全屏/分屏：收紧留白，优先把宽度让给对话内容 */
+  @media (max-width:1400px) {
+    section { padding:12px; border-radius:0 8px 8px 8px; }
+    .chatlayout { gap:9px; }
+    .msg { gap:7px; }
+    .bubble { max-width:min(820px,90%); padding:8px 11px; }
+    .composer { padding:7px 9px; }
+    .composerbar { flex-wrap:wrap; row-gap:5px; }
+    .composerbar select { max-width:170px; }
+    .agent-bar select { max-width:155px; }
+    .ctxmeter .ctxbar { width:110px; }
+  }
+  @media (max-width:1100px) {
+    section { padding:9px; }
+    .chatlayout { gap:7px; }
+    .bubble { max-width:100%; }
+    .msg.user .bubble { max-width:94%; }
+    .msg .avatar { flex-basis:24px; width:24px; height:24px; font-size:10px; }
+    #chatThinkingWrap, #agentThinkingWrap { font-size:11px; }
+    .composerbar select { max-width:145px; }
+    .agent-bar select { max-width:135px; }
+    .ctxmeter { gap:5px; }
+    .ctxmeter .ctxbar { width:80px; }
+  }
+  @media (max-width:760px) {
+    section { padding:6px; }
+    .chatlayout { gap:5px; }
+    .chatside { padding-right:8px; }
+    .msg .avatar { display:none; }
+    .msg { gap:0; margin-bottom:10px; }
+    .bubble { padding:7px 9px; }
+    .composerbar select { max-width:128px; }
+    .composerbar button { padding:5px 8px; }
+  }
 </style>
 </head>
 <body>
@@ -900,6 +963,14 @@ function toast(msg, ms = 3000) {
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms);
 }
 
+function nowStamp() {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+         `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.` +
+         `${p(d.getMilliseconds(), 3)}`;
+}
+
 function askChoice(opts = {}) {
   const mask = $('#choiceModal');
   const select = $('#choiceModalSelect');
@@ -1137,6 +1208,8 @@ let AGENT_SELECTED_TOOLS = new Set();
 let AGENT_HISTORY = [];
 let AGENT_ABORT = null;
 let AGENT_CONTEXT_DATA = null;
+let CHAT_USAGE = null;
+let AGENT_USAGE = null;
 // 配置文件第一行常是 "# ====" 这种装饰线，不能拿来当说明
 function cleanDesc(desc) {
   const d = (desc || '').trim();
@@ -1458,6 +1531,7 @@ async function openSession(kind, id) {
     WORKSPACES = r.workspaces || WORKSPACES;
     if (kind === 'chat') {
       CURRENT_CHAT_SESSION = data.id || '';
+      CHAT_USAGE = null;
       HISTORY.length = 0;
       $('#chatBox').innerHTML = '';
       (data.history || []).forEach(m => {
@@ -1474,6 +1548,7 @@ async function openSession(kind, id) {
       updateChatContextMeter();
     } else {
       CURRENT_AGENT_SESSION = data.id || '';
+      AGENT_USAGE = null;
       if (data.workspace_id && WORKSPACES.some(w => w.id === data.workspace_id)) {
         CURRENT_AGENT_WORKSPACE = data.workspace_id;
       }
@@ -1735,6 +1810,7 @@ async function deleteCurrentSession(kind) {
 function newChatSession() {
   HISTORY.length = 0;
   CHAT_CONTEXT_DATA = null;
+  CHAT_USAGE = null;
   CHAT_IMAGES = [];
   renderImagePreviews('chat');
   CURRENT_CHAT_SESSION = '';
@@ -2330,6 +2406,7 @@ function agentEnsureThink(out) {
     const summary = el('summary', 'agent-step-head');
     summary.appendChild(el('span', 'agent-step-icon', '🧠'));
     summary.appendChild(el('span', 'agent-step-label', '思考'));
+    summary.appendChild(el('span', 'agent-step-time', nowStamp()));
     details.appendChild(summary);
     const flow = el('div', 'think-flow');
     details.appendChild(flow);
@@ -2345,6 +2422,7 @@ function agentEnsureAnswer(out) {
   if (!last || !last.classList.contains('agent-answer')) {
     last = el('div', 'agent-step agent-answer body');
     last.dataset.raw = '';
+    last.dataset.time = nowStamp();
     out.flow.appendChild(last);
     out.answers.push({ body: last, raw: '' });
   }
@@ -2369,6 +2447,7 @@ function agentToolCard(name, args, out, status, index) {
   summary.appendChild(el('span', 'agent-step-icon', '🔧'));
   summary.appendChild(label);
   summary.appendChild(statusEl);
+  summary.appendChild(el('span', 'agent-step-time', nowStamp()));
   const pre = el('pre', 'agent-tool-args', JSON.stringify(args || {}, null, 2));
   const result = el('pre', 'agent-tool-result');
   details.appendChild(summary);
@@ -2482,6 +2561,7 @@ async function loadAgentTools(serverId) {
 
 function updateAgentThinking() {
   AGENT_CONTEXT_DATA = null;
+  AGENT_USAGE = null;
   const wrap = $('#agentThinkingWrap');
   if (!wrap) return;
   const m = AGENT_MODELS.find(x => x.name === $('#agentModel').value);
@@ -2524,6 +2604,7 @@ function agentNewChat(wid) {
   if (CURRENT_AGENT_WORKSPACE) AGENT_COLLAPSED.delete(CURRENT_AGENT_WORKSPACE);
   AGENT_HISTORY = [];
   AGENT_CONTEXT_DATA = null;
+  AGENT_USAGE = null;
   AGENT_IMAGES = [];
   renderImagePreviews('agent');
   CURRENT_AGENT_SESSION = newSessionId();
@@ -2547,6 +2628,7 @@ async function agentSend() {
     return toast('当前模型未声明图片输入');
   }
   AGENT_CONTEXT_DATA = null;
+  AGENT_USAGE = null;
   $('#agentInput').value = '';
   $('#agentInput').style.height = 'auto';
   const userContent = userMessageContent(text, 'agent');
@@ -2681,6 +2763,10 @@ async function agentSend() {
             if (typeof renderMarkdown === 'function') renderMarkdown(seg.body, seg.raw);
             else seg.body.textContent = seg.raw;
           }
+          if (data.usage) {
+            AGENT_USAGE = data.usage;
+            updateAgentContextMeter();
+          }
           agentScrollIf(stick);
         } else if (ev[1] === 'error') {
           out.failed = true;
@@ -2794,7 +2880,30 @@ function estimateMessagesTokens(messages) {
   return n;
 }
 
-function renderContextMeter(id, used, total, output, contextDefault, outputDefault) {
+function usageTokenLabel(n) {
+  if (typeof n !== 'number' || !isFinite(n)) return '—';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return String(Math.round(n));
+}
+
+function cacheUsageHTML(usage) {
+  if (!usage) return '';
+  const hit = usage.cache_hit;
+  if (typeof hit !== 'number') {
+    return '<span class="cachestat" title="供应商没有返回 prompt cache 明细">缓存命中 —</span>';
+  }
+  const pct = Math.max(0, Math.min(100, hit * 100));
+  const shown = hit >= 1 ? 100 : Math.min(99.9, pct);
+  const text = (shown === 100 ? '100' : shown.toFixed(1)) + '%';
+  const title = `缓存读 ${usageTokenLabel(usage.cache_read_tokens)} / ` +
+                `未缓存 ${usageTokenLabel(usage.uncached_input_tokens)} / ` +
+                `缓存写 ${usageTokenLabel(usage.cache_write_tokens)}`;
+  return `<span class="cachestat" title="${esc(title)}">缓存命中 <b>${text}</b></span>`;
+}
+
+function renderContextMeter(id, used, total, output, contextDefault, outputDefault,
+                            cacheUsage) {
   const box = $(id);
   if (!box) return;
   total = Number(total) || 1000000;
@@ -2806,7 +2915,8 @@ function renderContextMeter(id, used, total, output, contextDefault, outputDefau
     `<span>上下文 ≈ ${contextLabel(used, false)} / ${contextLabel(total, contextDefault)}</span>` +
     `<span class="ctxbar"><i style="width:${pct.toFixed(1)}%"></i></span>` +
     `<span>${pct.toFixed(1)}%</span>` +
-    (outputText ? `<span>输出上限 ${outputText}</span>` : '');
+    (outputText ? `<span>输出上限 ${outputText}</span>` : '') +
+    cacheUsageHTML(cacheUsage);
 }
 
 function updateChatContextMeter(extra) {
@@ -2814,14 +2924,16 @@ function updateChatContextMeter(extra) {
   if (CHAT_CONTEXT_DATA) {
     renderContextMeter('#chatContextMeter', CHAT_CONTEXT_DATA.used,
                        CHAT_CONTEXT_DATA.total, CHAT_CONTEXT_DATA.output,
-                       c.context_default !== false, c.output_default !== false);
+                       c.context_default !== false, c.output_default !== false,
+                       CHAT_USAGE);
     return;
   }
   const total = c.context || 1000000;
   const output = c.output || 256000;
   const used = estimateMessagesTokens(HISTORY) + estimateTextTokens(extra || '');
   renderContextMeter('#chatContextMeter', used, total, output,
-                     c.context_default !== false, c.output_default !== false);
+                     c.context_default !== false, c.output_default !== false,
+                     CHAT_USAGE);
 }
 
 function updateAgentContextMeter(extra) {
@@ -2829,7 +2941,8 @@ function updateAgentContextMeter(extra) {
   if (AGENT_CONTEXT_DATA) {
     renderContextMeter('#agentContextMeter', AGENT_CONTEXT_DATA.used,
                        AGENT_CONTEXT_DATA.total, AGENT_CONTEXT_DATA.output,
-                       m.context_default !== false, m.output_default !== false);
+                       m.context_default !== false, m.output_default !== false,
+                       AGENT_USAGE);
     return;
   }
   const total = m.context || 1000000;
@@ -2842,11 +2955,13 @@ function updateAgentContextMeter(extra) {
   const used = estimateMessagesTokens(AGENT_HISTORY) +
                estimateTextTokens(extra || '') + Math.ceil(toolsChars / 4);
   renderContextMeter('#agentContextMeter', used, total, output,
-                     m.context_default !== false, m.output_default !== false);
+                     m.context_default !== false, m.output_default !== false,
+                     AGENT_USAGE);
 }
 
 function updateChatBackend() {
   CHAT_CONTEXT_DATA = null;
+  CHAT_USAGE = null;
   const c = selectedChatConfig($('#chatConfig').value);
   const remote = !!(c && (c.backend === 'ollama' || c.backend === 'openai'));
   const think = $('#chatThinkingWrap');
@@ -3374,7 +3489,10 @@ function renderMsg(role, text) {
   if (role !== 'user') {
     const box = el('details', 'thinking');
     box.style.display = 'none';
-    box.appendChild(el('summary', '', '思考过程'));
+    const summary = el('summary');
+    summary.appendChild(el('span', '', '思考过程'));
+    summary.appendChild(el('span', 'msgtime', nowStamp()));
+    box.appendChild(summary);
     const pre = el('pre', '');
     box.appendChild(pre);
     bubble.appendChild(box);
@@ -3384,7 +3502,7 @@ function renderMsg(role, text) {
   body.dataset.raw = text || '';
   appendMessageImages(body, parts.images);
   const meta = el('div', 'meta');
-  meta.appendChild(el('span', '', new Date().toLocaleTimeString('zh-CN', { hour12: false })));
+  meta.appendChild(el('span', '', nowStamp()));
   if (role !== 'user') {
     const cp = el('a', '', '复制');
     cp.onclick = () => navigator.clipboard.writeText(body.dataset.raw || body.textContent).then(() => toast('已复制'));
@@ -3434,6 +3552,7 @@ async function send() {
   if (!cfgName) { toast('先选一个配置'); return; }
   const selected = CHAT_CONFIGS.find(x => x.name === cfgName) || {};
   CHAT_CONTEXT_DATA = null;
+  CHAT_USAGE = null;
   if (selected.backend !== 'ollama' && selected.backend !== 'openai' &&
       !(await ensurePy('chat'))) return;
   $('#chatInput').value = '';
@@ -3504,6 +3623,10 @@ async function send() {
           }
           if (typeof renderMarkdown === 'function') renderMarkdown(body, acc);
           else body.textContent = acc;
+          if (data.usage) {
+            CHAT_USAGE = data.usage;
+            updateChatContextMeter();
+          }
           chatScrollIf(stick);
         } else if (ev[1] === 'error') {
           body.textContent = '错误：' + data.error;
@@ -3554,7 +3677,10 @@ function srvMsg(role, text, model, ms, reasoning) {
   if (role !== 'user' && reasoning) {
     think = el('details', 'thinking');
     think.open = true;
-    think.appendChild(el('summary', '', '思考过程'));
+    const summary = el('summary');
+    summary.appendChild(el('span', '', '思考过程'));
+    summary.appendChild(el('span', 'msgtime', nowStamp()));
+    think.appendChild(summary);
     think.appendChild(el('pre', '', reasoning));
     bubble.appendChild(think);
   }
@@ -3568,7 +3694,7 @@ function srvMsg(role, text, model, ms, reasoning) {
   }
   bubble.appendChild(body);
   const meta = el('div', 'meta');
-  meta.appendChild(el('span', '', new Date().toLocaleTimeString('zh-CN', { hour12: false })));
+  meta.appendChild(el('span', '', nowStamp()));
   if (model) meta.appendChild(el('span', '', model + (ms ? ' · ' + ms + 'ms' : '')));
   bubble.appendChild(meta);
   wrap.appendChild(bubble);
@@ -3581,7 +3707,10 @@ function srvEnsureThink(st) {
   if (st.think) return st.think;
   const box = el('details', 'thinking');
   box.open = true;
-  box.appendChild(el('summary', '', '思考过程'));
+  const summary = el('summary');
+  summary.appendChild(el('span', '', '思考过程'));
+  summary.appendChild(el('span', 'msgtime', nowStamp()));
+  box.appendChild(summary);
   const pre = el('pre', '');
   box.appendChild(pre);
   st.bubble.insertBefore(box, st.body);
@@ -3842,7 +3971,9 @@ function initSidebar(kind) {
   const resizer = $('#' + kind + 'SideResizer');
   if (!layout || !aside || !collapse || !expand || !resizer) return;
   try {
-    if (localStorage.getItem('dlqq-side-collapsed-' + kind) === '1') {
+    const savedCollapsed = localStorage.getItem('dlqq-side-collapsed-' + kind);
+    const autoCollapse = window.innerWidth <= 1280;
+    if (autoCollapse || savedCollapsed === '1') {
       layout.classList.add('side-collapsed');
     }
   } catch (e) {}
@@ -3880,6 +4011,16 @@ try {
 } catch (e) {}
 initSidebar('chat');
 initSidebar('agent');
+
+let SIDE_WAS_NARROW = window.innerWidth <= 1280;
+window.addEventListener('resize', () => {
+  const narrow = window.innerWidth <= 1280;
+  if (narrow && !SIDE_WAS_NARROW) {
+    setSideCollapsed('chat', true);
+    setSideCollapsed('agent', true);
+  }
+  SIDE_WAS_NARROW = narrow;
+});
 
 async function startupDetect() {
   const mask = $('#bootMask');

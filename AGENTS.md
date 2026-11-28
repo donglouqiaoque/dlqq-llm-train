@@ -190,7 +190,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/mcp/restart` | 手动重连指定 MCP 服务器并刷新工具列表 |
 | GET | `/api/agent/configs` | Agent 可用的工具模型 + MCP 服务器 + 检测结果 |
 | GET | `/api/agent/tools?server=<id>` | 获取某个 MCP 服务器的工具（供 Agent 多选） |
-| POST | `/api/agent/chat` | Agent 工具循环，SSE：`context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
+| POST | `/api/agent/chat` | Agent 工具循环，SSE：`context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error`；API 模型的 `done.usage` 带缓存计数 |
 | GET | `/api/corpora` | `res\` 下的语料目录（文件数、体积） |
 | GET | `/api/train/status` `train/log` | 训练状态与增量日志 |
 | GET | `/api/server/status` | 桥接服务状态与端口 |
@@ -198,7 +198,7 @@ THIRD-PARTY-NOTICES.txt  Python / 依赖 / 前端第三方库的许可证清单�
 | POST | `/api/config/save` | 逐行改 value 保存（保注释与键顺序），先备份 |
 | POST | `/api/env/install` | 用项目 Python 安装 torch / numpy / transformers；`torch_type=cpu|gpu|xpu|auto`，`torch_version` / `numpy_version` / `transformers_version` 可留空；兼容旧 `torch_index=cpu|cu126|cu128|xpu|auto`；输出走 `env-log` |
 | POST | `/api/train/start` `train/stop` | 启动 / 停止训练子进程 |
-| POST | `/api/chat` | 对话，返回 SSE：`context` / `meta` / `reasoning` / `token` / `done` / `error` |
+| POST | `/api/chat` | 对话，返回 SSE：`context` / `meta` / `reasoning` / `token` / `done` / `error`；API 模型的 `done.usage` 带缓存计数 |
 | POST | `/api/server/start` `server/stop` | 启停桥接服务 |
 | POST | `/api/sign` | `mode=compute|verify`，跑签名工具 |
 
@@ -281,7 +281,12 @@ API 页点击模型行可手工覆盖上述字段，保存在 `.cache/openai_mod
 失败时退回按工具调用组裁剪；`tool_calls` / `tool_result` 必须成对保留。
 Agent 的 `max_tokens` 默认 256K（有模型输出字段时用模型值，并受上下文限制），它不是上下文上限；
 单轮输出上限和上下文窗口分开计算。Chat / Agent 输入框下方显示按字符数估算的上下文占用率；
-图片按固定视觉 token 估算，不按 base64 字符数计费。
+图片按固定视觉 token 估算，不按 base64 字符数计费。API 模型完成一轮后显示 provider 上报的
+prompt cache 命中率，公式为缓存读 /（未缓存输入 + 缓存读 + 缓存写）；兼容 DeepSeek
+`prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` 和 OpenAI
+`prompt_tokens_details.cached_tokens`，Agent 多步按 token 加权；无缓存字段显示“—”，
+本地模型和没有缓存统计的 Ollama 不显示。流式请求对非 Ollama API 尝试
+`stream_options.include_usage`，代理不支持时自动去掉重试一次。
 
 **MCP / Agent**：`mcp_client.py` 只用标准库实现 STDIO（一行一个 JSON）和 Streamable HTTP
 （JSON-RPC POST + Mcp-Session-Id）。已配置的 MCP 客户端在 WebUI 启动时创建并常驻，STDIO 进程
@@ -297,7 +302,8 @@ Agent 允许 `tool_use` 为 `native` 或 `unknown` 的 API 模型，只隐藏明
 思考/工具调用历史，回答始终显示；点击顶部展开历史，单条参数/结果再自行展开。
 思考、工具调用、回答按模型实际输出顺序作为平级时间线行展示。工具参数和结果完整显示并
 完整回填给模型，不做硬截断；只执行本次勾选的工具，模型返回未勾选或不存在的工具时回填
-“工具不存在”，不调用 MCP。
+“工具不存在”，不调用 MCP。每条思考、回答和工具调用均显示浏览器所在系统本地时区的
+`YYYY-MM-DD HH:mm:ss.SSS` 时间戳。
 `thinking` 支持 `off/low/medium/high` 等档位，按 `reasoning_efforts` 映射到实际 API 参数值；
 `off` 不发送参数；未知模型不伪造档位；本地字符级模型不支持该控件。
 工具结果之后会补一条内部续跑 user 提示，避免 Ollama/Qwen 把纯 tool 轮次判成
@@ -312,7 +318,9 @@ Agent 允许 `tool_use` 为 `native` 或 `unknown` 的 API 模型，只隐藏明
 `.cache/workspaces.json`，默认工作区是 `<工程根目录>\.runtime\default_workspace`，可添加其他
 绝对路径；Agent 左侧是「工作区 → 会话」树，每个工作区下只显示自己的会话，一个工作区可保存
 多个会话。新建 Agent 会话默认使用当前工作区，未指定时使用默认工作区。会话保存时记录
-`workspace_id`；Agent 调用 MCP 工具时以**会话所属工作区**的绝对路径优先，而不是页面临时选择。
+`workspace_id`；同时保存完整的 `model_history`（含 system、tool_calls、tool 结果和最终回答），
+下一轮请求以它为前缀追加新用户消息，避免丢失工具消息导致 prompt cache 中断。
+Agent 调用 MCP 工具时以**会话所属工作区**的绝对路径优先，而不是页面临时选择。
 工作区路径选择通过 `/api/workspaces/pick` 调用本机原生目录窗口。会话支持改名、删除和
 移动工作区（`/api/sessions/move`），移动后每次 MCP 调用仍读取会话当前 `workspace_id`；
 每轮结束自动保存；恢复时恢复历史、模型、MCP、工具和思考选择。Chat / Agent 侧边栏支持收起，

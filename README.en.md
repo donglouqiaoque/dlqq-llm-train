@@ -910,8 +910,10 @@ from that path on its first request.
 
 Execution is shown as a flat Agent timeline rather than nested bubbles: the turn header shows
 status and elapsed time, reasoning / tool-call rows are collapsed by default while answers
-remain visible; clicking the header expands the history, and each arguments/result block expands
-on its own. Reasoning / tool call / answer rows follow in the model's actual output order. As
+remain visible. Every reasoning row, answer, and tool call carries a local-system
+`YYYY-MM-DD HH:mm:ss.SSS` timestamp. Clicking the header expands the history, and each
+arguments/result block expands on its own. Reasoning / tool call / answer rows follow in the
+model's actual output order. As
 soon as the tool name is known, the row shows "preparing / calling"; it changes to "done" or
 "failed" after execution, and arguments/results are shown in full and sent back to the model in
 full, with no hard truncation. Only tools selected for this request are executed; if the model
@@ -936,7 +938,8 @@ Chat and Agent use a left navigation pane with conversation content on the right
 - session rows support rename, delete, and **move to another workspace**; after moving, the next
   MCP tool call automatically uses the new workspace path;
 - the left sidebar can be collapsed and resized by dragging its right edge; width and collapsed
-  state are stored in browser local storage;
+  state are stored in browser local storage; on narrow windows it collapses by default so the
+  message area gets the width, and Markdown tables/code blocks scroll horizontally;
 - a new Agent session uses its owning workspace; when none is specified it uses the default
   workspace at `<project root>\.runtime\default_workspace`.
 
@@ -947,9 +950,12 @@ path or press **Browse…** to open the native directory picker.
 
 Every Agent MCP tool call uses the **session's owning workspace** absolute path as
 `params._meta["dsh/workspace"]`, not the temporary page selection, so switching workspaces cannot
-send the wrong cwd. Session rows support rename and delete. Restoring a session restores its
-history, model, MCP server, selected tools, and thinking level; interrupted model/tool turns are
-not replayed automatically.
+send the wrong cwd. An Agent session also stores the full model message log (including
+`tool_calls`, tool results, and the previous assistant answer); the next request starts from that
+log and appends the new user message, so prompt cache reuse is not broken by dropping tool
+messages. Session rows support rename, delete, and moving to another workspace. Restoring a
+session restores its history, model, MCP server, selected tools, and thinking level; interrupted
+model/tool turns are not replayed automatically.
 
 When a model declares `input_modalities` containing `image`, the composer shows an **Images**
 button for up to four images of 6 MB each. Images are sent as OpenAI-compatible `image_url`
@@ -999,6 +1005,12 @@ Agent's "max_tokens output limit" error is the per-response output cap, not the 
 Chat and Agent show an estimated context occupancy and percentage below the composer
 (character-based approximation; images use a fixed visual-token estimate), together with the
 output cap.
+After an API model finishes a turn, the UI also shows the provider-reported **cache hit** rate.
+It is calculated as `cache read / (uncached input + cache read + cache write)` and normalizes
+DeepSeek's `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, OpenAI's
+`prompt_tokens_details.cached_tokens`, and similar usage fields. Agent tool steps are aggregated
+by token weight; when the provider reports no cache fields the UI shows “—” instead of 0%.
+Local character-level models and Ollama models without cache accounting do not show this metric.
 
 ---
 

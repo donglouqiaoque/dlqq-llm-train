@@ -419,6 +419,11 @@ def save_session(body):
     now = time.time()
     if not sid:
         sid = uuid.uuid4().hex
+    title = str(body.get("title") or "").strip()
+    if not title and old and old.get("title"):
+        # 自动保存不能把用户手动改过的会话名覆盖回首条消息。
+        title = old["title"]
+    title = session_title(history, title)
     if kind == "agent":
         reg = load_workspace_registry()
         wid = str(body.get("workspace_id") or "").strip()
@@ -432,7 +437,7 @@ def save_session(body):
         "id": sid,
         "workspace_id": wid,
         "kind": kind,
-        "title": session_title(history, body.get("title")),
+        "title": title,
         "created_at": (old or {}).get("created_at") or now,
         "updated_at": now,
         "history": history,
@@ -441,6 +446,8 @@ def save_session(body):
         "server": str(body.get("server") or ""),
         "tools": body.get("tools") if isinstance(body.get("tools"), list) else [],
         "thinking": str(body.get("thinking") or "off"),
+        "model_history": ((old or {}).get("model_history")
+                          if kind == "agent" else None),
     }
     path = _session_path(sid)
     with SESSION_LOCK:
@@ -475,6 +482,23 @@ def delete_session(sid):
             except OSError:
                 return False
     return True
+
+
+def save_session_model_history(sid, messages):
+    """保存 Agent 的完整模型消息，保证下一轮仍是上一轮请求的前缀。"""
+    clean = [m for m in messages or [] if isinstance(m, dict)]
+    path = _session_path(sid)
+    if not path or not clean:
+        return
+    with SESSION_LOCK:
+        data = load_session(sid) or {"id": sid, "kind": "agent"}
+        data["model_history"] = clean
+        data["updated_at"] = time.time()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
 
 
 def rename_session(sid, title):
@@ -1594,6 +1618,166 @@ def context_tokens(messages, tools=None):
         return 1
 
 
+def _usage_int(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    n = int(value)
+    return n if n >= 0 else None
+
+
+def _same_model_message(left, right):
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    if left.get("role") != right.get("role"):
+        return False
+    try:
+        return (json.dumps(left.get("content"), ensure_ascii=False, sort_keys=True)
+                == json.dumps(right.get("content"), ensure_ascii=False, sort_keys=True))
+    except (TypeError, ValueError):
+        return False
+
+
+def _usage_first(*values):
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _usage_from_obj(obj):
+    """把不同 provider 的 usage 归一成未缓存输入、缓存读/写和输出。"""
+    raw = obj.get("usage") if isinstance(obj, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    details = raw.get("prompt_tokens_details")
+    if not isinstance(details, dict):
+        details = {}
+    cached = _usage_first(
+        _usage_int(raw.get("prompt_cache_hit_tokens")),
+        _usage_int(details.get("cached_tokens")),
+        _usage_int(raw.get("cache_read_input_tokens")),
+        _usage_int(raw.get("cache_read_tokens")),
+    )
+    cache_write = _usage_first(
+        _usage_int(raw.get("cache_creation_input_tokens")),
+        _usage_int(raw.get("cache_write_tokens")),
+    )
+    if cache_write is None:
+        cache_write = 0
+    miss = _usage_int(raw.get("prompt_cache_miss_tokens"))
+    prompt = _usage_int(raw.get("prompt_tokens"))
+    input_tokens = _usage_int(raw.get("input_tokens"))
+    if prompt is None and miss is not None and cached is not None:
+        prompt = miss + cached
+    if prompt is None and input_tokens is not None:
+        prompt = input_tokens + (cached or 0) + cache_write
+    if prompt is None and miss is not None:
+        prompt = miss + (cached or 0) + cache_write
+    if miss is not None:
+        uncached = miss
+    elif input_tokens is not None:
+        # Anthropic 风格 input_tokens 不包含 cache read/write。
+        uncached = input_tokens
+    elif prompt is not None and cached is not None:
+        uncached = max(0, prompt - cached)
+    elif prompt is not None:
+        uncached = prompt
+    else:
+        uncached = None
+    completion = _usage_first(
+        _usage_int(raw.get("completion_tokens")),
+        _usage_int(raw.get("output_tokens")),
+    )
+    if prompt is None and uncached is None:
+        return None
+    out = {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "uncached_input_tokens": uncached,
+        "cache_read_tokens": cached,
+        "cache_write_tokens": cache_write,
+        "cache_measured": cached is not None,
+    }
+    out["cache_hit"] = _usage_cache_hit(out)
+    return out
+
+
+def _usage_cache_hit(usage):
+    if not isinstance(usage, dict) or not usage.get("cache_measured"):
+        return None
+    cached = usage.get("cache_read_tokens")
+    uncached = usage.get("uncached_input_tokens")
+    if cached is None or uncached is None:
+        return None
+    denom = cached + uncached + (usage.get("cache_write_tokens") or 0)
+    if denom <= 0:
+        return None
+    return min(1.0, cached / denom)
+
+
+def _merge_usage(total, part):
+    """合并 Agent 多个模型请求；缓存只在每个请求都报告时才算。"""
+    if not part:
+        return total
+    if not total:
+        out = dict(part)
+        out["cache_hit"] = _usage_cache_hit(out)
+        return out
+    out = dict(total)
+    for key in ("prompt_tokens", "completion_tokens", "uncached_input_tokens"):
+        a, b = total.get(key), part.get(key)
+        out[key] = a + b if a is not None and b is not None else None
+    for key in ("cache_read_tokens", "cache_write_tokens"):
+        a, b = total.get(key), part.get(key)
+        out[key] = a + b if a is not None and b is not None else None
+    out["cache_measured"] = bool(total.get("cache_measured")) and bool(
+        part.get("cache_measured"))
+    out["cache_hit"] = _usage_cache_hit(out)
+    return out
+
+
+def _usage_event(usage):
+    if not usage:
+        return None
+    return {
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+        "cache_read_tokens": usage.get("cache_read_tokens"),
+        "cache_write_tokens": usage.get("cache_write_tokens"),
+        "uncached_input_tokens": usage.get("uncached_input_tokens"),
+        "cache_hit": usage.get("cache_hit"),
+    }
+
+
+class ChatStreamError(Exception):
+    def __init__(self, status, body):
+        super().__init__(f"HTTP {status}: {str(body or '')[:300]}")
+        self.status = status
+        self.body = body or ""
+
+
+def _open_chat_stream(api, payload, timeout):
+    """请求流式 usage；代理不支持 stream_options 时自动去掉重试一次。"""
+    data = dict(payload)
+    want_usage = not openai_client.is_ollama_api(api)
+    if want_usage:
+        data["stream_options"] = {"include_usage": True}
+    conn, resp = openai_client.open_chat(api, data, timeout=timeout)
+    if want_usage and resp.status == 400:
+        try:
+            raw = resp.read().decode("utf-8", errors="replace")
+        finally:
+            conn.close()
+        low = raw.lower()
+        if "stream_options" in low or "include_usage" in low:
+            data.pop("stream_options", None)
+            conn, resp = openai_client.open_chat(api, data, timeout=timeout)
+            return conn, resp
+        raise ChatStreamError(resp.status, raw)
+    return conn, resp
+
+
+
 def _trim_for_context(messages, context, reserve=256000):
     """按保守字符数裁剪历史；以工具调用组为单位，保留 system 和最近消息。"""
     budget = max(1024, int(context) - reserve)
@@ -2523,8 +2707,10 @@ class Handler(BaseHTTPRequestHandler):
             payload.update(openai_thinking_payload(
                 openai_model_thinking(api, model), level))
         try:
-            conn, resp = openai_client.open_chat(
+            conn, resp = _open_chat_stream(
                 api, payload, timeout=openai_client.chat_timeout(api))
+        except ChatStreamError as e:
+            return self._err(e.status, f"API 返回错误：{e.body[:500]}")
         except Exception as e:
             return self._err(502, f"无法连接 API：{type(e).__name__}: {e}")
         if resp.status < 200 or resp.status >= 300:
@@ -2538,6 +2724,7 @@ class Handler(BaseHTTPRequestHandler):
         self._sse_start()
         parts = []
         reasoning_parts = []
+        usage_total = None
         try:
             self._sse("context", {
                 "used": context_tokens(payload.get("messages")),
@@ -2548,6 +2735,9 @@ class Handler(BaseHTTPRequestHandler):
                                "info": {"backend": "openai",
                                         "thinking": _thinking_level(body.get("thinking")) != "off"}})
             for obj in ollama.iter_sse(resp):
+                part = _usage_from_obj(obj)
+                if part:
+                    usage_total = part
                 reason = ollama.delta_reasoning(obj)
                 if reason:
                     reasoning_parts.append(reason)
@@ -2556,8 +2746,12 @@ class Handler(BaseHTTPRequestHandler):
                 if piece:
                     parts.append(piece)
                     self._sse("token", {"text": piece})
-            self._sse("done", {"text": "".join(parts),
-                               "reasoning": "".join(reasoning_parts)})
+            done = {"text": "".join(parts),
+                    "reasoning": "".join(reasoning_parts)}
+            usage = _usage_event(usage_total)
+            if usage:
+                done["usage"] = usage
+            self._sse("done", done)
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         except Exception as e:
@@ -2847,21 +3041,39 @@ class Handler(BaseHTTPRequestHandler):
                                "server": server["name"] if server else "",
                                "tools": len(tools), "thinking": thinking,
                                "backend": backend})
-            messages = list(msgs)
-            if tools:
-                messages.insert(0, {"role": "system", "content":
-                    "你是带 MCP 工具调用的 Agent。只能调用 tools 列表中真实存在的工具名，"
-                    "不要编造工具名，也不要把工具调用写进普通文本。创建文件时优先使用文件"
-                    "写入工具；内容过长时拆成多次创建/追加，不要在一次工具调用里塞入过长内容。"})
+            last_user = None
+            for item in reversed(msgs):
+                if isinstance(item, dict) and item.get("role") == "user":
+                    last_user = item
+                    break
+            system_prompt = (
+                "你是带 MCP 工具调用的 Agent。只能调用 tools 列表中真实存在的工具名，"
+                "不要编造工具名，也不要把工具调用写进普通文本。创建文件时优先使用文件"
+                "写入工具；内容过长时拆成多次创建/追加，不要在一次工具调用里塞入过长内容。"
+                if tools else
+                "你是普通对话助手。当前没有启用任何 MCP 工具，不要生成工具调用，直接回答用户。")
+            model_history = (session.get("model_history")
+                             if isinstance(session, dict) else None)
+            if isinstance(model_history, list) and model_history:
+                messages = [m for m in model_history if isinstance(m, dict)]
+                if messages and messages[0].get("role") == "system":
+                    messages[0] = {"role": "system", "content": system_prompt}
+                else:
+                    messages.insert(0, {"role": "system", "content": system_prompt})
+                if (last_user is not None and
+                        (not messages or not _same_model_message(
+                            messages[-1], last_user))):
+                    messages.append(last_user)
             else:
-                messages.insert(0, {"role": "system", "content":
-                    "你是普通对话助手。当前没有启用任何 MCP 工具，不要生成工具调用，"
-                    "直接回答用户。"})
+                messages = list(msgs)
+                messages.insert(0, {"role": "system", "content": system_prompt})
             user_query = ""
             for item in reversed(msgs):
                 if isinstance(item, dict) and item.get("role") == "user":
                     user_query = _message_content_text(item)
                     break
+            turn_usage = None
+            turn_usage_missing = False
             while True:
                 output_budget = (openai_output_budget(api, upstream)
                                  if backend == "openai" else 256000)
@@ -2893,8 +3105,12 @@ class Handler(BaseHTTPRequestHandler):
                 })
                 if backend == "openai":
                     payload.update(openai_thinking_payload(thinking_info, thinking))
-                    conn, resp = openai_client.open_chat(
-                        api, payload, timeout=openai_client.chat_timeout(api))
+                    try:
+                        conn, resp = _open_chat_stream(
+                            api, payload, timeout=openai_client.chat_timeout(api))
+                    except ChatStreamError as e:
+                        self._sse("error", {"error": f"API 返回错误：{e.body[:500]}"})
+                        return
                 else:
                     payload.update(ollama_thinking_payload(
                         ollama.model_thinking(tag), thinking))
@@ -2907,8 +3123,13 @@ class Handler(BaseHTTPRequestHandler):
                 parts = []
                 calls = {}
                 finish_reason = ""
+                call_usage = None
                 try:
                     for obj in ollama.iter_sse(resp):
+                        if backend == "openai":
+                            part = _usage_from_obj(obj)
+                            if part:
+                                call_usage = part
                         choices = obj.get("choices") or []
                         if not choices:
                             continue
@@ -2941,6 +3162,11 @@ class Handler(BaseHTTPRequestHandler):
                                 slot["function"]["arguments"] += fn["arguments"]
                 finally:
                     conn.close()
+                if backend == "openai":
+                    if call_usage:
+                        turn_usage = _merge_usage(turn_usage, call_usage)
+                    else:
+                        turn_usage_missing = True
                 call_list = [calls[k] for k in sorted(calls)]
                 indexes = []
                 for i, call in enumerate(call_list):
@@ -3008,7 +3234,19 @@ class Handler(BaseHTTPRequestHandler):
                         "请根据以上工具结果继续完成用户请求。"})
                     continue
                 text = "".join(parts)
-                self._sse("done", {"text": text})
+                done = {"text": text}
+                usage = _usage_event(turn_usage) if backend == "openai" else None
+                if usage:
+                    if turn_usage_missing:
+                        usage["cache_hit"] = None
+                    done["usage"] = usage
+                if session_id:
+                    history_messages = list(messages)
+                    if text:
+                        history_messages.append({"role": "assistant",
+                                                 "content": text})
+                    save_session_model_history(session_id, history_messages)
+                self._sse("done", done)
                 return
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass

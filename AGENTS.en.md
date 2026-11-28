@@ -214,7 +214,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | POST | `/api/mcp/restart` | manually reconnect one MCP server and refresh its tools |
 | GET | `/api/agent/configs` | tool-capable models, MCP servers and detection results for Agent |
 | GET | `/api/agent/tools?server=<id>` | list a server's tools for Agent multi-select |
-| POST | `/api/agent/chat` | Agent tool loop; SSE: `context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error` |
+| POST | `/api/agent/chat` | Agent tool loop; SSE: `context` / `meta` / `reasoning` / `tool_pending` / `tool` / `tool_result` / `token` / `done` / `error`; API model `done.usage` carries cache counts |
 | GET | `/api/corpora` | corpus directories under `res\` (file count, size) |
 | GET | `/api/train/status` `train/log` | training state and incremental log |
 | GET | `/api/server/status` | bridge state and port |
@@ -222,7 +222,7 @@ THIRD-PARTY-NOTICES.txt  license inventory for Python / dependencies / frontend 
 | POST | `/api/config/save` | line-level value update (keeps comments/order), backs up first |
 | POST | `/api/env/install` | install torch / numpy / transformers into the project Python; `torch_type=cpu|gpu|xpu|auto`; `torch_version` / `numpy_version` / `transformers_version` may be empty; legacy `torch_index=cpu|cu126|cu128|xpu|auto` remains supported; output via `env-log` |
 | POST | `/api/train/start` `train/stop` | start / stop the training child |
-| POST | `/api/chat` | chat, returns SSE: `context` / `meta` / `reasoning` / `token` / `done` / `error` |
+| POST | `/api/chat` | chat, returns SSE: `context` / `meta` / `reasoning` / `token` / `done` / `error`; API model `done.usage` carries cache counts |
 | POST | `/api/server/start` `server/stop` | start / stop the bridge child |
 | POST | `/api/sign` | `mode=compute|verify`, runs the signature tool |
 
@@ -314,7 +314,13 @@ requests compact history after reserving output space: old history is summarized
 back to tool-group-safe trimming; `tool_calls` / `tool_result` stay paired. Agent's `max_tokens`
 defaults to 256K (a model output field wins, bounded by context); it is a per-response output cap,
 not the context limit. Chat and Agent show an estimated context occupancy below the composer;
-images use a fixed visual-token estimate rather than base64 character count.
+images use a fixed visual-token estimate rather than base64 character count. After an API turn,
+the UI shows the provider-reported prompt cache hit rate: cache read / (uncached input + cache
+read + cache write). It normalizes DeepSeek's `prompt_cache_hit_tokens` /
+`prompt_cache_miss_tokens` and OpenAI's `prompt_tokens_details.cached_tokens`; Agent steps are
+weighted by tokens, missing cache fields show “—”, and local/Ollama models without cache stats
+show nothing. Non-Ollama API streams try `stream_options.include_usage` and retry once without it
+when the proxy rejects the option.
 
 **MCP / Agent**: `mcp_client.py` uses only the standard library and supports STDIO (one JSON per
 line) and Streamable HTTP (JSON-RPC POST + Mcp-Session-Id). Configured MCP clients are created at
@@ -335,7 +341,8 @@ elapsed time, reasoning / tool-call history is collapsed by default while answer
 clicking the header expands it and each argument/result block expands independently.
 Tool arguments and results are shown in full and sent back to the model in full without hard
 truncation; only tools selected for this request are executed, and an unselected or unknown tool
-returns "tool does not exist" without calling MCP.
+returns "tool does not exist" without calling MCP. Every reasoning row, answer, and tool call
+shows a `YYYY-MM-DD HH:mm:ss.SSS` timestamp in the browser's local system time zone.
 Agent requests may include a `tools` name list for multi-select filtering;
 `thinking` supports `off/low/medium/high` and maps through `reasoning_efforts` to the actual API
 value; `off` sends no parameter, unknown models do not fabricate levels. Local character-level
@@ -353,9 +360,12 @@ workspace registry lives in `.cache/workspaces.json`, defaults to
 `<project root>\.runtime\default_workspace`, and can add other absolute paths. The Agent sidebar is
 a "workspace → sessions" tree; each workspace shows only its own sessions and can contain multiple
 sessions. A new Agent session uses the current workspace, or the default when none is specified.
-A session stores its `workspace_id`; MCP tool calls prefer the **session's owning workspace** path
-over the temporary page selection. Workspace paths are chosen through `/api/workspaces/pick`,
-which opens the native directory dialog. Sessions support rename, delete, and moving to another
+A session stores its `workspace_id` and full `model_history` (system, tool_calls, tool results,
+and the final answer); the next request starts from that history and appends the new user message,
+so dropped tool messages cannot break prompt-cache reuse. MCP tool calls prefer the **session's
+owning workspace** path over the temporary page selection. Workspace paths are chosen through
+`/api/workspaces/pick`, which opens the native directory dialog. Sessions support rename, delete,
+and moving to another
 workspace (`/api/sessions/move`); after a move, every MCP call still reads the session's current
 `workspace_id`. Each turn auto-saves; restoring a session restores history, model, MCP, tools, and
 thinking. The Chat / Agent sidebar can be collapsed and resized by dragging its right edge; the
